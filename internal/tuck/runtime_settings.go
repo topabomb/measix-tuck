@@ -29,7 +29,7 @@ func pickFields(v M, keys []string) M {
 	return result
 }
 func publicModel(v M) M {
-	return pickFields(v, []string{"source", "modelId", "displayName", "enabled", "selectable", "protocol", "inputModalities", "capabilities", "contextWindow", "maxOutputTokens", "reasoningEfforts"})
+	return pickFields(v, []string{"source", "modelId", "displayName", "enabled", "selectable", "inspectionSelectable", "inspectionReason", "protocol", "inputModalities", "capabilities", "contextWindow", "maxOutputTokens", "reasoningEfforts"})
 }
 func ConnectionView(connection M, locked []string) M {
 	v := Clone(connection)
@@ -109,7 +109,7 @@ func RuntimeView(config *Config, models *Models, locked []string) (M, error) {
 		if B(p["enabled"]) {
 			for _, mv := range A(p["models"]) {
 				m := O(mv)
-				if B(m["enabled"]) {
+				if B(m["enabled"]) && Contains(m["capabilities"], "TOOL") {
 					modelCatalog = append(modelCatalog, Merge(publicModel(m), M{"source": "local"}))
 				}
 			}
@@ -122,18 +122,37 @@ func RuntimeView(config *Config, models *Models, locked []string) (M, error) {
 	if !Has(wb, "deliveryRetentionCount") {
 		wb["deliveryRetentionCount"] = 10
 	}
-	draft := M{"providers": providers, "defaultModelId": S(current["defaultModelId"]), "modelDefaults": current["modelDefaults"], "agents": current["agents"], "workbench": wb, "localMcp": localMcp, "platformModelSettings": O(current["platformModelSettings"]), "platformMcpTools": O(current["platformMcpTools"])}
+	draft := M{"providers": providers, "defaultModelId": S(current["defaultModelId"]), "modelDefaults": current["modelDefaults"], "agents": current["agents"], "workbench": wb, "localMcp": localMcp, "platformModelSettings": O(current["platformModelSettings"]), "platformMcpTools": O(current["platformMcpTools"]), "imageGenerators": A(current["imageGenerators"]), "defaultImageGenerator": O(current["defaultImageGenerator"]), "defaultAttachmentInspectionModelId": S(current["defaultAttachmentInspectionModelId"])}
 	names := []string{}
 	for name := range O(current["agents"]) {
 		names = append(names, name)
 	}
 	view := M{"managedProviders": managedProviders, "managedMcp": managedMcp, "localMcpState": localState, "savedModelIds": savedIDs, "toolsetTypes": editableToolsets, "revision": revision, "pending": config.Pending(), "config": draft, "mode": models.Summary()["mode"], "managedModels": managedModels, "lockedSections": locked, "modelCatalog": modelCatalog, "agentNames": names}
+	inspectionCatalog := []any{}
+	for _, model := range models.Catalog() {
+		inspectionCatalog = append(inspectionCatalog, publicModel(model))
+	}
+	view["inspectionModels"] = inspectionCatalog
+	view["platformInspectionModelId"] = O(snapshot["policy"])["defaultAttachmentInspectionModelId"]
+	view["imageCatalog"] = imageCatalog(current, models.Platform.Binding())
 	for _, section := range locked {
 		for _, field := range runtimeFields[section] {
 			delete(draft, field)
 		}
 	}
 	if Contains(locked, "providers") {
+		inspectionCatalog := []any{}
+		for _, model := range models.Catalog() {
+			inspectionCatalog = append(inspectionCatalog, publicModel(model))
+		}
+		view["inspectionModels"] = inspectionCatalog
+		view["platformInspectionModelId"] = O(snapshot["policy"])["defaultAttachmentInspectionModelId"]
+		// Agent overrides need resource choices even when connection settings are locked.
+		images := []any{}
+		for _, resource := range imageCatalog(current, models.Platform.Binding()) {
+			images = append(images, M{"source": resource["source"], "imageId": resource["imageId"], "displayName": resource["displayName"], "selectable": resource["selectable"], "reason": resource["reason"]})
+		}
+		view["imageCatalog"] = images
 		view["managedProviders"] = []any{}
 		view["managedModels"] = []any{}
 		view["savedModelIds"] = []any{}
@@ -156,7 +175,7 @@ func PrepareRuntime(config *Config, models *Models, data M, locked []string) (M,
 	if !ok {
 		return nil, nil, "", Problem(422, "invalid_config", "配置内容无效")
 	}
-	if !noUnknown(draft, "providers", "defaultModelId", "modelDefaults", "agents", "workbench", "localMcp", "platformModelSettings", "platformMcpTools") {
+	if !noUnknown(draft, "providers", "defaultModelId", "modelDefaults", "agents", "workbench", "localMcp", "platformModelSettings", "platformMcpTools", "imageGenerators", "defaultImageGenerator", "defaultAttachmentInspectionModelId") {
 		return nil, nil, "", Problem(422, "invalid_config", "配置内容无效")
 	}
 	if len(locked) > 0 && len(draft) == 0 {
@@ -212,7 +231,7 @@ func PrepareRuntime(config *Config, models *Models, data M, locked []string) (M,
 	snapshot := O(models.Platform.Binding()["snapshot"])
 	active := map[string]bool{}
 	for _, m := range configuredModels(next) {
-		active[S(m["modelId"])] = B(m["enabled"])
+		active[S(m["modelId"])] = B(m["enabled"]) && Contains(m["capabilities"], "TOOL")
 	}
 	for _, v := range A(snapshot["models"]) {
 		m := O(v)
@@ -246,6 +265,32 @@ func PrepareRuntime(config *Config, models *Models, data M, locked []string) (M,
 		a := O(v)
 		if id := S(a["modelId"]); id != "" && !active[id] {
 			return nil, nil, "", Problem(422, "invalid_config", "Agent "+name+" 引用的模型不可用")
+		}
+	}
+	for _, id := range inspectionSelections(next) {
+		if id == "" {
+			continue
+		}
+		valid := false
+		for _, model := range configuredModels(next) {
+			if S(model["modelId"]) == id && B(model["enabled"]) && Contains(model["inputModalities"], "IMAGE") {
+				valid = true
+			}
+		}
+		for _, item := range A(snapshot["models"]) {
+			model := O(item)
+			if S(model["modelId"]) != id || !B(model["enabled"]) || !Contains(model["inputModalities"], "TEXT") || !Contains(model["inputModalities"], "IMAGE") {
+				continue
+			}
+			for _, provider := range A(snapshot["providers"]) {
+				p := O(provider)
+				if p["providerId"] == model["providerId"] && B(p["enabled"]) && Contains([]string{"OPENAI_CHAT_COMPLETIONS", "OPENAI_RESPONSES"}, S(p["clientProtocol"])) {
+					valid = true
+				}
+			}
+		}
+		if !valid {
+			return nil, nil, "", Problem(422, "invalid_config", "附件识别模型必须是可用且声明 TEXT、IMAGE 输入的模型")
 		}
 	}
 	return next, current, revision, nil

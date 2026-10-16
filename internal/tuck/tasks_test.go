@@ -32,7 +32,7 @@ func (f *fakeNative) Run(c context.Context, s, r, a string, msg []M, model strin
 	if f.run != nil {
 		return f.run(c, s, r, a, msg, model, h, fn)
 	}
-	return fn(M{"type": "stream_stopped", "session_id": s, "reason": "completed"})
+	return fn(M{"type": "stream_stopped", "session_id": s, "reason": "normal"})
 }
 func taskFixture(t *testing.T) (*Manager, *Store, *fakeNative, string) {
 	t.Helper()
@@ -157,7 +157,7 @@ func TestNativeRecoveryAndMissingSession(t *testing.T) {
 		if method != "GET" || !strings.HasSuffix(path, "/recovery") {
 			t.Errorf("unexpected native request: %s %s", method, path)
 		}
-		return M{"messages": []any{M{"agent_name": "worker", "message": M{"role": "assistant", "message_id": "one", "usage": M{"input_tokens": 2, "output_tokens": 3}, "tool_calls": []any{M{"id": "x", "function": M{"name": "tuck_deliver_result", "arguments": `{"summary":"delivered"}`}}}}}, M{"message": M{"role": "tool", "tool_call_id": "x", "content": "ok"}}}}, nil
+		return M{"messages": []any{M{"agent_name": "worker", "message": M{"role": "assistant", "message_id": "one", "usage": M{"input_tokens": 2, "output_tokens": 3}, "tool_calls": []any{M{"id": "x", "function": M{"name": "deliver_result", "arguments": `{"summary":"delivered"}`}}}}}, M{"message": M{"role": "tool", "tool_call_id": "x", "content": "ok"}}}}, nil
 	}
 	if err = m.RestoreChildStatistics(context.Background()); err != nil {
 		t.Fatal(err)
@@ -171,7 +171,7 @@ func TestNativeRecoveryAndMissingSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	data := O(O(A(message["blocks"])[0])["data"])
-	if S(data["name"]) != "tuck_deliver_result" || S(data["deliverySummary"]) != "delivered" || S(data["status"]) != "success" {
+	if S(data["name"]) != "deliver_result" || S(data["deliverySummary"]) != "delivered" || S(data["status"]) != "success" {
 		t.Fatalf("metadata not recovered: %s", JSON(message))
 	}
 	if err = m.RestoreChildStatistics(context.Background()); err != nil {
@@ -280,7 +280,7 @@ func TestTaskQueueFailureAndResume(t *testing.T) {
 			}
 			return fn(M{"type": "stream_stopped", "session_id": session, "reason": "error"})
 		}
-		return fn(M{"type": "stream_stopped", "session_id": session, "reason": "completed"})
+		return fn(M{"type": "stream_stopped", "session_id": session, "reason": "normal"})
 	}
 	mustUpdate(t, m, id, M{"queuePaused": true})
 	submitTask(t, m, id, "first")
@@ -886,7 +886,7 @@ func TestDeliveryContinuationOwnership(t *testing.T) {
 			sent := []string{}
 			f.run = func(c context.Context, session, ref, agent string, msg []M, model string, h map[string]string, fn func(M) error) error {
 				sent = append(sent, S(msg[0]["content"]))
-				return fn(M{"type": "stream_stopped", "session_id": session, "reason": "completed"})
+				return fn(M{"type": "stream_stopped", "session_id": session, "reason": "normal"})
 			}
 			once := sync.Once{}
 			m.options.RefreshFiles = func(task M) ([]any, error) {
@@ -957,7 +957,7 @@ func TestDeliveryContinuationOwnership(t *testing.T) {
 		if S(msg[0]["content"]) != DeliveryReminder() {
 			t.Error("reminder mismatch")
 		}
-		return fn(M{"type": "stream_stopped", "session_id": session, "reason": "completed"})
+		return fn(M{"type": "stream_stopped", "session_id": session, "reason": "normal"})
 	}
 	submitTask(t, m, id, DeliveryReminder())
 	waitIdle(t, m, id)
@@ -970,6 +970,85 @@ func TestDeliveryContinuationOwnership(t *testing.T) {
 	}
 	if len(users) != 2 || users[0]["source"] != nil || S(O(users[1]["source"])["kind"]) != "delivery_required" || I(O(users[1]["source"])["templateVersion"]) != 2 || S(O(O(O(A(users[1]["blocks"])[0])["data"])["provenance"])["origin"]) != "delivery-required" {
 		t.Fatal(users)
+	}
+}
+
+func TestDeliveryRequiresExplicitRootCompletion(t *testing.T) {
+	for _, tc := range []struct {
+		name, session, reason, finish, failure string
+		wantTurns                              int
+	}{
+		{"normal", "root", "normal", "stop", "", 2},
+		{"enabled_during_turn", "root", "normal", "stop", "", 2},
+		{"disabled_during_turn", "root", "normal", "stop", "", 1},
+		{"unknown_reason", "root", "future_reason", "stop", "", 1},
+		{"missing_reason", "root", "", "stop", "", 1},
+		{"unregistered_child", "other", "normal", "stop", "", 1},
+		{"other_root", "other-root", "normal", "stop", "", 1},
+		{"missing_session", "", "normal", "stop", "", 1},
+		{"canceled", "root", "canceled", "stop", "", 1},
+		{"iterations", "root", "max_iterations", "stop", "", 1},
+		{"truncated", "root", "normal", "length", "", 1},
+		{"failed", "root", "normal", "stop", "model failed", 1},
+		{"tool_only", "root", "", "", "", 1},
+		{"child_only", "child", "normal", "stop", "", 1},
+		{"disconnected", "root", "", "", "", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, _, f, id := taskFixture(t)
+			config := m.Config()
+			O(config["workbench"])["requireDelivery"] = true
+			if tc.name == "enabled_during_turn" {
+				O(config["workbench"])["requireDelivery"] = false
+			}
+			m.options.Config = func() M { return Clone(config) }
+			other, err := m.Create(context.Background(), M{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			other = mustUpdate(t, m, S(other["id"]), M{"nativeSessionId": "unrelated-native-session"})
+			f.run = func(ctx context.Context, session, ref, agent string, messages []M, model string, headers map[string]string, emit func(M) error) error {
+				if tc.name == "enabled_during_turn" {
+					O(config["workbench"])["requireDelivery"] = true
+				}
+				if tc.name == "disabled_during_turn" {
+					O(config["workbench"])["requireDelivery"] = false
+				}
+				if tc.name == "disconnected" {
+					return nil
+				}
+				if tc.name == "tool_only" {
+					return emit(M{"type": "tool_call_response", "session_id": session, "agent_name": agent, "tool_call_id": "tool", "response": "done"})
+				}
+				target := tc.session
+				if target == "root" {
+					target = session
+				}
+				if target == "other-root" {
+					target = S(other["nativeSessionId"])
+				}
+				if target == "child" {
+					if err := emit(M{"type": "stream_started", "session_id": target, "agent_name": "worker"}); err != nil {
+						return err
+					}
+				}
+				if tc.failure != "" {
+					if err := emit(M{"type": "error", "session_id": session, "error": tc.failure}); err != nil {
+						return err
+					}
+				}
+				return emit(M{"type": "stream_stopped", "session_id": target, "reason": tc.reason, "finish_reason": tc.finish})
+			}
+			submitTask(t, m, id, "work")
+			done := waitIdle(t, m, id)
+			if I(done["turnCount"]) != tc.wantTurns || len(A(done["queue"])) != 0 {
+				t.Fatalf("unexpected automatic injection: %s", JSON(done))
+			}
+			unchanged := mustTask(t, m, S(other["id"]))
+			if unchanged["nativeStopped"] != nil || unchanged["lastTurnReason"] != nil || unchanged["turnTiming"] != nil {
+				t.Fatal("another root session was modified")
+			}
+		})
 	}
 }
 

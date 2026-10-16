@@ -23,7 +23,7 @@ async function verify(){
   if(!controller.signal.aborted&&input===testInput.value)testResult.value=r.ok?result:{ok:false,message:result.error||'验证失败'}
  }catch{if(!controller.signal.aborted&&input===testInput.value)testResult.value={ok:false,message:'验证请求失败，请检查连接'}}finally{testing.value=false}
 }
-function rename(event:Event){const next=(event.target as HTMLInputElement).value.trim(),old=props.model.modelId;if(!next||props.data.config.providers.some(p=>p.models.some(m=>m!==props.model&&m.modelId===next))){idDraft.value=undefined;return}props.model.modelId=next;if(props.data.config.defaultModelId===old)props.data.config.defaultModelId=next;for(const a of Object.values(props.data.config.agents))if(a.modelId===old)a.modelId=next;void router.replace(parent.value+'/models/'+encodeURIComponent(next))}
+function rename(event:Event){const next=(event.target as HTMLInputElement).value.trim(),old=props.model.modelId;if(!next||props.data.config.providers.some(p=>p.models.some(m=>m!==props.model&&m.modelId===next))){idDraft.value=undefined;return}props.model.modelId=next;if(props.data.config.defaultModelId===old)props.data.config.defaultModelId=next;if(props.data.config.defaultAttachmentInspectionModelId===old)props.data.config.defaultAttachmentInspectionModelId=next;for(const a of Object.values(props.data.config.agents)){if(a.modelId===old)a.modelId=next;if(a.attachmentInspectionModelId===old)a.attachmentInspectionModelId=next;}void router.replace(parent.value+'/models/'+encodeURIComponent(next))}
 function toggleEffort(value:string,checked:boolean){const selected=new Set(modelReasoningOptions(props.model).slice(1));checked?selected.add(value):selected.delete(value);props.model.reasoningEfforts=reasoningEfforts.filter(v=>selected.has(v))}
 function remove(){props.provider.models.splice(props.provider.models.indexOf(props.model),1);void router.push(parent.value)}
 </script>
@@ -37,6 +37,7 @@ function remove(){props.provider.models.splice(props.provider.models.indexOf(pro
    <label class="check"><input v-model="model.enabled" type="checkbox" />启用模型</label>
   </div>
   <ModelParameterFields :key="data.revision" :model-value="model" @change="(key,value)=>Object.assign(model,{[key]:value})" />
+  <label class="check"><input v-model="model.capabilities" type="checkbox" value="TOOL" />支持工具调用（聊天 Agent 需要，专用识图不需要）</label>
   <label class="check"><input v-model="model.inputModalities" type="checkbox" value="IMAGE" />支持图片输入</label>
   <div class="settings-group"><h3>推理</h3><label class="check"><input v-model="model.capabilities" type="checkbox" value="REASONING" @change="!($event.target as HTMLInputElement).checked&&(delete model.reasoningEfforts)" />允许手动选择推理等级</label>
    <div v-if="model.capabilities.includes('REASONING')" class="checks"><label v-for="effort in reasoningEfforts" :key="effort" class="check"><input type="checkbox" :checked="modelReasoningOptions(model).includes(effort)" @change="toggleEffort(effort,($event.target as HTMLInputElement).checked)" />{{ reasoningLabels[effort] }}</label></div>

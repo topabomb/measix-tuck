@@ -22,8 +22,8 @@ var agentID = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 var passwordPattern = regexp.MustCompile(`^scrypt\$32768\$8\$3\$[a-f0-9]{32}\$[a-f0-9]{64}$`)
 var protectable = []string{"platform", "providers", "agents", "mcp", "orchestration", "engine"}
 var reasoningEfforts = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
-var tuckTools = []string{"list_sessions", "send_session_message", "workspace_webdav_upload", "workspace_webdav_download_files"}
-var runtimeFields = map[string][]string{"providers": {"providers", "defaultModelId", "modelDefaults", "platformModelSettings"}, "agents": {"agents", "workbench"}, "mcp": {"localMcp", "platformMcpTools"}}
+var tuckTools = []string{"list_sessions", "send_session_message", "upload_runcove_file", "download_runcove_files", "generate_images", inspectionTool}
+var runtimeFields = map[string][]string{"providers": {"providers", "defaultModelId", "modelDefaults", "platformModelSettings", "imageGenerators", "defaultImageGenerator", "defaultAttachmentInspectionModelId"}, "agents": {"agents", "workbench"}, "mcp": {"localMcp", "platformMcpTools"}}
 
 const configVersion = 2
 
@@ -212,7 +212,7 @@ func validBudget(v M, defaults M) bool {
 }
 func ValidateConfig(c M, paths bool) error {
 	fail := func(s string) error { return Problem(422, "invalid_config", s) }
-	if !noUnknown(c, "schemaVersion", "server", "storage", "engine", "security", "providers", "defaultModelId", "modelDefaults", "platformModelSettings", "agents", "permissions", "localMcp", "platformMcpTools", "workbench") {
+	if !noUnknown(c, "schemaVersion", "server", "storage", "engine", "security", "providers", "defaultModelId", "modelDefaults", "platformModelSettings", "agents", "permissions", "localMcp", "platformMcpTools", "workbench", "imageGenerators", "defaultImageGenerator", "defaultAttachmentInspectionModelId") {
 		return fail("配置包含未知字段")
 	}
 	if !Integer(c["schemaVersion"], configVersion, configVersion) {
@@ -275,6 +275,12 @@ func ValidateConfig(c M, paths bool) error {
 	if Has(c, "defaultModelId") && (S(c["defaultModelId"]) != strings.TrimSpace(S(c["defaultModelId"])) || len(S(c["defaultModelId"])) > 256) {
 		return fail("默认模型标识无效")
 	}
+	if Has(c, "defaultAttachmentInspectionModelId") && (!stringField(c["defaultAttachmentInspectionModelId"], 0, 256) || strings.ContainsAny(S(c["defaultAttachmentInspectionModelId"]), " \t\r\n")) {
+		return fail("默认附件识别模型标识无效")
+	}
+	if e := validateImageConfig(c); e != nil {
+		return e
+	}
 	modelIDs := map[string]bool{}
 	providerIDs := map[string]bool{}
 	if !isArray(c["providers"]) || len(A(c["providers"])) > 50 {
@@ -293,7 +299,7 @@ func ValidateConfig(c M, paths bool) error {
 		for _, mv := range A(p["models"]) {
 			m := O(mv)
 			id := S(m["modelId"])
-			if !stringField(m["modelId"], 1, 256) || strings.ContainsAny(id, " \t\n\r") || modelIDs[id] || !stringField(m["displayName"], 1, 80) || !stringField(m["upstreamModelKey"], 1, 256) || !isBool(m["enabled"]) || !validBudget(m, nil) || !Contains(m["inputModalities"], "TEXT") || !uniqueStrings(m["inputModalities"], func(s string) bool { return s == "TEXT" || s == "IMAGE" }) || !Contains(m["capabilities"], "TOOL") || !uniqueStrings(m["capabilities"], func(s string) bool { return s == "TOOL" || s == "REASONING" }) {
+			if !stringField(m["modelId"], 1, 256) || strings.ContainsAny(id, " \t\n\r") || modelIDs[id] || !stringField(m["displayName"], 1, 80) || !stringField(m["upstreamModelKey"], 1, 256) || !isBool(m["enabled"]) || !validBudget(m, nil) || !Contains(m["inputModalities"], "TEXT") || !uniqueStrings(m["inputModalities"], func(s string) bool { return s == "TEXT" || s == "IMAGE" }) || !uniqueStrings(m["capabilities"], func(s string) bool { return s == "TOOL" || s == "REASONING" }) {
 				return fail("模型身份、预算或能力无效")
 			}
 			modelIDs[id] = true
@@ -354,6 +360,9 @@ func ValidateConfig(c M, paths bool) error {
 		}
 		if Has(a, "modelId") && (!stringField(a["modelId"], 1, 256) || strings.ContainsAny(S(a["modelId"]), " \t\r\n")) {
 			return fail("Agent modelId 无效")
+		}
+		if Has(a, "attachmentInspectionModelId") && (!stringField(a["attachmentInspectionModelId"], 0, 256) || strings.ContainsAny(S(a["attachmentInspectionModelId"]), " \t\r\n")) {
+			return fail("Agent 附件识别模型标识无效")
 		}
 		if Has(a, "disabledTuckTools") && !uniqueStrings(a["disabledTuckTools"], func(s string) bool { return slices.Contains(tuckTools, s) }) {
 			return fail("Tuck 工具选择无效")

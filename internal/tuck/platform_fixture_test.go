@@ -171,7 +171,7 @@ func (f *platformFixture) send(path string, body M) (int, M, string) {
 }
 func (f *platformFixture) serve(w http.ResponseWriter, r *http.Request) {
 	var body M
-	if r.Body != nil && !strings.Contains(r.URL.Path, "/dav/") && !(strings.HasSuffix(r.URL.Path, "/workspace/content") && r.Method == "PUT") {
+	if r.Body != nil && !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data;") && !strings.Contains(r.URL.Path, "/dav/") && !(strings.HasSuffix(r.URL.Path, "/workspace/content") && r.Method == "PUT") {
 		raw, _ := io.ReadAll(r.Body)
 		if len(raw) > 0 {
 			v, e := DecodeJSON(raw, AgentRequestBytes)

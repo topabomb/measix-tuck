@@ -353,6 +353,12 @@ func TestPlatformResponsesAndReasoningErrors(t *testing.T) {
 	}
 }
 func TestModelErrorDetail(t *testing.T) {
+	for _, field := range []string{"title", "detail"} {
+		message, code := ModelRequestError(400, M{"code": "invalid_request", "title": "Invalid image generation request", field: "Image request rejected fixture-secret Bearer opaque-token data:image/png;base64,ABCD", "forwarded": false}, "default", "M", []string{"fixture-secret"})
+		if code != "invalid_request" || !strings.Contains(message, "Image request rejected") || !strings.Contains(message, "未转发至上游") || strings.Contains(message, "fixture-secret") || strings.Contains(message, "opaque-token") || strings.Contains(message, "ABCD") {
+			t.Fatal("problem response lost its diagnostic or leaked credentials", message, code)
+		}
+	}
 	_, code := ModelRequestError(400, M{"error": M{"message": "Unsupported thinking level"}}, "low", "M", nil)
 	if code != "reasoning_effort_rejected" {
 		t.Fatal(code)

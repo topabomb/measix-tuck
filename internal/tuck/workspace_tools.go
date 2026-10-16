@@ -55,9 +55,18 @@ func (l *LocalTools) workspaceGate(ctx context.Context, turn *toolTurn) error {
 	if turn.Workspace == "" {
 		return Problem(400, "invalid_arguments", "The external runtime working directory is unknown.")
 	}
+	if e := checkTurnWorkspace(turn); e != nil {
+		return e
+	}
 	actual, e := filepath.EvalSymlinks(S(turn.Task["workspace"]))
 	if e != nil || actual != turn.Workspace || turn.Target == nil || platformIdentity(l.Models.Platform.Binding()) != turn.Identity {
 		return Problem(403, "tool_not_permitted", "The working directory or enterprise identity changed.")
+	}
+	return l.remoteGate(ctx, turn)
+}
+func (l *LocalTools) remoteGate(ctx context.Context, turn *toolTurn) error {
+	if turn.Target == nil || platformIdentity(l.Models.Platform.Binding()) != turn.Identity {
+		return Problem(403, "tool_not_permitted", "Runcove workspace access is unavailable or changed.")
 	}
 	p, e := l.projection(ctx)
 	if e != nil {
@@ -227,10 +236,10 @@ func overwriteFlag(value any) (bool, error) {
 	return flag, nil
 }
 func (l *LocalTools) Transfer(ctx context.Context, turn *toolTurn, name string, args M) M {
-	if name == "webdav_download_files" {
+	if name == "download_runcove_files" {
 		return l.downloadFiles(ctx, turn, args)
 	}
-	if name != "webdav_upload" {
+	if name != "upload_runcove_file" {
 		return toolFailure("invalid_arguments", "Choose an available enterprise WebDAV tool.")
 	}
 	overwrite, e := overwriteFlag(args["overwrite"])
@@ -346,11 +355,11 @@ func reservedRemote(remote string) bool {
 }
 func transferFailure(e error, writing bool) M {
 	if writing {
-		return M{"status": "unknown", "reason": "outcome_unknown", "detail": "The upload was interrupted and its remote outcome is unknown. Verify it in the file manager before retrying."}
+		return M{"status": "unknown", "code": "outcome_unknown", "message": "The upload was interrupted and its remote outcome is unknown. Check the remote file before retrying."}
 	}
 	code := Code(e)
 	if errors.Is(e, context.Canceled) || errors.Is(e, context.DeadlineExceeded) {
-		code = "cancelled"
+		code = "operation_canceled"
 	}
 	if code == "" {
 		code = "webdav_unavailable"
@@ -368,7 +377,7 @@ func transferFailure(e error, writing bool) M {
 	if Status(e) == 500 {
 		message = "The enterprise file operation failed. Check the current workspace before retrying."
 	}
-	return M{"status": "failed", "reason": code, "detail": message}
+	return toolFailure(code, message)
 }
 func checkDestination(root *os.Root, name string, overwrite bool) error {
 	info, e := root.Lstat(name)
@@ -378,12 +387,18 @@ func checkDestination(root *os.Root, name string, overwrite bool) error {
 	if e != nil {
 		return e
 	}
-	if !overwrite || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
 		return Problem(409, "local_file_exists", "Only existing regular files can be overwritten; choose an unused destination.")
+	}
+	if !overwrite {
+		return Problem(409, "local_file_exists", "The destination file already exists. Set overwrite=true to replace it, or choose another directory.")
 	}
 	return nil
 }
 func (l *LocalTools) downloadFiles(ctx context.Context, turn *toolTurn, args M) M {
+	if e := writableTaskWorkspace(turn.Task); e != nil {
+		return transferFailure(e, false)
+	}
 	overwrite, e := overwriteFlag(args["overwrite"])
 	if e != nil {
 		return transferFailure(e, false)
@@ -403,7 +418,7 @@ func (l *LocalTools) downloadFiles(ctx context.Context, turn *toolTurn, args M) 
 	if e = l.workspaceGate(ctx, turn); e != nil {
 		return transferFailure(e, false)
 	}
-	root, e := os.OpenRoot(turn.Workspace)
+	root, e := taskRoot(turn.Task)
 	if e != nil {
 		return transferFailure(e, false)
 	}
@@ -475,7 +490,10 @@ func (l *LocalTools) downloadFiles(ctx context.Context, turn *toolTurn, args M) 
 			if meta.Kind != "file" {
 				return toolFailure("webdav_not_file", "The download source is a directory. Specify individual files.")
 			}
-			tmp := ".tuck-download-" + UUID() + ".part"
+			if meta.Bytes < 0 {
+				return toolFailure("webdav_unavailable", "The remote file metadata has an invalid size.")
+			}
+			tmp := ".download_" + ID() + ".part"
 			defer parent.Remove(tmp)
 			file, e := parent.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 			if e != nil {
@@ -502,6 +520,11 @@ func (l *LocalTools) downloadFiles(ctx context.Context, turn *toolTurn, args M) 
 				}
 				return toolFailure(code, "The remote download failed or the file version changed.")
 			}
+			if strongETag(meta.ETag) && r.Header.Get("ETag") != "" && r.Header.Get("ETag") != meta.ETag {
+				file.Close()
+				r.Body.Close()
+				return toolFailure("webdav_version_changed", "The remote file version changed before download.")
+			}
 			n, e := io.CopyBuffer(file, contextReader{ctx, r.Body}, make([]byte, 128<<10))
 			r.Body.Close()
 			if e == nil {
@@ -511,7 +534,16 @@ func (l *LocalTools) downloadFiles(ctx context.Context, turn *toolTurn, args M) 
 			if e != nil {
 				return transferFailure(e, false)
 			}
+			if ctx.Err() != nil {
+				return transferFailure(ctx.Err(), false)
+			}
+			if n != meta.Bytes {
+				return toolFailure("webdav_version_changed", "The downloaded file size does not match its metadata. The destination was not replaced.")
+			}
 			if e = l.workspaceGate(ctx, turn); e != nil {
+				return transferFailure(e, false)
+			}
+			if e = checkTaskRoot(turn.Task, root); e != nil {
 				return transferFailure(e, false)
 			}
 			current, e := root.Stat(directory)
@@ -535,7 +567,7 @@ func (l *LocalTools) downloadFiles(ctx context.Context, turn *toolTurn, args M) 
 			return M{"status": "completed", "file": M{"path": filepath.ToSlash(filepath.Join(directory, name)), "name": name, "mime_type": MIMEType(remote), "bytes": n}}
 		}
 		outcome := operation()
-		stop = S(outcome["reason"]) == "cancelled" || S(outcome["reason"]) == "tool_not_permitted"
+		stop = S(outcome["code"]) == "operation_canceled" || S(outcome["code"]) == "tool_not_permitted"
 		if S(outcome["status"]) == "completed" {
 			completed++
 		}

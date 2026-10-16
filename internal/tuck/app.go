@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -119,6 +120,7 @@ func NewApp(config *Config) (app *App, err error) {
 		options.NativeDirectory = ""
 	}
 	options.BeginTurn = func(ctx context.Context, t M) (map[string]string, func(), error) { return app.Local.Begin(ctx, t) }
+	options.InspectionPresentation = func(root, input M) M { return app.Local.inspectionPresentation(root, input) }
 	options.ValidateAttachments = func(task M, ids []string) error { _, err := app.Files.attachments(task, ids); return err }
 	options.CheckWorkspace = func(path string) error {
 		if app.Delivery == nil {
@@ -277,7 +279,11 @@ func (a *App) serve(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(e, os.ErrNotExist) {
 			e = Problem(404, "not_found", "Resource not found")
 		}
-		WriteError(w, e)
+		if r.URL.Path == "/api/tools/list-sessions" || r.URL.Path == "/api/tools/send-message" {
+			WriteJSON(w, Status(e), toolError(e))
+		} else {
+			WriteError(w, e)
+		}
 	}
 }
 func (a *App) route(w http.ResponseWriter, r *http.Request) error {
@@ -704,13 +710,32 @@ func (a *App) toolsRoute(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 	if r.URL.Path == "/api/tools/list-sessions" && (r.Method == "POST" || r.Method == "GET") {
+		limit := 10
 		if r.Method == "POST" {
-			if _, e := ReadJSON(r.Body, 24<<20); e != nil {
+			body, e := ReadJSON(r.Body, 24<<20)
+			if e != nil {
 				return e
 			}
+			if !noUnknown(body, "limit") {
+				return Problem(400, "invalid_arguments", "Only limit is accepted.")
+			}
+			if body["limit"] != nil {
+				if !Integer(body["limit"], 1, 100) {
+					return Problem(400, "invalid_arguments", "limit must be an integer from 1 to 100.")
+				}
+				limit = I(body["limit"])
+			}
 		}
+
 		sessions := []any{}
-		for _, task := range a.Manager.List() {
+		tasks := a.Manager.List()
+		activity := func(task M) int64 {
+			created, _ := time.Parse(time.RFC3339Nano, S(task["createdAt"]))
+			timing := O(task["turnTiming"])
+			return max(created.UnixMilli(), int64(N(timing["startedAt"])), int64(N(timing["endedAt"])))
+		}
+		sort.SliceStable(tasks, func(i, j int) bool { return activity(tasks[i]) > activity(tasks[j]) })
+		for _, task := range tasks {
 			if B(task["archived"]) || S(task["parentTaskId"]) != "" {
 				continue
 			}
@@ -722,7 +747,10 @@ func (a *App) toolsRoute(w http.ResponseWriter, r *http.Request) error {
 			}
 			sessions = append(sessions, M{"task_id": task["id"], "title": task["title"], "agent": task["agent"], "assistant_name": name, "status": task["status"], "queued_prompts": task["queuedPrompts"], "pending_interaction": O(task["pendingInteraction"])["kind"]})
 		}
-		WriteJSON(w, 200, M{"sessions": sessions})
+		if len(sessions) > limit {
+			sessions = sessions[:limit]
+		}
+		WriteJSON(w, 200, toolOutput("list_sessions", M{"status": "completed", "sessions": sessions}))
 		return nil
 	}
 	if r.URL.Path == "/api/tools/send-message" && r.Method == "POST" {
@@ -753,11 +781,7 @@ func (a *App) toolsRoute(w http.ResponseWriter, r *http.Request) error {
 		if _, e = a.Manager.Steer(r.Context(), S(task["id"]), message, nil, M{"kind": "collaboration"}); e != nil {
 			return Problem(Status(e), Code(e), "Message delivery was not confirmed. Check the target conversation before sending again.")
 		}
-		delivery := "next_turn"
-		if S(task["status"]) == "working" {
-			delivery = "steer"
-		}
-		WriteJSON(w, 202, M{"accepted": true, "target_task_id": task["id"], "delivery": delivery})
+		WriteJSON(w, 202, toolOutput("send_session_message", M{"status": "accepted"}))
 		return nil
 	}
 	return Problem(404, "not_found", "Route not found")

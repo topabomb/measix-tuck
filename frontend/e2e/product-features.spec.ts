@@ -110,7 +110,7 @@ test('syntax colors remain paired, media stays compact and theme switches preser
       expect(geometry.right).toBeLessThanOrEqual(geometry.viewport)
     }
     await page.keyboard.press('Tab')
-    await expect(page.getByRole('link',{name:'打开原图 ↗'})).toBeFocused()
+    await expect(page.getByRole('link',{name:'打开图片 ↗'})).toBeFocused()
     await page.keyboard.press('Tab')
     await expect(page.getByRole('button',{name:'关闭图片预览'})).toBeFocused()
     await page.getByRole('button',{name:'关闭图片预览'}).click()

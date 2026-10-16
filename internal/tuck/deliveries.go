@@ -224,6 +224,7 @@ type deliverySource struct {
 	info     os.FileInfo
 	path     string
 	metadata M
+	remote   *davMetadata
 }
 type contextReader struct {
 	ctx    context.Context
@@ -241,11 +242,13 @@ func (d *Deliveries) Submit(ctx context.Context, turn *toolTurn, args M) (result
 	defer turn.deliveryMu.Unlock()
 	sources := []deliverySource{}
 	var staging, final string
-	activeFile := ""
+	activeField := ""
 	committed := false
 	defer func() {
 		for _, source := range sources {
-			source.file.Close()
+			if source.file != nil {
+				source.file.Close()
+			}
 		}
 		root, e := os.OpenRoot(d.Root)
 		if e == nil {
@@ -271,11 +274,11 @@ func (d *Deliveries) Submit(ctx context.Context, turn *toolTurn, args M) (result
 			}
 			d.Manager.mu.Unlock()
 		}
-		issues := []any{}
-		if activeFile != "" {
-			issues = append(issues, M{"path": activeFile, "code": code, "message": message})
+		result := toolFailure(code, message)
+		if activeField != "" {
+			result["field"] = activeField
 		}
-		return M{"status": "failed", "code": code, "message": message, "issues": issues}
+		return result
 	}
 	if e := d.Local.current(turn); e != nil {
 		return fail("tool_not_permitted", e.Error())
@@ -289,7 +292,18 @@ func (d *Deliveries) Submit(ctx context.Context, turn *toolTurn, args M) (result
 	}
 	var root *os.Root
 	var e error
-	if len(A(args["files"])) > 0 {
+	hasLocal := false
+	for _, v := range A(args["files"]) {
+		ref, e := parseToolFile(v, true)
+		if e != nil {
+			return fail(Code(e), e.Error())
+		}
+		hasLocal = hasLocal || ref.Source == "local"
+	}
+	if hasLocal {
+		if e := checkTurnWorkspace(turn); e != nil {
+			return fail(Code(e), e.Error())
+		}
 		if turn.Workspace == "" {
 			return fail("invalid_workspace", "The external runtime working directory is unknown.")
 		}
@@ -301,11 +315,42 @@ func (d *Deliveries) Submit(ctx context.Context, turn *toolTurn, args M) (result
 	}
 	seen := map[string]bool{}
 	var total int64
-	for _, v := range A(args["files"]) {
+	for index, v := range A(args["files"]) {
 		entry := O(v)
-		activeFile = S(entry["path"])
-		if !noUnknown(entry, "path", "description") || !stringField(entry["path"], 1, 4096) || entry["description"] != nil && !stringField(entry["description"], 1, 1000) {
+		activeField = fmt.Sprintf("files[%d].path", index)
+		if !noUnknown(entry, "source", "path", "description") || !stringField(entry["path"], 1, 4096) || entry["description"] != nil && !stringField(entry["description"], 1, 1000) {
 			return fail("invalid_arguments", "Each file needs a relative path and optional nonempty description.")
+		}
+		ref, e := parseToolFile(entry, true)
+		if e != nil {
+			return fail(Code(e), e.Error())
+		}
+		if ref.Source == "runcove" {
+			if e = d.Local.remoteGate(ctx, turn); e != nil {
+				return fail(Code(e), e.Error())
+			}
+			meta, e := d.Local.metadata(ctx, turn, ref.Path, false)
+			if e != nil {
+				return fail(Code(e), e.Error())
+			}
+			if meta.Kind != "file" || meta.Bytes < 0 || !strongETag(meta.ETag) {
+				return fail("file_not_readable", "A remote delivery file is not readable or has no verifiable version.")
+			}
+			if meta.Bytes > MaxDeliveryFile || total+meta.Bytes > MaxDeliveryBytes {
+				return fail("delivery_too_large", "Remote files exceed the delivery size limits.")
+			}
+			key := "runcove:" + ref.Path
+			if seen[key] {
+				return fail("invalid_arguments", "List each file once.")
+			}
+			seen[key] = true
+			total += meta.Bytes
+			metadata := M{"id": ID(), "path": ref.Path, "sizeBytes": meta.Bytes, "mimeType": MIMEType(ref.Path)}
+			if entry["description"] != nil {
+				metadata["description"] = strings.TrimSpace(S(entry["description"]))
+			}
+			sources = append(sources, deliverySource{path: ref.Path, metadata: metadata, remote: meta})
+			continue
 		}
 		path, e := relativeFile(S(entry["path"]), true)
 		if e != nil {
@@ -362,7 +407,7 @@ func (d *Deliveries) Submit(ctx context.Context, turn *toolTurn, args M) (result
 		sources = append(sources, deliverySource{file: handle, info: info, path: path, metadata: metadata})
 	}
 	free, e := availableBytes(d.Root)
-	activeFile = ""
+	activeField = ""
 	if e != nil || free < uint64(total)+(256<<20) {
 		return fail("insufficient_storage", "Not enough free space to preserve this delivery.")
 	}
@@ -378,8 +423,8 @@ func (d *Deliveries) Submit(ctx context.Context, turn *toolTurn, args M) (result
 	}
 	files := []any{}
 	buffer := make([]byte, 128<<10)
-	for _, source := range sources {
-		activeFile = source.path
+	for index, source := range sources {
+		activeField = fmt.Sprintf("files[%d].path", index)
 		if ctx.Err() != nil {
 			return fail("delivery_canceled", "The delivery was canceled before it was committed.")
 		}
@@ -388,29 +433,59 @@ func (d *Deliveries) Submit(ctx context.Context, turn *toolTurn, args M) (result
 			return fail("snapshot_failed", "Cannot create delivery file.")
 		}
 		hash := sha256.New()
-		n, e := io.CopyBuffer(io.MultiWriter(target, hash), io.LimitReader(contextReader{ctx, source.file}, source.info.Size()+1), buffer)
+		var reader io.Reader = source.file
+		size := int64(N(source.metadata["sizeBytes"]))
+		var remote io.ReadCloser
+		if source.remote != nil {
+			body, meta, err := d.Local.openRemoteFile(ctx, turn, source.path, MaxDeliveryFile)
+			if err != nil {
+				target.Close()
+				return fail(Code(err), err.Error())
+			}
+			remote = body
+			if meta.ETag != source.remote.ETag || meta.Bytes != size {
+				body.Close()
+				target.Close()
+				return fail("file_changed", "A remote file changed before copying.")
+			}
+			reader = body
+		}
+		n, e := io.CopyBuffer(io.MultiWriter(target, hash), io.LimitReader(contextReader{ctx, reader}, size+1), buffer)
+		if remote != nil {
+			remote.Close()
+		}
 		if e == nil {
 			e = target.Sync()
 		}
 		target.Close()
-		after, statErr := source.file.Stat()
-		disk, sourceErr := root.Lstat(source.path)
 		if e != nil {
 			if ctx.Err() != nil {
 				return fail("delivery_canceled", "The delivery was canceled before it was committed.")
 			}
 			return fail("snapshot_failed", "Delivery file copy failed.")
 		}
-		if statErr != nil || sourceErr != nil || n != source.info.Size() || after.Size() != source.info.Size() || !after.ModTime().Equal(source.info.ModTime()) || !os.SameFile(source.info, disk) || disk.Mode()&os.ModeSymlink != 0 {
-			return fail("file_changed", "A file changed while being copied. Wait for its writer to finish.")
+		if n != size {
+			return fail("file_changed", "A file changed while copying.")
 		}
+		if source.remote != nil {
+			if e = d.Local.remoteGate(ctx, turn); e != nil {
+				return fail(Code(e), e.Error())
+			}
+		} else {
+			after, statErr := source.file.Stat()
+			disk, sourceErr := root.Lstat(source.path)
+			if statErr != nil || sourceErr != nil || after.Size() != size || !after.ModTime().Equal(source.info.ModTime()) || !os.SameFile(source.info, disk) || disk.Mode()&os.ModeSymlink != 0 {
+				return fail("file_changed", "A file changed while copying. Wait for its writer to finish.")
+			}
+		}
+
 		source.metadata["sha256"] = hex.EncodeToString(hash.Sum(nil))
 		files = append(files, source.metadata)
 	}
 	if e = d.Local.current(turn); e != nil {
 		return fail("tool_not_permitted", e.Error())
 	}
-	activeFile = ""
+	activeField = ""
 	if ctx.Err() != nil {
 		return fail("delivery_canceled", "The delivery was canceled before it was committed.")
 	}

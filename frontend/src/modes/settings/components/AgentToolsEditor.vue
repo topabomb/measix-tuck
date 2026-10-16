@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import {useRoute} from 'vue-router'
+import {inspectionModelOptions} from './inspection-model-options'
+import {imageGeneratorOptions} from './image-generator-options'
 import NativeToolsEditor from './NativeToolsEditor.vue'
 import type { Mcp, Settings } from './types'
 import {platformMcpPath,mcpStatus} from './catalog-paths'
@@ -24,11 +26,17 @@ function bindEnterprise(id:string,event:Event){
   if((event.target as HTMLInputElement).checked)disabled.delete(id);else disabled.add(id)
   if(disabled.size)agent.value.disabledEnterpriseMcp=[...disabled];else delete agent.value.disabledEnterpriseMcp
 }
+const inspectionOptions=computed(()=>inspectionModelOptions(props.data))
+const inspectionModel=computed({get:()=>agent.value?.attachmentInspectionModelId??'',set:(value:string)=>{agent.value.attachmentInspectionModelId=value}})
+const imageOptions=computed(()=>imageGeneratorOptions(props.data))
+const imageResource=computed({get:()=>{const r=agent.value?.imageGenerator;return r?.source&&r.imageId?`${r.source}:${r.imageId}`:''},set:(value:string)=>{if(!value){delete agent.value.imageGenerator;return}const [source,imageId]=value.split(':');agent.value.imageGenerator={source,imageId}}})
 const tuckTools=[
+  {id:'inspect_attachments',label:'识别附件',description:'读取任务目录或已连接的 Runcove 工作区中的附件并返回文字；目前支持图片，暂不支持 PDF。',readonlyAllowed:true},
+  {id:'generate_images',label:'生成图片',description:'使用已配置的生图资源，保存原图并将图片返回模型上下文；需可写的本地主任务目录。',main:true},
   {id:'list_sessions',label:'查看会话',description:'列出主会话及其任务 ID、助手和当前状态。',main:true},
   {id:'send_session_message',label:'发送会话消息',description:'按用户要求向指定主会话发送消息。',main:true},
-  {id:'workspace_webdav_upload',label:'上传工作区文件',description:'将本地工作目录中的文件上传到企业 WebDAV。'},
-  {id:'workspace_webdav_download_files',label:'批量下载工作区文件',description:'下载 1–20 个文件到指定本地目录，保留文件名，不覆盖已有文件。'},
+  {id:'upload_runcove_file',label:'上传工作区文件',description:'将本地工作目录中的文件上传到 Runcove 工作区。'},
+  {id:'download_runcove_files',label:'批量下载工作区文件',description:'下载 1–20 个文件到指定本地目录，保留文件名，默认不覆盖已有文件。'},
 ]
 function setTuck(id:string,event:Event){
   const disabled=new Set(agent.value.disabledTuckTools||[])
@@ -46,14 +54,16 @@ function setTuck(id:string,event:Event){
       <template v-else-if="route.params.tool==='tuck'">
         <div class="tools-heading"><h3>Tuck 工具</h3></div>
         <p class="hint">选择此 Agent 可使用的工具，保存并应用后生效。</p>
-        <p v-if="agent.readonly" class="hint">当前为只读 Agent，以下工具不可用；取消只读后沿用已保存的开关。</p>
+        <p v-if="agent.readonly" class="hint">只读 Agent 仍可识别附件；写入和会话协作工具不可用，取消只读后沿用已保存的开关。</p>
         <div class="tuck-list">
           <div v-for="item in tuckTools" :key="item.id" class="tuck-tool">
-            <label class="check"><input type="checkbox" :aria-label="'启用'+item.label" :checked="!agent.readonly&&(!item.main||!!assistant)&&!agent.disabledTuckTools?.includes(item.id)" :disabled="!!agent.readonly||!!item.main&&!assistant" @change="setTuck(item.id,$event)" /><span><strong>{{item.label}}</strong><code>{{item.id}}</code></span></label>
-            <p class="hint">{{item.description}}<span v-if="item.main&&!assistant"> 仅主代理可用。</span><span v-else-if="!item.main"> 需本地工作目录及可用的企业 WebDAV。</span></p>
+            <label class="check"><input type="checkbox" :aria-label="'启用'+item.label" :checked="(!agent.readonly||item.readonlyAllowed)&&(!item.main||!!assistant)&&!agent.disabledTuckTools?.includes(item.id)" :disabled="!!agent.readonly&&!item.readonlyAllowed||!!item.main&&!assistant" @change="setTuck(item.id,$event)" /><span><strong>{{item.label}}</strong><code>{{item.id}}</code></span></label>
+            <p class="hint">{{item.description}}<span v-if="item.main&&!assistant"> 仅主代理可用。</span><span v-else-if="!item.main&&!item.readonlyAllowed"> 需本地工作目录及可用的Runcove 工作区。</span></p>
+            <label v-if="item.id==='inspect_attachments'&&!agent.disabledTuckTools?.includes(item.id)" class="delivery-options">识图模型（覆盖）<select aria-label="识图模型（覆盖）" v-model="inspectionModel"><option value="">跟随全局默认</option><option v-if="agent.attachmentInspectionModelId&&!inspectionOptions.some(m=>m.modelId===agent.attachmentInspectionModelId)" :value="agent.attachmentInspectionModelId" disabled>{{agent.attachmentInspectionModelId}}（不可用）</option><option v-for="m in inspectionOptions" :key="m.modelId" :value="m.modelId">{{m.label}}</option></select></label>
+            <label v-if="item.id==='generate_images'&&assistant&&!agent.readonly&&!agent.disabledTuckTools?.includes(item.id)" class="delivery-options">生图资源（覆盖）<select aria-label="生图资源（覆盖）" v-model="imageResource"><option value="">跟随全局默认</option><option v-if="imageResource&&!imageOptions.some(r=>r.selector===imageResource)" :value="imageResource" disabled>{{imageResource}}（不可用）</option><option v-for="r in imageOptions" :key="r.selector" :value="r.selector">{{r.label}}</option></select></label>
           </div>
           <div class="tuck-tool">
-            <label class="check"><input type="checkbox" aria-label="启用交付工具" :checked="!!assistant&&!agent.readonly&&assistant.deliveryTool!==false" :disabled="!assistant||!!agent.readonly" @change="assistant&&(assistant.deliveryTool=($event.target as HTMLInputElement).checked)" /><span><strong>交付成果</strong><code>tuck_deliver_result</code></span></label>
+            <label class="check"><input type="checkbox" aria-label="启用交付工具" :checked="!!assistant&&!agent.readonly&&assistant.deliveryTool!==false" :disabled="!assistant||!!agent.readonly" @change="assistant&&(assistant.deliveryTool=($event.target as HTMLInputElement).checked)" /><span><strong>交付成果</strong><code>deliver_result</code></span></label>
             <p class="hint">提交摘要和文件清单，保存交付版本。<span v-if="!assistant">子代理不提供交付工具。</span></p>
             <div v-if="assistant" class="delivery-options">
               <label>交付版本保留数量（覆盖）<input aria-label="交付版本保留数量（覆盖）" :value="retentionDraft??assistant.deliveryRetentionCount" type="number" min="0" max="100" step="1" :placeholder="`跟随全局（${data.config.workbench.deliveryRetentionCount??10}）`" @input="setRetention" /></label>

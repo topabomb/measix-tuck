@@ -26,7 +26,7 @@ test('paste, drag, picker, model gate, session draft and image-only submission',
   await page.getByTestId(`session-${task.id}`).click()
   await expect(page.getByRole('group',{name:'待发送附件'})).toContainText('clipboard.png')
   await page.getByTestId('task-model').selectOption('text')
-  await expect(page.getByText('当前模型不支持图片或能力未确认，请切换模型或移除图片')).toBeVisible()
+  await expect(page.getByText('当前模型不支持图片；请配置识图模型并启用附件识别工具，或切换聊天模型')).toBeVisible()
   await expect(page.getByTestId('send-message')).toBeDisabled()
   await page.getByTestId('task-model').selectOption('vision')
   await input.fill('')

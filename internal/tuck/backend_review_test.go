@@ -32,7 +32,7 @@ func TestQueueEditDuringPreparationUsesCurrentEntry(t *testing.T) {
 	sent := make(chan string, 2)
 	engine.run = func(_ context.Context, session, _, _ string, messages []M, _ string, _ map[string]string, fn func(M) error) error {
 		sent <- S(messages[0]["content"])
-		return fn(M{"type": "stream_stopped", "session_id": session, "reason": "completed"})
+		return fn(M{"type": "stream_stopped", "session_id": session, "reason": "normal"})
 	}
 	if _, err := m.Submit(id, "before edit", []string{"attachment"}, nil, nil); err != nil {
 		t.Fatal(err)
@@ -66,7 +66,7 @@ func TestQueueSubmittedDuringFinalRefreshIsStarted(t *testing.T) {
 	sent := make(chan string, 2)
 	engine.run = func(_ context.Context, session, _, _ string, messages []M, _ string, _ map[string]string, fn func(M) error) error {
 		sent <- S(messages[0]["content"])
-		return fn(M{"type": "stream_stopped", "session_id": session, "reason": "completed"})
+		return fn(M{"type": "stream_stopped", "session_id": session, "reason": "normal"})
 	}
 	submitTask(t, m, id, "first")
 	<-finishing

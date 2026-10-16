@@ -41,6 +41,7 @@ export interface DockerTask extends ConversationDescriptor {
   forkedFrom?: { id: string; title: string; userMessageIndex: number }
 }
 export interface ConnectionInfo {
+  attachmentInspection?:Record<string,{available:boolean;modelId?:string;reason?:string}>
   localMcp?: {name:string;displayName:string;url:string;enabled:boolean;status:'pending'|'ready'|'unavailable'|'disabled';validated:boolean;toolCount:number;error?:string|null}[]
   mode: 'platform' | 'direct' | 'template'; status: string; defaultModelId?: string; deploymentName?: string; employeeName?: string; origin?: string; managedGeneration?: number; schemaVersion?: number; compatibilityPlatform?: string; error?: string | null
   models: { providerId?:string; source?:'platform'|'local'; modelId: string; displayName: string; protocol: string; selectable: boolean; reason?: string | null; lastError?: string | null; inputModalities: string[]; capabilities: string[]; reasoningEfforts?: string[]; contextWindow?:number; maxOutputTokens?:number; settingsSource?:string }[]

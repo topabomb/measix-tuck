@@ -26,6 +26,9 @@ test('focus is contained and theme-correct across forms, sidebar, dialogs and te
     app.manager.submit(root.id,'SCHEMA_QUESTION')
     await until(()=>root.pendingInteraction)
     await page.goto(app.url)
+    // Initial conversation restoration changes the route and closes transient menus.
+    await expect(page).toHaveURL(new RegExp(`/chat/conversations/${root.id}$`))
+    await expect(page.getByRole('form',{name:'生成设置',exact:true})).toBeVisible()
     for(const theme of ['苔灰','暖砂','炭棕','曜黑（高对比）','石墨']) {
       await openSettings(page)
       await page.getByRole('navigation',{name:'设置分类'}).getByRole('link',{name:'外观',exact:true}).click()

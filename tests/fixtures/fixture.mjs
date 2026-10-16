@@ -6,11 +6,23 @@ export {until};
 const pause=ms=>new Promise(done=>setTimeout(done,ms));
 const listen=server=>new Promise((done,fail)=>server.once('error',fail).listen(0,'127.0.0.1',done));
 export async function fixture(options={}) {
- const {beforeResponse,maxIterations=16,attachmentModels=false,localAssistants=false,delivery=false,enterprisePlatform,security}=options;
+ const {imageGeneration,attachmentInspection=false,inspectionText,inspectionAttachments,beforeResponse,maxIterations=16,attachmentModels=false,localAssistants=false,delivery=false,enterprisePlatform,security}=options;
   const requests = [];
   const model = createServer(async (req, res) => {
-    let text = ''; for await (const bytes of req) text += bytes;
-    const body = JSON.parse(text); requests.push(body);
+    const chunks=[]; for await (const bytes of req) chunks.push(bytes);
+    const raw=Buffer.concat(chunks);
+    let body;
+    if(req.headers['content-type']?.startsWith('multipart/form-data')){
+      const form=await new Response(raw,{headers:{'Content-Type':req.headers['content-type']}}).formData();
+      body={};for(const [key,value] of form)if(typeof value==='string')body[key]=key==='n'?Number(value):value;
+      body.referenceImages=await Promise.all(form.getAll('image[]').map(async file=>({name:file.name,type:file.type,base64:Buffer.from(await file.arrayBuffer()).toString('base64')})));
+    }else body=JSON.parse(raw.toString());
+    requests.push(body);
+    if(['/v1/images/generations','/v1/images/edits'].includes(req.url)&&imageGeneration){body.requestPath=req.url;res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({data:Array.from({length:body.n??1},()=>({b64_json:imageGeneration}))}));return;}
+    if(attachmentInspection&&!body.stream){
+      if(JSON.stringify(body).includes('REJECT_INSPECTION')){res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:{code:'unsupported_image',message:'This fixture model does not support images'}}));return;}
+      res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({choices:[{finish_reason:'stop',message:{role:'assistant',content:inspectionText??'识别证据：图片包含蓝色背景和金色方块。'}}]}));return;
+    }
     const history = body.messages || [];
     const lastUser = history.findLastIndex(item => item.role === 'user');
     const recent = history.slice(lastUser + 1);
@@ -26,6 +38,16 @@ export async function fixture(options={}) {
     else if (JSON.stringify(history).includes('CHILD_QUESTION') && !(body.tools || []).some(tool => tool.function?.name === 'transfer_task')) { if (!done.includes('user_prompt')) calls = [tool('user_prompt',{message:'子助手需要确认素材',schema:{type:'object',properties:{material:{type:'string',title:'素材名称'}},required:['material']}})]; }
     else if (JSON.stringify(history).includes('CHILD_ONLY') && !(body.tools || []).some(tool => tool.function?.name === 'transfer_task')) content = '子 Agent 已独立完成检查。';
     else if (prompt.includes('FAIL_MODEL')) { res.writeHead(400); res.end(JSON.stringify({ error: { message: 'Intentional test provider failure', type: 'invalid_request_error' } })); return; }
+    else if(prompt.includes('DELIVER_REMOTE_TOOL')) { if(!done.includes('deliver_result'))calls=[tool('deliver_result',{summary:'远程图片交付',files:[{source:'runcove',path:'picture.png'}]})]; else content='远程交付完成。'; }
+    else if (attachmentInspection&&prompt.includes('INSPECT_TOOL')) {
+      if(!done.includes('inspect_attachments'))calls=[tool('inspect_attachments',{attachments:inspectionAttachments??[...new Set(prompt.match(/artifacts\/uploads\/[A-Za-z0-9_.-]+\.png/g)||[])].map(path=>({path})),request:prompt.includes('REJECT_INSPECTION')?'REJECT_INSPECTION':'识别图片的背景与图形颜色。'} )];
+      else content=JSON.stringify(toolOutputs).includes('unsupported_image')?'识图模型拒绝了图片输入，请检查识图模型配置。':'已根据识图结果确认：蓝色背景，金色方块。';
+    }
+    else if (imageGeneration&&/GENERATE_IMAGE_TOOL|REFERENCE_IMAGE_TOOL/.test(JSON.stringify(history))) {
+      const references=[...new Set(JSON.stringify(history).match(/artifacts\/uploads\/[A-Za-z0-9_.-]+\.png/g)||[])];
+      if (!JSON.stringify(body).includes('data:image/')) calls=[tool('generate_images',JSON.stringify(history).includes('REFERENCE_IMAGE_TOOL')?{prompt:'Combine the four references in their supplied order into a blue poster',count:4,reference_images:references}:{prompt:'Draw a blue geometric poster'})];
+      else content=JSON.stringify(body).includes('data:image/')?'已生成图片，并在模型上下文中接收到实际图片。':'ERROR: image absent from model context';
+    }
     else if (prompt.includes('MULTI_QUESTION')) {
       if (!done.includes('user_prompt')) {
         calls = ['素材','尺寸'].map((title,index)=>({...tool('user_prompt',{title,message:`请提供${title}`,schema:{type:'object',properties:{value:{type:'string',title}},required:['value']}}),id:`question-${requests.length}-${index}`}));
@@ -48,7 +70,7 @@ export async function fixture(options={}) {
         calls = [tool('send_session_message', { target_task_id: ` ${target?.task_id} `, message: prompt.includes('IDLE') ? '空闲协作测试消息' : '执行中协作测试消息', timeout_secs:30 })];
       } else content = '已通过实际工具投递协作消息。';
     }
-    else if (delivery && prompt.includes('TEXT_DELIVERY')) { if (!done.includes('tuck_deliver_result')) calls=[tool('tuck_deliver_result',{summary:'核对完成，请查看交付。',files:[]})]; }
+    else if (delivery && prompt.includes('TEXT_DELIVERY')) { if (!done.includes('deliver_result')) calls=[tool('deliver_result',{summary:'核对完成，请查看交付。',files:[]})]; }
     else if (prompt.includes('FULL_LOOP')) {
       if (!done.includes('create_todos')) calls = [tool('create_todos', { descriptions: ['生成报告', '验证报告'] })];
       else if (!done.includes('user_prompt')) calls = [tool('user_prompt', { message: '报告标题是什么？', schema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] } })];
@@ -58,7 +80,7 @@ export async function fixture(options={}) {
       else if (!done.includes('update_todos')) {
         const snapshot = toolOutputs.map(item => { try { return JSON.parse(item.content); } catch { return {}; } }).find(item => item.all_todos);
         calls = [tool('update_todos', { updates: (snapshot?.all_todos || []).map(todo => ({ id: todo.id, status: 'completed' })) })];
-      } else if(delivery&&!done.includes('tuck_deliver_result')) calls=[tool('tuck_deliver_result',{summary:'已生成 [report.md](report.md)，终端和子任务验证完成。',files:[{path:'report.md',description:'通过工具生成并检查的报告'}]})];
+      } else if(delivery&&!done.includes('deliver_result')) calls=[tool('deliver_result',{summary:'已生成 [report.md](report.md)，终端和子任务验证完成。',files:[{path:'report.md',description:'通过工具生成并检查的报告'}]})];
       else content = '已生成 [report.md](report.md)，终端和子任务验证完成。\n\n```js\nconsole.log("verified")\n```';
     }
     const delta = calls ? { role: 'assistant', tool_calls: calls.map((call, index) => ({ index, ...call })) } : { role: 'assistant', content };
@@ -83,9 +105,10 @@ export async function fixture(options={}) {
  config.workbench.defaultAgent='root';
  if(!localAssistants)config.workbench.assistants=config.workbench.assistants.filter(a=>a.agent==='root');
  for(const assistant of config.workbench.assistants){assistant.workspace={mode:'auto'};assistant.deliveryTool=delivery;}
- const ids=attachmentModels?['vision','text']:['fixture-model'];
- config.providers=[{id:'fixture',displayName:'Test provider',enabled:true,protocol:'OPENAI_CHAT_COMPLETIONS',baseUrl:`http://127.0.0.1:${model.address().port}/v1`,apiKey:'local-test-only',models:ids.map(modelId=>({modelId,displayName:modelId==='vision'?'测试视觉模型':modelId==='text'?'测试文本模型':'测试模型',enabled:true,upstreamModelKey:'gpt-4o-mini',inputModalities:modelId==='vision'?['TEXT','IMAGE']:['TEXT'],capabilities:['TOOL'],contextWindow:240640,maxOutputTokens:32768}))}];
+ const ids=attachmentInspection?['vision','vision-alt','text']:attachmentModels?['vision','text']:['fixture-model'];
+ config.providers=[{id:'fixture',displayName:'Test provider',enabled:true,protocol:'OPENAI_CHAT_COMPLETIONS',baseUrl:`http://127.0.0.1:${model.address().port}/v1`,apiKey:'local-test-only',models:ids.map(modelId=>({modelId,displayName:modelId==='vision'?'测试视觉模型':modelId==='text'?'测试文本模型':'测试模型',enabled:true,upstreamModelKey:'gpt-4o-mini',inputModalities:modelId==='vision'||imageGeneration?['TEXT','IMAGE']:['TEXT'],capabilities:['TOOL'],contextWindow:240640,maxOutputTokens:32768}))}];
  config.defaultModelId=ids[0];
+ if(attachmentInspection){config.defaultModelId='text';for(const model of config.providers[0].models){model.upstreamModelKey=model.modelId;if(model.modelId.startsWith('vision')){model.inputModalities=['TEXT','IMAGE'];model.capabilities=[];}}}
  if(security)config.security.auth=security.auth;
  let app;
  try{app=await launch(config,{enterprisePlatform})}catch(error){model.closeAllConnections();model.close();throw error}

@@ -101,17 +101,17 @@ export function createAgentScenarioPack(scope: string, ordinal: number): Referen
     },
     {
       fixtureId: 'scenario-image-gen-call', turnId: imageTurn, stepId: imageStep, role: 'assistant',
-      blocks: [block('image-gen-call', 'tool-call', { name: 'generate_image', callId: imageCall, category: 'image-generation', model: imageModel, status: 'running', progress: 42, input: { prompt: imagePrompt, count: 4, aspectRatio: '1:1', quality: 'standard' }, durationMs: 1480, defaultOpen: false })],
+      blocks: [block('image-gen-call', 'tool-call', { name: 'generate_images', callId: imageCall, category: 'image-generation', model: imageModel, status: 'running', progress: 42, input: { prompt: imagePrompt, count: 4 }, durationMs: 1480, defaultOpen: false })],
     },
     {
       fixtureId: 'scenario-image-gen-result', turnId: imageTurn, stepId: imageStep, role: 'tool',
-      blocks: [block('image-gen-result', 'tool-result', { name: 'generate_image', callId: imageCall, category: 'image-generation', model: imageModel, status: 'success', progress: 100, output: { imageIds: Array.from({ length: 4 }, (_, i) => `generated-${ordinal}-${i + 1}`), revisedPrompt: imagePrompt, seed: 8800 + ordinal }, durationMs: 8420, defaultOpen: false })],
+      blocks: [block('image-gen-result', 'tool-result', { name: 'generate_images', callId: imageCall, category: 'image-generation', model: imageModel, status: 'success', progress: 100, output: { status: 'completed', files: Array.from({ length: 4 }, (_, i) => ({ path: `artifacts/images/img_${String(i + 1).padStart(16, '0')}.png`, prompt_path: `artifacts/images/img_${String(i + 1).padStart(16, '0')}.prompt.txt` })) }, durationMs: 8420, defaultOpen: false })],
     },
     {
       fixtureId: 'scenario-image-gen-artifacts', turnId: imageTurn, stepId: imageStep, role: 'assistant',
       blocks: [block('generated-images', 'attachments', {
         title: 'Generated image set',
-        provenance: { origin: 'tool-output', toolCallId: imageCall, toolName: 'generate_image', model: imageModel, prompt: imagePrompt },
+        provenance: { origin: 'tool-output', toolCallId: imageCall, toolName: 'generate_images', model: imageModel, prompt: imagePrompt },
         items: Array.from({ length: 4 }, (_, i) => ({ id: `generated-${ordinal}-${i + 1}`, name: `agent-workstation-${i + 1}.png`, kind: 'image' as const, mimeType: 'image/png', width: 1024, height: 1024, sizeBytes: 1_100_000 + i * 73_000, seed: 8800 + ordinal * 10 + i, resource: { id: `generated-resource-${ordinal}-${i + 1}`, kind: 'artifact' as const, uri: `artifact://generated-${ordinal}-${i + 1}`, label: `agent-workstation-${i + 1}.png` } })),
       })],
     },

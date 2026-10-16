@@ -38,6 +38,7 @@ type ManagerOptions struct {
 	RefreshFiles                             func(M) ([]any, error)
 	CheckWorkspace                           func(string) error
 	ApprovalTools                            func() []string
+	InspectionPresentation                   func(M, M) M
 }
 type taskRun struct {
 	cancel   context.CancelFunc
@@ -769,7 +770,7 @@ func (m *Manager) drain(ctx context.Context, id string, run *taskRun) {
 			return
 		}
 		entry := Clone(O(A(task["queue"])[0]))
-		if S(O(entry["source"])["kind"]) == "delivery_required" && !B(O(m.Config()["workbench"])["requireDelivery"]) {
+		if S(O(entry["source"])["kind"]) == "delivery_required" && (!B(O(m.Config()["workbench"])["requireDelivery"]) || !m.deliveryEnabled(task)) {
 			task["queue"] = A(task["queue"])[1:]
 			task["queuedPrompts"] = len(A(task["queue"]))
 			runErr = m.publishLocked(task, M{"type": "state", "task": task}, nil)
@@ -834,7 +835,6 @@ func (m *Manager) drain(ctx context.Context, id string, run *taskRun) {
 			return
 		}
 		headers := map[string]string{}
-		requireDelivery := B(O(m.Config()["workbench"])["requireDelivery"]) && m.deliveryEnabled(snapshot)
 		finish := func() {}
 		if m.options.BeginTurn != nil {
 			headers, finish, runErr = m.options.BeginTurn(ctx, snapshot)
@@ -872,7 +872,9 @@ func (m *Manager) drain(ctx context.Context, id string, run *taskRun) {
 		if task["lastFailure"] != nil {
 			reason = "error"
 		}
-		if reason == "completed" && requireDelivery && B(O(m.Config()["workbench"])["requireDelivery"]) {
+		// A reminder is one follow-up to ordinary input, never a source of
+		// another reminder. The native completion remains the execution fact.
+		if reason == "completed" && S(O(entry["source"])["kind"]) != "delivery_required" && B(O(m.Config()["workbench"])["requireDelivery"]) && m.deliveryEnabled(task) {
 			has, e := m.options.Store.HasDelivery(id, S(task["turnId"]))
 			if e != nil {
 				runErr = e
@@ -1424,6 +1426,6 @@ func (m *Manager) waitSending(ctx context.Context, id string) bool {
 func DeliveryReminder() string {
 	return `<tuck_automation type="delivery_required">
 This is an automated message from Tuck, not text written by the user.
-The previous turn completed without a delivery. Call tuck_deliver_result with a brief summary of the results, using no more than 1,000 characters. Include only key files if file delivery is needed.
+The previous turn completed without a delivery. Call deliver_result with a brief summary of the results, using no more than 1,000 characters. Include only key files if file delivery is needed.
 </tuck_automation>`
 }

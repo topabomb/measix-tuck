@@ -88,7 +88,7 @@ export interface ContentBlockMap {
   attachments: { items: readonly AttachmentItem[]; title?: string; provenance?: ArtifactProvenance }
   audio: { title: string; purpose: 'tts' | 'asr-input' | 'recording'; durationMs: number; src?: string; transcript?: string; model?: string; waveform?: readonly number[]; status?: 'processing' | 'ready' | 'error' }
   html: { html: string }
-  'tool-call': { name: string; callId: string; input: unknown; category?: ToolCategory; presentation?: ToolPresentationIntent; resources?: readonly ResourceRef[]; model?: string; progress?: number; durationMs?: number; status?: 'running' | 'success' | 'error'; defaultOpen?: boolean }
+  'tool-call': { name: string; callId: string; input: unknown; inputAttachments?: readonly AttachmentItem[]; category?: ToolCategory; presentation?: ToolPresentationIntent; resources?: readonly ResourceRef[]; model?: string; progress?: number; durationMs?: number; status?: 'running' | 'success' | 'error'; defaultOpen?: boolean }
   'tool-result': { name: string; callId: string; output: unknown; category?: ToolCategory; presentation?: ToolPresentationIntent; resources?: readonly ResourceRef[]; model?: string; progress?: number; durationMs?: number; status?: 'running' | 'success' | 'error'; defaultOpen?: boolean }
   terminal: { callId?: string; command?: string; cwd?: ResourceRef; output: string; status: 'running' | 'success' | 'error' | 'interrupted'; exitCode?: number; durationMs?: number; defaultOpen?: boolean }
   /** One parent-visible delegation batch. One run covers sync; many runs cover parallel/background children. */

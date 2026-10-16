@@ -185,12 +185,12 @@ func TestWorkspaceToolsRoundTripAndPartialBatches(t *testing.T) {
 	f := newWorkspaceFixture(t)
 	l, tr := f.turn(t)
 	os.WriteFile(filepath.Join(tr.Workspace, "source.bin"), []byte{0, 1, 255, 7}, 0600)
-	r := l.Transfer(context.Background(), tr, "webdav_upload", M{"file_path": "source.bin", "remote_path": "reports/测试 #%.bin"})
+	r := l.Transfer(context.Background(), tr, "upload_runcove_file", M{"file_path": "source.bin", "remote_path": "reports/测试 #%.bin"})
 	if r["status"] != "completed" {
 		t.Fatal(r)
 	}
 	args := M{"remote_paths": []any{"reports/测试 #%.bin"}, "local_directory": "out"}
-	r = l.Transfer(context.Background(), tr, "webdav_download_files", args)
+	r = l.Transfer(context.Background(), tr, "download_runcove_files", args)
 	if r["status"] != "completed" || I(r["completed_count"]) != 1 {
 		t.Fatal(r)
 	}
@@ -198,14 +198,14 @@ func TestWorkspaceToolsRoundTripAndPartialBatches(t *testing.T) {
 	if e != nil || !bytes.Equal(got, []byte{0, 1, 255, 7}) {
 		t.Fatal(got, e)
 	}
-	if r = l.Transfer(context.Background(), tr, "webdav_download_files", args); r["reason"] != "local_file_exists" {
+	if r = l.Transfer(context.Background(), tr, "download_runcove_files", args); r["code"] != "local_file_exists" {
 		t.Fatal(r)
 	}
 	args["overwrite"] = true
-	if r = l.Transfer(context.Background(), tr, "webdav_download_files", args); r["status"] != "completed" {
+	if r = l.Transfer(context.Background(), tr, "download_runcove_files", args); r["status"] != "completed" {
 		t.Fatal(r)
 	}
-	r = l.Transfer(context.Background(), tr, "webdav_download_files", M{"remote_paths": []any{"hello.txt", "missing.txt", "second.txt"}, "local_directory": "partial"})
+	r = l.Transfer(context.Background(), tr, "download_runcove_files", M{"remote_paths": []any{"hello.txt", "missing.txt", "second.txt"}, "local_directory": "partial"})
 	if r["status"] != "partial" || I(r["completed_count"]) != 2 || I(r["failed_count"]) != 1 || len(A(r["files"])) != 3 {
 		t.Fatal(r)
 	}
@@ -217,7 +217,7 @@ func TestWorkspaceToolsPreflightAndConcurrentPublication(t *testing.T) {
 	f := newWorkspaceFixture(t)
 	l, tr := f.turn(t)
 	for _, args := range []M{{"remote_paths": []any{"a/same.txt", "b/same.txt"}, "local_directory": "not-created", "overwrite": true}, {"remote_paths": []any{"../hello.txt"}, "local_directory": "bad"}, {"remote_paths": []any{"hello.txt"}, "local_directory": "../../outside"}, {"remote_paths": []any{".agent-space/data"}, "local_directory": "bad"}, {"remote_paths": []any{"hello.txt"}, "local_directory": "bad", "overwrite": 123}} {
-		r := l.Transfer(context.Background(), tr, "webdav_download_files", args)
+		r := l.Transfer(context.Background(), tr, "download_runcove_files", args)
 		if r["status"] != "failed" {
 			t.Fatal(r)
 		}
@@ -233,8 +233,8 @@ func TestWorkspaceToolsPreflightAndConcurrentPublication(t *testing.T) {
 	}
 	f.mu.Unlock()
 	os.MkdirAll(filepath.Join(tr.Workspace, "blocked/hello.txt"), 0700)
-	r := l.Transfer(context.Background(), tr, "webdav_download_files", M{"remote_paths": []any{"hello.txt"}, "local_directory": "blocked", "overwrite": true})
-	if r["reason"] != "local_file_exists" {
+	r := l.Transfer(context.Background(), tr, "download_runcove_files", M{"remote_paths": []any{"hello.txt"}, "local_directory": "blocked", "overwrite": true})
+	if r["code"] != "local_file_exists" {
 		t.Fatal(r)
 	}
 	var wg sync.WaitGroup
@@ -243,7 +243,7 @@ func TestWorkspaceToolsPreflightAndConcurrentPublication(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			out <- l.Transfer(context.Background(), tr, "webdav_download_files", M{"remote_paths": []any{"hello.txt"}, "local_directory": "concurrent"})
+			out <- l.Transfer(context.Background(), tr, "download_runcove_files", M{"remote_paths": []any{"hello.txt"}, "local_directory": "concurrent"})
 		}()
 	}
 	wg.Wait()
@@ -287,12 +287,12 @@ func TestWorkspaceToolsCancellationIdentityAndUnknownUpload(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan M, 1)
 	go func() {
-		done <- l.Transfer(ctx, tr, "webdav_download_files", M{"remote_paths": []any{"hello.txt", "second.txt", "third.txt"}, "local_directory": "replace", "overwrite": true})
+		done <- l.Transfer(ctx, tr, "download_runcove_files", M{"remote_paths": []any{"hello.txt", "second.txt", "third.txt"}, "local_directory": "replace", "overwrite": true})
 	}()
 	<-started
 	cancel()
 	r := <-done
-	if r["status"] != "partial" || O(A(r["files"])[1])["reason"] != "cancelled" || O(A(r["files"])[2])["reason"] != "not_attempted" {
+	if r["status"] != "partial" || O(A(r["files"])[1])["code"] != "operation_canceled" || O(A(r["files"])[2])["code"] != "not_attempted" {
 		t.Fatal(r)
 	}
 	old, _ := os.ReadFile(filepath.Join(tr.Workspace, "replace/second.txt"))
@@ -311,15 +311,15 @@ func TestWorkspaceToolsCancellationIdentityAndUnknownUpload(t *testing.T) {
 	}
 	f.mu.Unlock()
 	os.WriteFile(filepath.Join(tr.Workspace, "upload.txt"), []byte("unknown result"), 0600)
-	r = l.Transfer(context.Background(), tr, "webdav_upload", M{"file_path": "upload.txt", "remote_path": "unknown.txt"})
-	if r["status"] != "unknown" || r["reason"] != "outcome_unknown" {
+	r = l.Transfer(context.Background(), tr, "upload_runcove_file", M{"file_path": "upload.txt", "remote_path": "unknown.txt"})
+	if r["status"] != "unknown" || r["code"] != "outcome_unknown" {
 		t.Fatal(r)
 	}
 	f.mu.Lock()
 	O(f.projection["webdav"])["bindingRevision"] = 2
 	f.mu.Unlock()
-	r = l.Transfer(context.Background(), tr, "webdav_download_files", M{"remote_paths": []any{"hello.txt"}, "local_directory": "stale"})
-	if r["reason"] != "tool_not_permitted" {
+	r = l.Transfer(context.Background(), tr, "download_runcove_files", M{"remote_paths": []any{"hello.txt"}, "local_directory": "stale"})
+	if r["code"] != "tool_not_permitted" {
 		t.Fatal(r)
 	}
 }
@@ -330,7 +330,7 @@ func TestWorkspaceToolsLargeFileAndDestinationRedirection(t *testing.T) {
 	f.mu.Lock()
 	f.files["large.bin"] = blob
 	f.mu.Unlock()
-	r := l.Transfer(context.Background(), tr, "webdav_download_files", M{"remote_paths": []any{"large.bin"}, "local_directory": "large"})
+	r := l.Transfer(context.Background(), tr, "download_runcove_files", M{"remote_paths": []any{"large.bin"}, "local_directory": "large"})
 	if r["status"] != "completed" || len(JSON(r)) > 4000 {
 		t.Fatal(r)
 	}
@@ -359,13 +359,13 @@ func TestWorkspaceToolsLargeFileAndDestinationRedirection(t *testing.T) {
 			} else if e := directoryLink(filepath.Join(outside, "moved"), dest); e != nil {
 				t.Error(e)
 			}
-			w.Write([]byte("remote"))
+			w.Write([]byte("hello world"))
 			return true
 		}
 		return false
 	}
 	f.mu.Unlock()
-	r = l.Transfer(context.Background(), tr, "webdav_download_files", M{"remote_paths": []any{"hello.txt"}, "local_directory": "redirect", "overwrite": true})
+	r = l.Transfer(context.Background(), tr, "download_runcove_files", M{"remote_paths": []any{"hello.txt"}, "local_directory": "redirect", "overwrite": true})
 	if moveBlocked.Load() {
 		// Windows os.Root keeps the directory open without delete sharing, so
 		// the attack is rejected before redirection. No outside file may exist.

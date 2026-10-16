@@ -242,6 +242,11 @@ func (n *normalizer) handle(root, event M, observed *string) error {
 		}
 	}
 	task := n.owner(root, event)
+	// A terminal event must identify its actual session. Unknown or missing
+	// identities cannot establish that the root Agent turn has ended.
+	if kind == "stream_stopped" && (S(event["session_id"]) == "" || event["session_id"] != task["nativeSessionId"] || task["id"] != root["id"] && task["parentTaskId"] != root["id"]) {
+		return nil
+	}
 	if err := n.observeActivity(task, event); err != nil {
 		return err
 	}
@@ -334,6 +339,9 @@ func (n *normalizer) handle(root, event M, observed *string) error {
 				}
 			}
 			presentation := M{"kind": "generic"}
+			if name == inspectionTool && m.options.InspectionPresentation != nil {
+				presentation = m.options.InspectionPresentation(root, input)
+			}
 			if category(name) == "shell" {
 				presentation = M{"kind": "terminal", "command": firstString(input["cmd"], input["command"]), "cwd": resource(task, ".")}
 			} else if len(resources) > 0 {
@@ -405,10 +413,10 @@ func (n *normalizer) handle(root, event M, observed *string) error {
 		return m.stateLocked(task, M{"lastFailure": M{"code": firstString(event["code"], "runtime_error"), "message": firstString(event["error"], event["message"], "Agent execution failed")}})
 	case "stream_stopped":
 		FinishTurnTiming(task, true, NowMS())
-		reason := "completed"
+		reason := "interrupted"
 		switch S(event["reason"]) {
-		case "canceled", "cancelled", "max_iterations":
-			reason = "interrupted"
+		case "normal":
+			reason = "completed"
 		case "error":
 			reason = "error"
 		}
@@ -546,7 +554,7 @@ func (n *normalizer) toolResponse(root, task, event M, observed *string) error {
 		return err
 	}
 	out := M{"name": name, "callId": id, "output": output, "category": category(name), "resources": data["resources"], "presentation": data["presentation"], "status": status}
-	if name == "tuck_deliver_result" {
+	if name == "deliver_result" {
 		out["deliverySummary"] = O(record["input"])["summary"]
 	}
 	if _, err = n.append(owner, "tool", []any{newBlock("result:"+id, "tool-result", out)}, false); err != nil {
@@ -572,7 +580,11 @@ func (n *normalizer) toolResponse(root, task, event M, observed *string) error {
 		}
 	}
 	if len(media) > 0 {
-		if _, err = n.append(owner, "tool", []any{newBlock("media:"+id, "attachments", M{"title": "工具返回的实际产物", "provenance": M{"origin": "tool-output", "toolName": name, "toolCallId": id}, "items": media})}, false); err != nil {
+		provenance := M{"origin": "tool-output", "toolName": name, "toolCallId": id}
+		if name == "generate_images" && !failed {
+			provenance["prompt"] = O(record["input"])["prompt"]
+		}
+		if _, err = n.append(owner, "tool", []any{newBlock("media:"+id, "attachments", M{"title": "工具返回的实际产物", "provenance": provenance, "items": media})}, false); err != nil {
 			return err
 		}
 	}
@@ -846,7 +858,7 @@ func historyTools(messages []any) map[string]M {
 			call := O(x)
 			id := S(call["id"])
 			meta := Merge(tools[id], M{"name": O(call["function"])["name"]})
-			if S(meta["name"]) == "tuck_deliver_result" {
+			if S(meta["name"]) == "deliver_result" {
 				meta["input"] = parseValue(O(call["function"])["arguments"])
 			}
 			tools[id] = meta
@@ -880,7 +892,7 @@ func (n *normalizer) restoreToolMetadata(task M, nativeMessages []any) error {
 			if meta == nil {
 				continue
 			}
-			if S(block["type"]) == "tool-result" && S(meta["name"]) == "tuck_deliver_result" {
+			if S(block["type"]) == "tool-result" && S(meta["name"]) == "deliver_result" {
 				if _, ok := data["deliverySummary"].(string); !ok {
 					if summary, ok := O(meta["input"])["summary"].(string); ok {
 						data["deliverySummary"] = summary
@@ -908,6 +920,17 @@ func (n *normalizer) restoreToolMetadata(task M, nativeMessages []any) error {
 
 func (n *normalizer) importHistory(task M, messages []any) error {
 	tools := historyTools(messages)
+	presentations := map[string]M{}
+	if parent := S(O(task["forkedFrom"])["id"]); parent != "" {
+		var err error
+		presentations, err = n.m.options.Store.InspectionPresentations(parent)
+		if err != nil {
+			return err
+		}
+	}
+	// Call IDs may be reused in later rounds. Associate media with the
+	// preceding call's input, rather than the last occurrence in the history.
+	calls := map[string]M{}
 	for _, v := range messages {
 		w := O(v)
 		if w["message"] != nil {
@@ -931,7 +954,12 @@ func (n *normalizer) importHistory(task M, messages []any) error {
 		for _, v := range A(msg["tool_calls"]) {
 			c := O(v)
 			f := O(c["function"])
-			blocks = append(blocks, newBlock("call:"+S(c["id"]), "tool-call", M{"name": f["name"], "callId": c["id"], "input": parseValue(f["arguments"]), "category": category(S(f["name"])), "status": tools[S(c["id"])]["status"]}))
+			calls[S(c["id"])] = M{"name": f["name"], "input": parseValue(f["arguments"])}
+			data := M{"name": f["name"], "callId": c["id"], "input": parseValue(f["arguments"]), "category": category(S(f["name"])), "status": tools[S(c["id"])]["status"]}
+			if presentation := presentations[inspectionCallKey(data)]; presentation != nil {
+				data["presentation"] = Clone(presentation)
+			}
+			blocks = append(blocks, newBlock("call:"+S(c["id"]), "tool-call", data))
 		}
 		if role == "tool" {
 			id := S(msg["tool_call_id"])
@@ -941,10 +969,35 @@ func (n *normalizer) importHistory(task M, messages []any) error {
 				status = "error"
 			}
 			data := M{"name": firstString(msg["name"], meta["name"], "tool"), "callId": id, "output": msg["content"], "status": status}
-			if S(meta["name"]) == "tuck_deliver_result" {
+			if S(meta["name"]) == "deliver_result" {
 				data["deliverySummary"] = O(meta["input"])["summary"]
 			}
 			blocks = append(blocks, newBlock("result:"+id, "tool-result", data))
+			// The public session API retains MCP images in multi_content.
+			// Import them without consulting engine storage or fetching URLs.
+			media := []any{}
+			for _, part := range A(msg["multi_content"]) {
+				p := O(part)
+				src := S(O(p["image_url"])["url"])
+				if S(p["type"]) != "image_url" || src == "" {
+					continue
+				}
+				mime := ""
+				if strings.HasPrefix(src, "data:") {
+					mime = strings.SplitN(strings.SplitN(src[5:], ",", 2)[0], ";", 2)[0]
+				}
+				media = append(media, M{"id": fmt.Sprintf("%s:media-%d", id, len(media)), "name": fmt.Sprintf("image-%d", len(media)+1), "kind": "image", "mimeType": mime, "src": src})
+			}
+			if len(media) > 0 {
+				call := calls[id]
+				name := firstString(call["name"], data["name"])
+				provenance := M{"origin": "tool-output", "toolName": name, "toolCallId": id}
+				if name == "generate_images" && status == "success" {
+					provenance["prompt"] = O(call["input"])["prompt"]
+				}
+				blocks = append(blocks, newBlock("media:"+id, "attachments", M{"title": "工具返回的实际产物", "provenance": provenance, "items": media}))
+			}
+			delete(calls, id)
 		}
 		if len(blocks) > 0 {
 			if _, err := n.append(task, role, blocks, false); err != nil {
@@ -1039,6 +1092,27 @@ func WorkbenchMessage(taskID string, message M) M {
 	out := Clone(message)
 	for _, v := range A(out["blocks"]) {
 		b := O(v)
+		data := O(b["data"])
+		if S(b["type"]) == "tool-call" && S(data["name"]) == inspectionTool {
+			items := []any{}
+			for i, value := range A(O(data["input"])["attachments"]) {
+				if i >= 4 {
+					break
+				}
+				ref, e := parseToolFile(value, false)
+				if e == nil {
+					src := fmt.Sprintf("/api/tasks/%s/files?inspection=1&path=%s", url.PathEscape(taskID), url.QueryEscape(ref.Path))
+					if ref.Source == "runcove" {
+						if !Contains([]string{"success", "error"}, S(data["status"])) {
+							continue
+						}
+						src += fmt.Sprintf("&source=runcove&message=%d&item=%d&revision=%d&block=%s", I(message["index"]), i, I(message["revision"]), url.QueryEscape(S(b["id"])))
+					}
+					items = append(items, M{"id": fmt.Sprint(i), "name": filepath.Base(ref.Path), "kind": "image", "mimeType": "", "src": src})
+				}
+			}
+			data["inputAttachments"] = items
+		}
 		if S(b["type"]) != "attachments" {
 			continue
 		}

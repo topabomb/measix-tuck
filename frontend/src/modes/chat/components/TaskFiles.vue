@@ -6,6 +6,8 @@ import { authFetch } from '../../../app/auth'
 import { appUrl } from '../../../app/urls'
 import WorkbenchDialog from '../../../shared/ui/WorkbenchDialog.vue'
 import SummaryPopover from '../../../shared/ui/SummaryPopover.vue'
+import ImagePreview from '../../../shared/ui/ImagePreview.vue'
+import type { AttachmentItem } from '../../../engine/model/conversation'
 const props = defineProps<{ task: DockerTask; shared?: boolean; trigger?:HTMLElement|null }>()
 const emit = defineEmits<{ close: [] }>()
 const files = ref(props.task.artifacts), loading = ref(false), search = ref(''), page = ref(0)
@@ -16,6 +18,7 @@ watch(() => props.task.artifacts, value => { files.value = value })
 watch(() => matches.value.length, count => { page.value = Math.min(page.value, Math.max(0, Math.ceil(count / 40) - 1)) })
 const preview = ref<{ path:string; content:string } | null>(null), original = ref(''), editing = ref(false), discard = ref(false), busy = ref(false), error = ref('')
 const previewText = ref<HTMLTextAreaElement | null>(null)
+const imagePreview = ref<{ item:AttachmentItem; prompt:string; loading:boolean; error:string } | null>(null)
 let controller: AbortController | null = null
 let disposed = false
 const dirty = computed(() => preview.value?.content !== original.value)
@@ -33,6 +36,18 @@ onBeforeUnmount(() => { disposed = true; controller?.abort() })
 async function openFile(file: DockerTask['artifacts'][number]) {
   controller?.abort(); controller = new AbortController(); const request = controller
   error.value = ''
+  const generated = /^(artifacts\/images\/img_[A-Za-z0-9]{16})\.(png|jpe?g|gif|webp)$/i.exec(file.path)
+  if (generated) {
+    imagePreview.value={item:{id:file.path,name:file.path.split('/').at(-1)!,kind:'image',mimeType:`image/${generated[2]==='jpg'?'jpeg':generated[2]}`,sizeBytes:file.size,src:url(file.path)},prompt:'',loading:true,error:''}
+    try {
+      const response=await authFetch(url(generated[1]+'.prompt.txt')+'&preview=1',{signal:request.signal})
+      if(!response.ok) throw new Error('配套提示词文件不可用；图片仍可查看。')
+      const prompt=await response.text()
+      if(!disposed&&!request.signal.aborted&&imagePreview.value) imagePreview.value.prompt=prompt
+    } catch(cause) { if(!disposed&&!request.signal.aborted&&imagePreview.value) imagePreview.value.error=(cause as Error).message }
+    finally { if(!disposed&&!request.signal.aborted&&imagePreview.value) imagePreview.value.loading=false }
+    return
+  }
   if (/\.(png|jpe?g|gif|webp|mp[34]|m4a|wav|ogg|webm|pdf)$/i.test(file.path)) { window.open(url(file.path),'_blank','noopener'); return }
   if (file.size > 2 * 1024 * 1024 || /\.(docx?|xlsx?|pptx?|zip|7z|gz|exe|dll|db|sqlite|bin)$/i.test(file.path)) { error.value = '此文件请下载后查看；文本预览最多 2 MB。'; return }
   try {
@@ -48,6 +63,7 @@ async function openFile(file: DockerTask['artifacts'][number]) {
   } catch (cause) { if (!request.signal.aborted && !disposed) error.value = (cause as Error).message }
 }
 function closePreview() { if (busy.value) return; if (dirty.value) discard.value = true; else preview.value = null }
+function closeImage() { controller?.abort(); imagePreview.value=null }
 async function save() {
   if (!preview.value || busy.value) return
   const submitted = { ...preview.value }
@@ -58,7 +74,7 @@ async function save() {
 }
 </script>
 <template>
-  <SummaryPopover v-if="!preview" :open="true" :trigger="trigger" label="任务产物" close-label="关闭文件" @update:open="!$event && !preview && emit('close')">
+  <SummaryPopover v-if="!preview && !imagePreview" :open="true" :trigger="trigger" label="任务产物" close-label="关闭文件" @update:open="!$event && !preview && !imagePreview && emit('close')">
     <section class="tuck-files-panel" aria-label="任务产物">
       <p v-if="shared" class="shared-note">父子会话共享工作目录，以下文件不代表由当前子代理独自产出。</p>
       <div class="artifact-toolbar"><details><summary>工作目录{{ task.workspaceMode==='none' ? ' · 原生默认' : '' }}</summary><p class="file-directory">{{ task.workspace || '外部运行时默认目录未知' }}</p></details><small class="artifact-count">{{ files.length }} 项</small><button :disabled="loading" @click="refresh"><TuckLoading v-if="loading" label="读取中…" /><template v-else>刷新</template></button></div>
@@ -75,12 +91,13 @@ async function save() {
       <footer v-if="matches.length > 40"><button :disabled="page === 0" @click="page--">上一页</button><span>{{ page + 1 }} / {{ Math.ceil(matches.length / 40) }}</span><button :disabled="(page+1)*40 >= matches.length" @click="page++">下一页</button></footer>
     </section>
   </SummaryPopover>
-  <WorkbenchDialog v-else label="查看任务产物" wide preview :busy="busy" :dismiss-on-backdrop="!dirty" @close="closePreview">
+  <WorkbenchDialog v-else-if="preview" label="查看任务产物" wide preview :busy="busy" :dismiss-on-backdrop="!dirty" @close="closePreview">
     <form class="tuck-editor" @submit.prevent="save"><header class="preview-heading"><h2 :title="preview.path">{{ preview.path }}</h2><button type="button" aria-label="关闭文件预览" :disabled="busy" @click="closePreview">×</button></header><textarea ref="previewText" v-model="preview.content" aria-label="文件内容" :readonly="!editing" :tabindex="editing ? 0 : -1" spellcheck="false" /><p v-if="error" role="alert">{{ error }}</p>
       <div v-if="discard" class="discard-prompt" role="alert">有未保存的修改。<button type="button" @click="discard = false">继续编辑</button><button type="button" @click="preview = null">放弃修改</button></div>
       <div class="preview-footer"><button v-if="!editing" type="button" @click="editing = true">编辑</button><button v-else type="submit" :disabled="busy || !dirty">保存文件</button></div>
     </form>
   </WorkbenchDialog>
+  <ImagePreview v-if="imagePreview" :item="imagePreview.item" :src="imagePreview.item.src!" original :prompt="imagePreview.prompt" :prompt-loading="imagePreview.loading" :prompt-error="imagePreview.error" @close="closeImage" />
 </template>
 <style scoped>
 .tuck-files-panel { min-width:0; display:grid; gap:8px; }

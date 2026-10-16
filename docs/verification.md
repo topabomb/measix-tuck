@@ -42,6 +42,26 @@ node scripts/project.mjs e2e product-navigation.spec.ts mobile-chat.spec.ts comp
 
 表中的 Go 文件位于 [internal/tuck/](../internal/tuck/)。夹具 JavaScript 只合成外部服务并驱动 Go，不是另一个产品实现。存储变化还须核对 [迁移约定](persistence-migrations.md#后续修改约定) 的支持范围与失败边界。
 
+## 附件识别链路
+
+附件识别另由 `attachment_inspection_test.go` 验证 Chat/Responses 交叉协议、多图顺序及实际字节、纯文本主模型接收文字、后续上下文和分支、只读子代理独立选择及上游错误回到 Agent。覆盖任务内任意路径、越界链接、平台默认/准入、许可与取消。`TestNativeTextOnlyToolImageBehavior` 验证原生 text-only 请求不带工具图片，而公开历史仍保留图片。
+
+构建后运行 `node scripts/project.mjs e2e attachment-inspection.spec.ts attachments.spec.ts --workers=1`，检查全局/Agent 配置、上传与识别、停用、失败提示、历史刷新和 1365/390/320px；截图在 `.local/attachment-inspection/`。协议与验收边界见[附件识别](attachment-inspection.md)。
+
+## 生图链路
+
+`image_generation_test.go` 覆盖资源配置及保护、协议请求、无效响应、图片 URL 网络边界、平台准入、工具许可、取消、发布失败清理、原图字节和官方引擎的 Chat/Responses 图片输入。`TestImageGenerationNativeContext` 使用未修改的官方程序与合成供应商，逐字节检查工具返回后的模型请求及后续轮次中的图片表示，并核对规范化媒体和 HTTP 返回内容；不导入引擎内部包或查询其数据库。
+
+构建前端后运行 `node scripts/project.mjs e2e image-generation.spec.ts --workers=1`。通过实际设置页添加资源、操作默认下拉菜单、保存和刷新，再发起生图任务；核对工具图片、放大预览、刷新后的历史、原图及配套提示词下载、对话与产物预览中的提示词复制，以及 320px、390px 和宽屏的溢出与图片解码。还验证 `none` 模式禁用附件入口且直接 API 写入被拒绝。截图在 `.local/image-generation/`，逐张查看实际呈现。合成供应商只验证线协议与传递链，不证明真实外部供应商的图片质量、模型理解效果或计费。
+
+目录规范见 [任务文件](task-files.md)。`TestNoneWorkspaceRejectsTuckWrites` 覆盖上传、编辑、下载、生图的无目录拒绝和工具目录筛选；`TestArtifactDirectoryLinksAndDownloadScope` 覆盖固定目录链接、下载子目录越界和返回路径合同。DAV 原生调用、覆盖、取消及中途目录重定向继续由 workspace/native parity 测试验收。失败发布须证明原图与提示词均不残留，且共享目录内其他文件不变。
+
+`TestImageCancellationDuringResponseBody` 覆盖成功/失败响应体读取中的取消，保持取消分类；`TestImagePlatformRuntimePath` 覆盖平台生图运行路径的快照及调用前校验。预览须区分对话中的模型表示与任务文件中的原图，不能把缩放后的历史图片标作原图。
+
+`TestImageGenerationNativeContext` 在 Chat/Responses 下分别验证 0、1、4 张参考图；多参考图逐字节及按顺序核对 multipart image[]，四张结果检查原图、提示词、公开历史媒体和后续轮次上下文。分支通过官方会话 API 的 multi_content 恢复图片，验证分支媒体 HTTP 字节、提示词及继续对话的模型上下文；`TestImageHistoryRepeatedCallIDs` 检查重复调用 ID 不串提示词。`TestImageReferenceValidationAndNoFallback` 验证非法数量/旧参数、路径越界及目录链接、重复文件身份、伪图片/超限、取消，以及供应商拒绝后不切回纯文字、不重试、不发布文件。浏览器参考图用例验证四张生成结果、刷新后的十二个文件（四张输入、四张输出及四份提示词）、三种宽度的实际预览，以及创建分支后的图片、提示词复制与刷新保留。
+
+真实服务验收另用已授权的 OpenAI 兼容生图资源和支持 IMAGE 输入的聊天模型，检查实际生成文件及下一次请求；无对应资源时明确记录未执行，不能把合成图片称为真实 AI 生图。
+
 ## 性能与布局门槛
 
 性能测量与 race 分开运行，记录数据集、平台、实际构建和测量方法。以下为验收条件，不是所有部署的延迟承诺。
@@ -77,3 +97,17 @@ UI 变更按影响核对：
 - 官方引擎缓存与故障夹具不能证明公网下载通路；交叉编译不能证明 ARM64 实机行为；单元测试和冷备恢复不能证明真实断电或坏盘恢复。
 
 每次验证随变更记录提交/构建、命令、环境、失败和未执行项。日志、截图和 trace 保存在 `.local/`、测试临时目录或 `release/`，不加入 Git；不要把它们或当前部署地址、真实凭据写回长期指南。
+
+## 工具描述及 Runcove 扩展
+
+`tool_revision_test.go` 验证描述资源、所有参数说明、列表数量、远程快照和识别上下文；`tool_names_test.go` 使用官方引擎验证七个无前缀名称。`runcove-tools.spec.ts` 覆盖无本地目录下远程图片输入的 1365/390/320px 展示、点击预览、刷新和交付后远端修改仍可下载旧副本。平台生图测试断言 size=auto；参考图明确拒绝且不触发模型请求。以上隔离验证与真实平台部署验收分别记录。
+
+`tool_results_test.go` 验证七工具的精简模型投影、英文错误、无值字段省略、上游分类和秘密过滤、响应体超时、实际 HTTP 会话工具、部分下载及分支预览身份歧义。`TestParityNativeDeliveryContinuation` 使用官方引擎验证自动补交付不能再次触发自动补交付，真实用户输入仍有独立的一次机会；浏览器 `delivery-versions.spec.ts` 核对实际请求次数、提示条数和刷新后的展示，不通过隐藏历史消息掩盖重复执行。
+
+生图资源覆盖由 TestAgentImageSelection、TestImageResourceConfiguration 和 TestNativeTextOnlyToolImageBehavior 验证继承、失效不回退、配置保护及官方引擎实际调用；image-generation.spec.ts 通过设置页面选择 Agent 覆盖、刷新、生成图片、恢复全局默认，核对请求模型和工具描述，并检查 1365/390/320px 呈现。
+
+TestDeliveryRequiresExplicitRootCompletion 验证正常根终止、未知/空原因、缺失/陌生/其他主会话身份、已知子会话结束、工具结果、EOF、取消、步数/输出上限、模型错误，以及运行中开关变化。TestParityNativeDeliveryContinuation 同时核对官方公开终止事件的根会话 ID、reason=normal 和每轮一次事实。
+
+七工具独立审查的回归：`workspace_download_integrity_test.go` 验证正常 EOF 下截短、超长和 ETag 不一致的下载均不发布、不覆盖旧文件；`inspection_authorization_test.go` 验证 Chat/Responses 模型等待期间远程绑定变化或撤权后不返回成功。`tool-ui-regressions.spec.ts` 验证弹窗内剪贴板降级复制的实际内容、资源 ID 更名不串改引用及受保护配置；`attachment-inspection.spec.ts` 检查识别正文的 Markdown、简洁错误与原始详情，以及三种宽度下的输入和结果展示。
+
+真实七工具验收应使用独立测试对话及远程目录，记录实际模型、资源来源和逐项工具返回，不以模型自述代替执行证据。覆盖自动/指定/无目录、默认及边界数量、非法路径和类型、覆盖冲突与显式覆盖、部分下载、参考图、Agent 资源覆盖和工具关闭。上传/下载核对字节，交付后修改源文件并重新下载旧快照；原图与提示词逐份核对，查看输入缩略图、预览、复制、刷新及窄屏。取消需观察到调用已开始且尚无结果，再检查中断、无残留及后续轮次恢复；自动补交付核对正常结束事实、两轮上限和一条提示。结束后恢复临时配置。真实环境不能稳定触发的超时、撤权竞态、未知写入结果和畸形上游响应仍由隔离测试验证，分别标明证据来源。

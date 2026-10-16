@@ -112,7 +112,7 @@ func TestParityHistoricalToolRepair(t *testing.T) {
 			m, s, _, id := taskFixture(t)
 			name, args := "shell", M{}
 			if delivery {
-				name = "tuck_deliver_result"
+				name = "deliver_result"
 				args = M{"summary": "已完成历史成果", "files": []any{}}
 			}
 			calls := []any{M{"id": "call", "function": M{"name": name, "arguments": string(JSON(args))}}}
@@ -474,7 +474,7 @@ func TestParityNativeConcurrentDeliveries(t *testing.T) {
 			case <-r.Context().Done():
 				return
 			}
-			nativeDelta(w, nativeCall("tuck_deliver_result", M{"summary": prompt, "files": []any{M{"path": "report.txt", "description": nil}}}, "same-provider-id"))
+			nativeDelta(w, nativeCall("deliver_result", M{"summary": prompt, "files": []any{M{"path": "report.txt", "description": nil}}}, "same-provider-id"))
 			return
 		}
 		nativeDelta(w, M{"content": "delivered"})
@@ -708,7 +708,7 @@ func TestParityNativeWorkspaceModes(t *testing.T) {
 		case 0:
 			nativeDelta(w, nativeCall("read_file", M{"path": "native-default-proof.txt"}, ""))
 		case 1:
-			nativeDelta(w, nativeCall("tuck_deliver_result", M{"summary": "Native directory verified", "files": []any{M{"path": "native-default-proof.txt"}}}, ""))
+			nativeDelta(w, nativeCall("deliver_result", M{"summary": "Native directory verified", "files": []any{M{"path": "native-default-proof.txt"}}}, ""))
 		default:
 			nativeDelta(w, M{"content": "done"})
 		}
@@ -722,7 +722,7 @@ func TestParityNativeWorkspaceModes(t *testing.T) {
 		b := O(req["body"])
 		prompt, _ := recentNative(b)
 		if prompt == "WORKSPACE_NATIVE_PROOF" {
-			for _, name := range []string{"read_file", "write_file", "tuck_deliver_result", "list_sessions", "send_session_message"} {
+			for _, name := range []string{"read_file", "write_file", "deliver_result", "list_sessions", "send_session_message"} {
 				if !Contains(nativeNames(b), name) {
 					t.Fatal("none mode removed tools", name)
 				}
@@ -825,7 +825,7 @@ func TestParityNativeDeliveryContinuation(t *testing.T) {
 	nativeScript(f, func(w http.ResponseWriter, r *http.Request, b M) {
 		prompt, results := recentNative(b)
 		if strings.Contains(prompt, "tuck_automation") && len(results) == 0 {
-			nativeDelta(w, nativeCall("tuck_deliver_result", M{"summary": "automatic result", "files": []any{M{"path": "report.txt"}}}, ""))
+			nativeDelta(w, nativeCall("deliver_result", M{"summary": "automatic result", "files": []any{M{"path": "report.txt"}}}, ""))
 			return
 		}
 		nativeDelta(w, M{"content": "finished work"})
@@ -837,6 +837,23 @@ func TestParityNativeDeliveryContinuation(t *testing.T) {
 	done := runAppTask(t, app, id, "original user task")
 	if I(done["turnCount"]) != 2 || I(O(done["latestDelivery"])["version"]) != 1 {
 		t.Fatal(done)
+	}
+	events, err := app.Store.TaskEvents(id, []string{"native"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stops := 0
+	for _, row := range events {
+		event := O(row["event"])
+		if event["type"] == "stream_stopped" {
+			if event["session_id"] != done["nativeSessionId"] || event["reason"] != "normal" {
+				t.Fatal("unexpected official completion contract", event)
+			}
+			stops++
+		}
+	}
+	if stops != 2 {
+		t.Fatal("expected one explicit root stop per native turn", stops)
 	}
 	messages := taskMessages(t, app.Store, id)
 	found := false
@@ -898,15 +915,17 @@ func TestParityNativeDeliveryContinuation(t *testing.T) {
 	loop := newParityTask(t, app, nil)
 	lid := S(loop["id"])
 	submitTask(t, app.Manager, lid, "keep working")
-	waitTask(t, app.Manager, lid, func(v M) bool { return I(v["turnCount"]) >= 3 })
-	if e := app.Manager.Abort(context.Background(), lid); e != nil {
-		t.Fatal(e)
-	}
 	stopped := waitIdle(t, app.Manager, lid)
 	count := I(stopped["turnCount"])
 	time.Sleep(100 * time.Millisecond)
-	if I(mustTask(t, app.Manager, lid)["turnCount"]) != count || len(A(stopped["queue"])) != 0 {
+	if count != 2 || I(mustTask(t, app.Manager, lid)["turnCount"]) != count || len(A(stopped["queue"])) != 0 || stopped["latestDelivery"] != nil {
 		t.Fatal(stopped)
+	}
+	// Genuine user input can independently receive one reminder, even when
+	// its text happens to equal Tuck's reminder template.
+	done = runAppTask(t, app, lid, DeliveryReminder())
+	if I(done["turnCount"]) != 4 || len(A(done["queue"])) != 0 {
+		t.Fatal(done)
 	}
 	nativeScript(f, func(w http.ResponseWriter, r *http.Request, b M) {
 		WriteJSON(w, 400, M{"error": M{"message": "fixture model rejected", "type": "invalid_request_error"}})
@@ -933,7 +952,7 @@ func TestParityNativeDeliveryPersistencePause(t *testing.T) {
 			case <-r.Context().Done():
 				return
 			}
-			nativeDelta(w, nativeCall("tuck_deliver_result", M{"summary": "cannot commit"}, ""))
+			nativeDelta(w, nativeCall("deliver_result", M{"summary": "cannot commit"}, ""))
 			return
 		}
 		nativeDelta(w, M{"content": "done"})
@@ -967,7 +986,7 @@ func TestParityNativeDeliveryChildrenAndApproval(t *testing.T) {
 		names := nativeNames(b)
 		if !Contains(names, "transfer_task") {
 			childSeen.Store(true)
-			if Contains(names, "tuck_deliver_result") {
+			if Contains(names, "deliver_result") {
 				t.Error("child received delivery tool")
 			}
 			nativeDelta(w, M{"content": "child result"})
@@ -978,7 +997,7 @@ func TestParityNativeDeliveryChildrenAndApproval(t *testing.T) {
 			return
 		}
 		if len(results) == 1 {
-			nativeDelta(w, nativeCall("tuck_deliver_result", M{"summary": "parent result"}, ""))
+			nativeDelta(w, nativeCall("deliver_result", M{"summary": "parent result"}, ""))
 			return
 		}
 		nativeDelta(w, M{"content": "parent done"})
@@ -991,8 +1010,8 @@ func TestParityNativeDeliveryChildrenAndApproval(t *testing.T) {
 	saveApp(t, app, func(c M) { O(c["workbench"])["requireDelivery"] = true })
 	nativeScript(f, func(w http.ResponseWriter, r *http.Request, b M) {
 		_, results := recentNative(b)
-		if len(results) == 0 && Contains(nativeNames(b), "tuck_deliver_result") {
-			nativeDelta(w, nativeCall("tuck_deliver_result", M{"summary": "approval result"}, ""))
+		if len(results) == 0 && Contains(nativeNames(b), "deliver_result") {
+			nativeDelta(w, nativeCall("deliver_result", M{"summary": "approval result"}, ""))
 			return
 		}
 		nativeDelta(w, M{"content": "done"})
@@ -1034,7 +1053,7 @@ func TestParityNativeDeliveryNullableAndLimit(t *testing.T) {
 		}
 		for _, v := range A(b["tools"]) {
 			fn := O(O(v)["function"])
-			if fn["name"] == "tuck_deliver_result" {
+			if fn["name"] == "deliver_result" {
 				schema = Clone(O(fn["parameters"]))
 			}
 		}
@@ -1045,11 +1064,11 @@ func TestParityNativeDeliveryNullableAndLimit(t *testing.T) {
 			for i := 0; i < 49; i++ {
 				files = append(files, M{"path": fmt.Sprintf("file%d.txt", i)})
 			}
-			nativeDelta(w, nativeCall("tuck_deliver_result", M{"summary": "too many", "files": files}, ""))
+			nativeDelta(w, nativeCall("deliver_result", M{"summary": "too many", "files": files}, ""))
 		case 1:
-			nativeDelta(w, nativeCall("tuck_deliver_result", M{"summary": "nullable", "files": nil}, ""))
+			nativeDelta(w, nativeCall("deliver_result", M{"summary": "nullable", "files": nil}, ""))
 		case 2:
-			nativeDelta(w, nativeCall("tuck_deliver_result", M{"summary": "omitted"}, ""))
+			nativeDelta(w, nativeCall("deliver_result", M{"summary": "omitted"}, ""))
 		default:
 			nativeDelta(w, M{"content": "done"})
 		}
@@ -1161,7 +1180,7 @@ func TestParityNativeWorkspaceMultiFile(t *testing.T) {
 				if len(results) == 0 {
 					count := 0
 					for _, name := range names {
-						if strings.HasSuffix(name, "webdav_upload") || strings.HasSuffix(name, "webdav_download_files") {
+						if strings.HasSuffix(name, "upload_runcove_file") || strings.HasSuffix(name, "download_runcove_files") {
 							count++
 						}
 					}
@@ -1174,7 +1193,7 @@ func TestParityNativeWorkspaceMultiFile(t *testing.T) {
 					}
 					for _, v := range A(b["tools"]) {
 						fn := O(O(v)["function"])
-						if fn["name"] == "workspace_webdav_download_files" {
+						if fn["name"] == "download_runcove_files" {
 							properties := O(O(fn["parameters"])["properties"])
 							if I(O(properties["remote_paths"])["maxItems"]) != 20 || !strings.Contains(S(fn["description"]), "1–20") || !strings.Contains(string(JSON(O(properties["overwrite"])["type"])), "boolean") {
 								t.Error(fn)
@@ -1184,11 +1203,11 @@ func TestParityNativeWorkspaceMultiFile(t *testing.T) {
 					if Contains(names, "workspace_webdav_download") {
 						t.Error("single download tool exposed")
 					}
-					nativeDelta(w, nativeCall("workspace_webdav_download_files", M{"remote_paths": []any{"picture.png", "notes.txt"}, "local_directory": directory, "overwrite": overwrite}, ""))
+					nativeDelta(w, nativeCall("download_runcove_files", M{"remote_paths": []any{"picture.png", "notes.txt"}, "local_directory": directory, "overwrite": overwrite}, ""))
 					return true
 				}
 				result := string(JSON(results))
-				if !strings.Contains(result, "completed_count") || !strings.Contains(result, "notes.txt") || strings.Contains(result, "Batch transfer verified") || strings.Contains(result, "Replaced through native MCP") || strings.Contains(result, "image_url") || strings.Contains(result, "data:image") {
+				if !strings.Contains(result, "files") || !strings.Contains(result, "notes.txt") || strings.Contains(result, "completed_count") || strings.Contains(result, "Batch transfer verified") || strings.Contains(result, "Replaced through native MCP") || strings.Contains(result, "image_url") || strings.Contains(result, "data:image") {
 					t.Error("tool result not metadata-only", result)
 				}
 				nativeDelta(w, M{"content": "files received"})
@@ -1197,7 +1216,7 @@ func TestParityNativeWorkspaceMultiFile(t *testing.T) {
 		})
 	}
 	for i := 1; i <= 2; i++ {
-		directory := fmt.Sprintf("downloads/round-%d", i)
+		directory := fmt.Sprintf("round-%d", i)
 		setScript(directory, false, 2)
 		runAppTask(t, app, id, "Download both files")
 		raw, e := os.ReadFile(filepath.Join(S(task["workspace"]), directory, "notes.txt"))
@@ -1223,30 +1242,30 @@ func TestParityNativeWorkspaceMultiFile(t *testing.T) {
 	f.mu.Lock()
 	f.files["notes.txt"] = []byte("Replaced through native MCP")
 	f.mu.Unlock()
-	setScript("downloads/round-2", true, 2)
+	setScript("round-2", true, 2)
 	runAppTask(t, app, id, "Download both files")
-	raw, _ := os.ReadFile(filepath.Join(S(task["workspace"]), "downloads/round-2/notes.txt"))
+	raw, _ := os.ReadFile(filepath.Join(S(task["workspace"]), "round-2/notes.txt"))
 	if string(raw) != "Replaced through native MCP" || getCount() != 6 {
 		t.Fatal(string(raw), getCount())
 	}
 	f.mu.Lock()
 	O(f.projection["webdav"])["available"] = false
 	f.mu.Unlock()
-	setScript("downloads/unavailable", false, 0)
+	setScript("unavailable", false, 0)
 	runAppTask(t, app, id, "Files unavailable")
 	f.mu.Lock()
 	O(f.projection["webdav"])["available"] = true
 	f.mu.Unlock()
-	setScript("downloads/recovered", false, 2)
+	setScript("recovered", false, 2)
 	runAppTask(t, app, id, "Files available again")
 	f.mu.Lock()
 	f.projection["filesAvailable"] = false
 	f.mu.Unlock()
-	setScript("downloads/files-disabled", false, 0)
+	setScript("files-disabled", false, 0)
 	runAppTask(t, app, id, "Projection file availability off")
 	f.mu.Lock()
 	f.projection["filesAvailable"] = true
 	f.mu.Unlock()
-	setScript("downloads/files-enabled", false, 2)
+	setScript("files-enabled", false, 2)
 	runAppTask(t, app, id, "Projection file availability recovered")
 }

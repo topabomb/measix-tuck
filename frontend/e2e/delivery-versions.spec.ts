@@ -6,6 +6,36 @@ import { platformFixture } from '../../tests/fixtures/platform-fixture.mjs'
 import { fixture, until } from '../../tests/fixtures/fixture.mjs'
 import { openSettings, closeSettings } from './settings'
 
+test('an automatic delivery reminder cannot trigger another reminder',async({page})=>{
+  await page.setViewportSize({width:390,height:844})
+  const f=await platformFixture({native:true}),app=f.app!
+  let requests=0
+  try{
+    await fetch(f.url+'/api/connection/enroll',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({material:f.material})})
+    f.controls.chatReply=()=>{requests++;return {content:'本轮已结束，尚未提交交付。'}}
+    await page.goto(f.url+'/#/settings/orchestration')
+    await page.getByLabel('启用交付要求',{exact:true}).check()
+    await expect.poll(()=>app.store.orchestration().requireDelivery).toBe(true)
+    const task=await app.manager.create({title:'补交付只触发一次',modelId:f.snapshot.models[0].modelId,approvalMode:'auto'})
+    await page.goto(`${f.url}/#/chat/conversations/${task.id}`)
+    await page.getByTestId('composer-input').fill('完成后交付。');await page.getByTestId('send-message').click()
+    await expect.poll(()=>app.manager.get(task.id)?.turnCount).toBe(2)
+    await expect.poll(()=>app.manager.runs.has(task.id)).toBe(false)
+    expect(requests).toBe(2)
+    await expect(page.getByTestId('orchestration-note')).toHaveCount(1)
+    await page.reload();await expect(page.getByTestId('orchestration-note')).toHaveCount(1)
+    await page.getByTestId('orchestration-note').scrollIntoViewIfNeeded()
+    await expect(page.getByTestId('orchestration-note')).toBeInViewport()
+    await expect(page.getByTestId('orchestration-note')).toBeVisible()
+    await page.screenshot({path:resolve('../.local/delivery-reminder-once-390.png')})
+    await page.getByTestId('composer-input').fill('请继续完成交付。');await page.getByTestId('send-message').click()
+    await expect.poll(()=>app.manager.get(task.id)?.turnCount).toBe(4)
+    await expect.poll(()=>app.manager.runs.has(task.id)).toBe(false)
+    expect(requests).toBe(4)
+    await expect(page.getByTestId('orchestration-note')).toHaveCount(2)
+  }finally{await f.close()}
+})
+
 test('UI delivery requirement continues a completed native turn, validates files and ends after successful delivery',async({page},info)=>{
   const f=await platformFixture({native:true}),app=f.app!
   try{
@@ -18,7 +48,7 @@ test('UI delivery requirement continues a completed native turn, validates files
       if(reminder){
         if(!recent.some((m:any)=>m.role==='tool'))reminders++
         const results=recent.filter((m:any)=>m.role==='tool')
-        if(results.length<2){attempts++;return {tool_calls:[{index:0,id:'same-provider-id',type:'function',function:{name:'tuck_deliver_result',arguments:JSON.stringify({summary:'设置生效，已验证并交付报告。',files:[{path:results.length?'report.txt':'missing.txt'}]})}}]}}
+        if(results.length<2){attempts++;return {tool_calls:[{index:0,id:'same-provider-id',type:'function',function:{name:'deliver_result',arguments:JSON.stringify({summary:'设置生效，已验证并交付报告。',files:[{path:results.length?'report.txt':'missing.txt'}]})}}]}}
       }
       return {content:'本轮执行完成。'}
     }
@@ -47,7 +77,7 @@ test('UI delivery requirement continues a completed native turn, validates files
     await expect(deliveryCard).toContainText('设置生效，已验证并交付报告。')
     await expect(page.getByTestId('delivery-activity').filter({hasText:'交付失败'})).toContainText('does not exist')
     await page.getByTestId('delivery-activity').filter({hasText:'交付失败'}).locator('summary').click()
-    await expect(page.getByTestId('delivery-activity').filter({hasText:'交付失败'}).locator('pre')).toContainText('missing.txt')
+    await expect(page.getByTestId('delivery-activity').filter({hasText:'交付失败'}).locator('pre')).toContainText('files[0].path')
     for(const width of [1280,390]) {
       await page.setViewportSize({width,height:780})
       await expect(deliveryCard).toBeVisible()
@@ -101,7 +131,7 @@ test('ordinary conversations expose immutable downloads, direct URLs, channel na
     const enrollment=await fetch(f.url+'/api/connection/enroll',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({material:f.material})});expect(enrollment.status).toBe(200)
     f.controls.chatReply=(body:any)=>{
       const recent=body.messages.slice(body.messages.findLastIndex((m:any)=>m.role==='user')+1)
-      return recent.some((m:any)=>m.role==='tool')?{content:'已交付。'}:{tool_calls:[{index:0,id:'provider-call',type:'function',function:{name:'tuck_deliver_result',arguments:JSON.stringify({summary:`已完成 [成果](result.txt)，未列出的 [草稿](draft.txt) 不属于交付。[绝对地址成果](${url}/api/tasks/${task.id}/files?path=result.txt) [绝对地址草稿](${url}/api/tasks/${task.id}/files?path=draft.txt) [内部地址成果](/api/tasks/${task.id}/files?path=result.txt)`,files:[{path:'result.txt'},{path:'report.pdf'}]})}}]}
+      return recent.some((m:any)=>m.role==='tool')?{content:'已交付。'}:{tool_calls:[{index:0,id:'provider-call',type:'function',function:{name:'deliver_result',arguments:JSON.stringify({summary:`已完成 [成果](result.txt)，未列出的 [草稿](draft.txt) 不属于交付。[绝对地址成果](${url}/api/tasks/${task.id}/files?path=result.txt) [绝对地址草稿](${url}/api/tasks/${task.id}/files?path=draft.txt) [内部地址成果](/api/tasks/${task.id}/files?path=result.txt)`,files:[{path:'result.txt'},{path:'report.pdf'}]})}}]}
     }
     const task=await app.manager.create({title:'普通对话的交付',modelId:f.snapshot.models[0].modelId,approvalMode:'auto'})
     const stream='BT /F1 12 Tf 50 750 Td (Delivery PDF) Tj ET',objects=['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R] /Count 1 >>','<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`]
@@ -191,7 +221,7 @@ test('persisted Tuck provenance renders as orchestration while matching user tex
   const task=await f.manager.create({title:'来源验收',agent:'root'})
   f.manager.append(task,{role:'user',blocks:[{id:'user',type:'markdown',data:{markdown:'Tuck 自动要求补交付：这是用户原文'}}]})
   f.manager.append(task,{role:'user',source:{kind:'delivery_required'},blocks:[{id:'reminder',type:'markdown',data:{markdown:'Actual reminder text',provenance:{origin:'delivery-required'}}}]})
-  f.manager.append(task,{role:'tool',blocks:[{id:'result-without-link',type:'tool-result',data:{name:'tuck_deliver_result',callId:'result-without-link',status:'success',output:JSON.stringify({status:'completed',version:1,file_count:0})}}]})
+  f.manager.append(task,{role:'tool',blocks:[{id:'result-without-link',type:'tool-result',data:{name:'deliver_result',callId:'result-without-link',status:'success',output:JSON.stringify({status:'completed',version:1,file_count:0})}}]})
   await page.goto(f.url+'/#/chat/conversations/'+task.id)
   for(let i=0;i<2;i++){
    await expect(page.getByTestId('orchestration-note')).toHaveCount(1)

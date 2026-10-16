@@ -33,7 +33,7 @@ func TestOfficialDeliveryNativeMCP(t *testing.T) {
 	c["defaultModelId"] = "proof-model"
 	f.save(c)
 	f.change(func() {
-		f.controls["chatTool"] = "tuck_deliver_result"
+		f.controls["chatTool"] = "deliver_result"
 		f.controls["chatArguments"] = M{"summary": "Native result", "files": []any{M{"path": "result.txt", "description": "Delivered result"}}}
 	})
 	app := f.startApp()
@@ -67,7 +67,7 @@ func TestOfficialWorkspaceNativeMCP(t *testing.T) {
 	}
 	id := S(task["id"])
 	f.p.change(func() {
-		f.p.controls["chatTool"] = "workspace_webdav_download_files"
+		f.p.controls["chatTool"] = "download_runcove_files"
 		f.p.controls["chatArguments"] = M{"remote_paths": []any{"hello.txt"}, "local_directory": "native-download"}
 	})
 	runAppTask(t, app, id, "Download enterprise file")
@@ -76,7 +76,7 @@ func TestOfficialWorkspaceNativeMCP(t *testing.T) {
 		t.Fatal("native WebDAV download failed", e, string(raw))
 	}
 	f.p.change(func() {
-		f.p.controls["chatTool"] = "workspace_webdav_upload"
+		f.p.controls["chatTool"] = "upload_runcove_file"
 		f.p.controls["chatArguments"] = M{"file_path": local, "remote_path": "native-upload/hello.txt"}
 	})
 	runAppTask(t, app, id, "Upload enterprise result")
@@ -142,7 +142,7 @@ func TestLocalMCPTaskTurnOwnership(t *testing.T) {
 	if _, e = readRPC(r, float64(1)); e != nil || session == "" {
 		t.Fatal(e, "catalog client binding missing")
 	}
-	params := M{"name": "webdav_download_files", "arguments": M{"remote_paths": []any{"hello.txt"}, "local_directory": "ownership"}}
+	params := M{"name": "download_runcove_files", "arguments": M{"remote_paths": []any{"hello.txt"}, "local_directory": "ownership"}}
 	r, e = send(session, keys[1], "tools/call", params)
 	if e != nil {
 		t.Fatal(e)
@@ -1153,7 +1153,7 @@ func TestOfficialSavedLimitsAndReadonly(t *testing.T) {
 			request = O(r["body"])
 		}
 	}
-	if strings.Contains(string(JSON(request["tools"])), "tuck_deliver_result") {
+	if strings.Contains(string(JSON(request["tools"])), "deliver_result") {
 		t.Fatal("readonly native delivery exposed")
 	}
 }
@@ -1452,14 +1452,14 @@ func TestOfficialEnterpriseSelectionsAndCoexistence(t *testing.T) {
 			t.Fatal("optout tool visible", name)
 		}
 	}
-	if !Contains(names, "tuck_deliver_result") {
+	if !Contains(names, "deliver_result") {
 		t.Fatal("unrelated delivery removed", names, len(app.Local.peers), app.Engine.State())
 	}
 	saveApp(t, app, func(c M) {
-		O(O(c["agents"])["root"])["disabledTuckTools"] = []any{"workspace_webdav_upload", "send_session_message"}
+		O(O(c["agents"])["root"])["disabledTuckTools"] = []any{"upload_runcove_file", "send_session_message"}
 	})
 	names = visible()
-	if !Contains(names, "list_sessions") || Contains(names, "send_session_message") || !Contains(names, "workspace_webdav_download_files") || Contains(names, "workspace_webdav_upload") {
+	if !Contains(names, "list_sessions") || Contains(names, "send_session_message") || !Contains(names, "download_runcove_files") || Contains(names, "upload_runcove_file") {
 		t.Fatal(names)
 	}
 	f.change(func() { O(f.controls["state"])["runtimeBlocked"] = true })

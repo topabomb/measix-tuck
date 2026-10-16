@@ -25,6 +25,65 @@ import (
 func uploadData(name string, raw []byte) M {
 	return M{"name": name, "base64": base64.StdEncoding.EncodeToString(raw)}
 }
+
+func TestArtifactDirectoryLinksAndDownloadScope(t *testing.T) {
+	for _, kind := range []string{"uploads", "images", "downloads"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newWorkspaceFixture(t)
+			l, turn := f.turn(t)
+			outside := filepath.Join(turn.Workspace, "project")
+			if e := os.MkdirAll(outside, 0700); e != nil {
+				t.Fatal(e)
+			}
+			if e := os.MkdirAll(filepath.Join(turn.Workspace, TaskArtifactsDirectory), 0700); e != nil {
+				t.Fatal(e)
+			}
+			if e := directoryLink(outside, filepath.Join(turn.Workspace, TaskArtifactsDirectory, kind)); e != nil {
+				t.Fatal(e)
+			}
+			root, e := openArtifactRoot(turn.Task, kind)
+			if root != nil {
+				root.Close()
+			}
+			if Code(e) != "artifact_directory_changed" {
+				t.Fatal("accepted redirected artifact root", kind, e)
+			}
+			entries, e := os.ReadDir(outside)
+			if e != nil || len(entries) != 0 {
+				t.Fatal("redirected directory changed", entries, e)
+			}
+			_ = l
+		})
+	}
+	f := newWorkspaceFixture(t)
+	l, turn := f.turn(t)
+	root, e := openArtifactRoot(turn.Task, "downloads")
+	if e != nil {
+		t.Fatal(e)
+	}
+	root.Close()
+	outside := filepath.Join(turn.Workspace, "project")
+	if e = os.MkdirAll(outside, 0700); e != nil {
+		t.Fatal(e)
+	}
+	if e = directoryLink(outside, filepath.Join(turn.Workspace, "escape")); e != nil {
+		t.Fatal(e)
+	}
+	for _, directory := range []string{"../images", outside} {
+		out := l.Transfer(turn.ctx, turn, "download_runcove_files", M{"remote_paths": []any{"hello.txt"}, "local_directory": directory})
+		if out["status"] != "failed" {
+			t.Fatal("download escaped type directory", directory, out)
+		}
+	}
+	entries, e := os.ReadDir(outside)
+	if e != nil || len(entries) != 0 {
+		t.Fatal("project directory changed", entries, e)
+	}
+	out := l.Transfer(turn.ctx, turn, "download_runcove_files", M{"remote_paths": []any{"hello.txt"}, "local_directory": "."})
+	if out["status"] != "completed" || out["local_directory"] != "." || O(O(A(out["files"])[0])["file"])["path"] != "hello.txt" {
+		t.Fatal("download path contract", out)
+	}
+}
 func testPNG(t *testing.T, width, height int, random bool) []byte {
 	t.Helper()
 	img := image.NewNRGBA(image.Rect(0, 0, width, height))
@@ -221,6 +280,10 @@ func deliveryFixture(t *testing.T) (*Deliveries, *toolTurn, *Manager, *Store, *p
 	t.Cleanup(l.Close)
 	ctx, cancel := context.WithCancel(context.Background())
 	turn := &toolTurn{Key: UUID(), TaskID: id, TurnID: S(task["turnId"]), Workspace: S(task["workspace"]), Task: task, ctx: ctx, cancel: cancel}
+	turn.workspaceInfo, e = os.Stat(turn.Workspace)
+	if e != nil {
+		t.Fatal(e)
+	}
 	l.turns[turn.Key] = turn
 	return d, turn, m, s, p
 }
@@ -347,6 +410,10 @@ func TestDeliveryConcurrentIdentityAndCommitFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	other := &toolTurn{Key: UUID(), TaskID: id, TurnID: S(second["turnId"]), Workspace: S(second["workspace"]), Task: second, ctx: ctx, cancel: cancel}
+	other.workspaceInfo, e = os.Stat(other.Workspace)
+	if e != nil {
+		t.Fatal(e)
+	}
 	d.Local.turns[other.Key] = other
 	var wg sync.WaitGroup
 	results := make(chan M, 2)

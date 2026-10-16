@@ -43,9 +43,12 @@ const planLabels = { complete:'任务已完成', plan:'任务计划', completed:
 const pending = computed(() => presentQuestion(props.task.pendingInteraction))
 const iterationApproval = computed(() => pending.value?.kind === 'approval' && pending.value.purpose === 'iterations')
 const readOnly = computed(() => !!props.task.parentTaskId || props.task.archived)
+const writableWorkspace = computed(() => props.task.workspaceMode !== 'none' && !!props.task.workspace)
 const working = computed(() => props.task.status === 'working')
 const selectedModel = computed(() => props.connection?.models.find(model => model.modelId === props.task.modelId && (!props.task.modelSource || !model.source || model.source===props.task.modelSource)))
-const imageIssue = computed(() => attachments.value.some(item => item.uploaded?.kind === 'image' || item.previewUrl) && !selectedModel.value?.inputModalities.includes('IMAGE') ? '当前模型不支持图片或能力未确认，请切换模型或移除图片' : '')
+const needsInspection = computed(() => attachments.value.some(item => item.uploaded?.kind === 'image' || item.previewUrl) && !selectedModel.value?.inputModalities.includes('IMAGE'))
+const inspectionAvailable = computed(() => !!props.connection?.attachmentInspection?.[props.task.agent]?.available)
+const imageIssue = computed(() => needsInspection.value && !inspectionAvailable.value ? '当前模型不支持图片；请配置识图模型并启用附件识别工具，或切换聊天模型' : '')
 const canSend = computed(() => !readOnly.value && props.connected && !busy.value && !imageIssue.value && attachments.value.every(item => item.status === 'ready') && (!!draft.value.trim() || !!attachments.value.length))
 const keyboardHint = computed(() => mobile.value?'回车换行，使用按钮发送':working.value ? 'Enter 排队 · Ctrl / ⌘ + Enter 立即发送' : pending.value ? 'Enter 排队 · Shift + Enter 换行' : 'Enter 发送 · Shift + Enter 换行')
 
@@ -65,6 +68,7 @@ onMounted(resize)
 watch(imageIssue, () => emit('layout'), { flush: 'sync' })
 function addFiles(files: readonly File[], items?: DataTransferItemList) {
   if (readOnly.value || busy.value || !props.connected) return
+  if (!writableWorkspace.value) { notice.value='无目录模式不能保存附件，请在自动或指定目录的对话中添加文件。'; return }
   emit('layout'); notice.value = ''
   if (items && Array.from(items).some(item => item.kind === 'file' && item.webkitGetAsEntry?.()?.isDirectory)) { notice.value = '暂不支持文件夹，请选择文件'; return }
   notice.value = props.workspace.attachmentDrafts.add(props.task.id, files) || ''
@@ -81,7 +85,7 @@ function pasteFiles(event: ClipboardEvent) {
 const isFileDrag = (event: DragEvent) => event.dataTransfer?.types.includes('Files')
 const isWorkspaceDrag = (event: DragEvent) => event.target instanceof Element && !!event.target.closest('#enterprise-workspace-panel')
 function resetDrag() { dragDepth = 0; dragActive.value = false }
-function dragEnter(event: DragEvent) { if (!isFileDrag(event)) return; if (isWorkspaceDrag(event)) { resetDrag(); return }; event.preventDefault(); dragDepth++; dragActive.value = !readOnly.value && !busy.value && props.connected && !document.querySelector('dialog[open]') }
+function dragEnter(event: DragEvent) { if (!isFileDrag(event)) return; if (isWorkspaceDrag(event)) { resetDrag(); return }; event.preventDefault(); dragDepth++; dragActive.value = writableWorkspace.value && !readOnly.value && !busy.value && props.connected && !document.querySelector('dialog[open]') }
 function dragOver(event: DragEvent) { if (!isFileDrag(event)) return; if (isWorkspaceDrag(event)) { resetDrag(); return }; event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = dragActive.value ? 'copy' : 'none' }
 function dragLeave(event: DragEvent) { if (!isFileDrag(event) || isWorkspaceDrag(event)) return; dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth || !event.relatedTarget) resetDrag() }
 function dropFiles(event: DragEvent) { if (!isFileDrag(event)) return; if (isWorkspaceDrag(event)) { resetDrag(); return }; event.preventDefault(); const accept = dragActive.value; resetDrag(); if (accept && event.dataTransfer) addFiles(Array.from(event.dataTransfer.files), event.dataTransfer.items) }
@@ -186,11 +190,12 @@ async function resolve(approved: boolean) {
     <div v-if="!readOnly" class="workbench-input-box">
       <ComposerAttachments :items="attachments" :disabled="busy" @remove="workspace.attachmentDrafts.remove(task.id, $event)" @retry="workspace.attachmentDrafts.retry(task.id, $event)" />
       <p v-if="imageIssue" class="attachment-issue" role="status">{{ imageIssue }}</p>
+      <p v-else-if="needsInspection" class="hint" role="status">图片路径将交给助手，由附件识别工具按需读取；聊天模型不会直接收到图片。</p>
       <div v-if="dragActive" class="attachment-drop" role="status">松开添加附件</div>
       <input ref="fileInput" type="file" multiple hidden data-testid="attachment-input" @change="pickFiles" />
       <textarea ref="input" v-model="draft" aria-label="消息" :aria-description="keyboardHint" rows="1" data-testid="composer-input" :placeholder="pending ? '补充消息，先加入队列…' : working ? '补充要求，或排队下一条任务…' : '向 Tuck 发送消息…'" @paste="pasteFiles" @input="updateDraft" @keydown="keydown" />
       <div class="workbench-toolbar">
-        <button type="button" class="attach-button" aria-label="添加文件" title="添加文件，也可粘贴或拖放" :disabled="busy || !connected" @click="fileInput?.click()"><span class="control-face"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" /></svg></span></button>
+        <button type="button" class="attach-button" aria-label="添加文件" :title="writableWorkspace ? '添加文件，也可粘贴或拖放' : '添加附件需要自动或指定的工作目录'" :disabled="busy || !connected || !writableWorkspace" @click="fileInput?.click()"><span class="control-face"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" /></svg></span></button>
         <Teleport :to="settingsTarget||'body'" :disabled="!mobile||!settingsTarget">
         <div class="composer-settings" :class="{'in-panel':mobile}">
           <select v-if="connection?.models.length" aria-label="模型" data-testid="task-model" :value="selectedModel?.modelId || ''" :disabled="busy || task.status !== 'idle' || !connected" @change="selectModel"><option value="" disabled>选择模型</option><option v-for="model in connection.models" :key="model.modelId" :value="model.modelId" :disabled="!model.selectable">{{ model.displayName }}{{ connection.mode==='platform' ? (model.source==='local'?' · 本地':' · 平台') : '' }}</option></select>

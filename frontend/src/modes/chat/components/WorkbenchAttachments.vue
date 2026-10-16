@@ -1,28 +1,17 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
-import type { AttachmentItem } from '../../../engine/model/conversation'
+import { computed, ref } from 'vue'
+import type { AttachmentItem, ArtifactProvenance } from '../../../engine/model/conversation'
 import type { RenderUnit } from '../../../engine/presentation/render-unit'
 import { useFoldState } from '../../../engine/vue/renderers/fold-state'
-import WorkbenchDialog from '../../../shared/ui/WorkbenchDialog.vue'
+import ImagePreview from '../../../shared/ui/ImagePreview.vue'
 
 const props = defineProps<{ unit: RenderUnit }>()
 const items = computed(() => (props.unit.payload.items ?? []) as readonly AttachmentItem[])
 const expanded = useFoldState(props.unit.id, false)
 const visibleItems = computed(() => expanded.value ? items.value : items.value.slice(0, 4))
 const preview = ref<AttachmentItem | null>(null)
-const decodedSize = ref<{ width: number; height: number } | null>(null)
-const previewSize = computed(() => decodedSize.value ?? (preview.value?.width && preview.value?.height ? { width: preview.value.width, height: preview.value.height } : null))
-const closePreview = ref<HTMLButtonElement | null>(null)
-let previousFocus: HTMLElement | null = null
-watch(preview, async value => {
-  decodedSize.value = null
-  if (value) { previousFocus = document.activeElement as HTMLElement; await nextTick(); closePreview.value?.focus() }
-  else previousFocus?.focus()
-})
-function previewLoaded(event: Event) {
-  const image = event.target as HTMLImageElement
-  if (image.naturalWidth && image.naturalHeight) decodedSize.value = { width: image.naturalWidth, height: image.naturalHeight }
-}
+const failedImages = ref(new Set<string>())
+const prompt = computed(() => (props.unit.payload.provenance as ArtifactProvenance | undefined)?.prompt)
 function safeUrl(item: AttachmentItem) {
   const value = item.src || item.resource?.uri || ''
   return /^(https?:\/\/|\/(?!\/)|data:image\/)/i.test(value) ? value : ''
@@ -37,22 +26,17 @@ function size(item: AttachmentItem) {
     <header><span>{{ unit.payload.title || '附件' }}</span><small>{{ items.length }} 项</small></header>
     <div class="attachment-items" :class="{ expanded }">
       <template v-for="item in visibleItems" :key="item.id">
-        <button v-if="item.kind === 'image' && safeUrl(item)" class="image-preview" data-testid="attachment-image" :aria-label="`预览 ${item.name}`" @click="preview = item">
-          <img :src="safeUrl(item)" :alt="item.name" :width="item.width || 240" :height="item.height || 160" loading="lazy" />
+        <button v-if="item.kind === 'image' && safeUrl(item) && !failedImages.has(item.id)" class="image-preview" data-testid="attachment-image" :aria-label="`预览 ${item.name}`" @click="preview = item">
+          <img :src="safeUrl(item)" :alt="item.name" :width="item.width || 240" :height="item.height || 160" loading="lazy" @error="failedImages.add(item.id)" />
           <span :title="item.name">{{ item.name }}</span>
         </button>
+        <div v-else-if="failedImages.has(item.id)" class="file-item" data-testid="attachment-unavailable"><span>▤</span><span><strong :title="item.name">{{ item.name }}</strong><small>图片不可用或已移除</small></span></div>
         <a v-else-if="safeUrl(item)" class="file-item" data-testid="attachment-file" :href="safeUrl(item)" target="_blank" rel="noopener noreferrer"><span>▤</span><span><strong :title="item.name">{{ item.name }}</strong><small>{{ size(item) }}</small></span><span>↗</span></a>
         <div v-else class="file-item" data-testid="attachment-file"><span>▤</span><span><strong :title="item.name">{{ item.name }}</strong><small>{{ size(item) }}</small></span></div>
       </template>
     </div>
     <button v-if="items.length > 4" class="expand-attachments" :aria-expanded="expanded" @click="expanded = !expanded">{{ expanded ? '收起附件' : `展开其余 ${items.length - 4} 项` }}</button>
-    <WorkbenchDialog v-if="preview" :label="`图片预览 ${preview.name}`" wide preview @close="preview = null">
-        <section class="media-preview-dialog">
-          <header class="preview-heading"><strong :title="preview.name">{{ preview.name }}</strong><button ref="closePreview" aria-label="关闭图片预览" @click="preview = null">×</button></header>
-          <img class="preview-body" :key="preview.id" :src="safeUrl(preview)" :alt="preview.name" @load="previewLoaded" />
-          <footer class="preview-footer"><span><template v-if="previewSize">{{ previewSize.width }} × {{ previewSize.height }} · </template>{{ size(preview) }}</span><a :href="safeUrl(preview)" target="_blank" rel="noopener noreferrer">打开原图 ↗</a></footer>
-        </section>
-    </WorkbenchDialog>
+    <ImagePreview v-if="preview" :item="preview" :src="safeUrl(preview)" :prompt="prompt" @close="preview = null" />
   </article>
 </template>
 
@@ -71,6 +55,5 @@ function size(item: AttachmentItem) {
 .file-item small { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 a.file-item:hover, .image-preview:hover { border-color:var(--tuck-accent); }
 .expand-attachments { border:0; border-top:1px solid var(--tuck-border); border-radius:0; width:100%; padding:5px; background:var(--tuck-surface); color:var(--tuck-muted); cursor:pointer; font-size:var(--tuck-font-caption); }
-.media-preview-dialog { min-width:0; color:var(--tuck-text); background:var(--tuck-surface); }
 @media(max-width:480px) { .attachment-items { grid-template-columns:repeat(2,minmax(0,1fr)); } .image-preview img { height:100px; } }
 </style>

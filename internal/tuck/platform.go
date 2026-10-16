@@ -545,6 +545,11 @@ func snapshotClosure(snapshot M) error {
 			return e
 		}
 	}
+	for _, v := range A(snapshot["imageGenerators"]) {
+		if _, e := PathOnly(S(O(v)["runtimePath"])); e != nil {
+			return e
+		}
+	}
 	for _, v := range A(snapshot["mcp"]) {
 		m := O(v)
 		if _, e := PathOnly(S(m["runtimePath"])); e != nil {

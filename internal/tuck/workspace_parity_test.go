@@ -17,12 +17,12 @@ func TestParityDAVBatchReplacementAndPreflight(t *testing.T) {
 	f := newWorkspaceFixture(t)
 	l, tr := f.turn(t)
 	dest := filepath.Join(tr.Workspace, "batch")
-	os.Mkdir(dest, 0700)
+	os.MkdirAll(dest, 0700)
 	for _, name := range []string{"hello.txt", "second.txt", "untouched.txt"} {
 		os.WriteFile(filepath.Join(dest, name), []byte("old"), 0600)
 	}
 	args := M{"remote_paths": []any{"hello.txt", "second.txt"}, "local_directory": "batch"}
-	if r := l.Transfer(context.Background(), tr, "webdav_download_files", args); r["reason"] != "local_file_exists" {
+	if r := l.Transfer(context.Background(), tr, "download_runcove_files", args); r["code"] != "local_file_exists" {
 		t.Fatal(r)
 	}
 	f.mu.Lock()
@@ -33,7 +33,7 @@ func TestParityDAVBatchReplacementAndPreflight(t *testing.T) {
 	}
 	f.mu.Unlock()
 	args["overwrite"] = true
-	if r := l.Transfer(context.Background(), tr, "webdav_download_files", args); r["status"] != "completed" || I(r["completed_count"]) != 2 {
+	if r := l.Transfer(context.Background(), tr, "download_runcove_files", args); r["status"] != "completed" || I(r["completed_count"]) != 2 {
 		t.Fatal(r)
 	}
 	for name, want := range map[string]string{"hello.txt": "hello world", "second.txt": "second", "untouched.txt": "old"} {
@@ -42,8 +42,8 @@ func TestParityDAVBatchReplacementAndPreflight(t *testing.T) {
 			t.Fatal(name, string(raw))
 		}
 	}
-	r := l.Transfer(context.Background(), tr, "webdav_download_files", M{"remote_paths": []any{"folder"}, "local_directory": "directory-source"})
-	if r["status"] != "failed" || O(A(r["files"])[0])["reason"] != "webdav_not_file" {
+	r := l.Transfer(context.Background(), tr, "download_runcove_files", M{"remote_paths": []any{"folder"}, "local_directory": "directory-source"})
+	if r["status"] != "failed" || O(A(r["files"])[0])["code"] != "webdav_not_file" {
 		t.Fatal(r)
 	}
 	if e := os.Symlink(filepath.Join(dest, "untouched.txt"), filepath.Join(dest, "alias.txt")); e == nil {
@@ -51,8 +51,8 @@ func TestParityDAVBatchReplacementAndPreflight(t *testing.T) {
 		f.files["alias.txt"] = []byte("replacement")
 		f.calls = nil
 		f.mu.Unlock()
-		r = l.Transfer(context.Background(), tr, "webdav_download_files", M{"remote_paths": []any{"hello.txt", "alias.txt"}, "local_directory": "batch", "overwrite": true})
-		if r["reason"] != "local_file_exists" {
+		r = l.Transfer(context.Background(), tr, "download_runcove_files", M{"remote_paths": []any{"hello.txt", "alias.txt"}, "local_directory": "batch", "overwrite": true})
+		if r["code"] != "local_file_exists" {
 			t.Fatal(r)
 		}
 		f.mu.Lock()
@@ -68,7 +68,7 @@ func TestParityDAVBatchReplacementAndPreflight(t *testing.T) {
 func TestParityDAVBrokenStreamAndFreshCancellation(t *testing.T) {
 	f := newWorkspaceFixture(t)
 	l, tr := f.turn(t)
-	os.Mkdir(filepath.Join(tr.Workspace, "out"), 0700)
+	os.MkdirAll(filepath.Join(tr.Workspace, "out"), 0700)
 	os.WriteFile(filepath.Join(tr.Workspace, "out/second.txt"), []byte("keep old"), 0600)
 	f.setDAVHook(func(w http.ResponseWriter, r *http.Request, name string) bool {
 		if r.Method == "GET" && name == "second.txt" {
@@ -78,7 +78,7 @@ func TestParityDAVBrokenStreamAndFreshCancellation(t *testing.T) {
 		}
 		return false
 	})
-	r := l.Transfer(context.Background(), tr, "webdav_download_files", M{"remote_paths": []any{"hello.txt", "second.txt"}, "local_directory": "out", "overwrite": true})
+	r := l.Transfer(context.Background(), tr, "download_runcove_files", M{"remote_paths": []any{"hello.txt", "second.txt"}, "local_directory": "out", "overwrite": true})
 	if r["status"] != "partial" {
 		t.Fatal(r)
 	}
@@ -104,7 +104,7 @@ func TestParityDAVBrokenStreamAndFreshCancellation(t *testing.T) {
 		}
 		return false
 	})
-	r = l.Transfer(ctx, tr, "webdav_download_files", M{"remote_paths": []any{"second.txt"}, "local_directory": "fresh"})
+	r = l.Transfer(ctx, tr, "download_runcove_files", M{"remote_paths": []any{"second.txt"}, "local_directory": "fresh"})
 	if r["status"] != "failed" {
 		t.Fatal(r)
 	}
@@ -124,11 +124,11 @@ func TestParityDAVBooleansEmptyImageAndReservedPaths(t *testing.T) {
 		if i > 0 {
 			args["overwrite"] = flag
 		}
-		r := l.Transfer(context.Background(), tr, "webdav_upload", args)
+		r := l.Transfer(context.Background(), tr, "upload_runcove_file", args)
 		if r["status"] != "completed" || I(r["bytes"]) != 0 {
 			t.Fatal(r)
 		}
-		r = l.Transfer(context.Background(), tr, "webdav_upload", args)
+		r = l.Transfer(context.Background(), tr, "upload_runcove_file", args)
 		overwrite, _ := overwriteFlag(flag)
 		if (r["status"] == "completed") != overwrite {
 			t.Fatal(flag, r)
@@ -138,7 +138,7 @@ func TestParityDAVBooleansEmptyImageAndReservedPaths(t *testing.T) {
 	f.mu.Lock()
 	f.files["image.png"] = image
 	f.mu.Unlock()
-	r := l.Transfer(context.Background(), tr, "webdav_download_files", M{"remote_paths": []any{"empty-0.txt", "image.png"}, "local_directory": `native\nested`})
+	r := l.Transfer(context.Background(), tr, "download_runcove_files", M{"remote_paths": []any{"empty-0.txt", "image.png"}, "local_directory": `native\nested`})
 	if r["status"] != "completed" || len(JSON(r)) > 5000 || strings.Contains(string(JSON(r)), "base64") {
 		t.Fatal(r)
 	}
@@ -154,7 +154,7 @@ func TestParityDAVBooleansEmptyImageAndReservedPaths(t *testing.T) {
 		for _, in := range []struct {
 			tool string
 			args M
-		}{{"webdav_upload", M{"file_path": "empty.txt", "remote_path": name}}, {"webdav_download_files", M{"remote_paths": []any{name}, "local_directory": "reserved-output"}}} {
+		}{{"upload_runcove_file", M{"file_path": "empty.txt", "remote_path": name}}, {"download_runcove_files", M{"remote_paths": []any{name}, "local_directory": "reserved-output"}}} {
 			r = l.Transfer(context.Background(), tr, in.tool, in.args)
 			if r["code"] != "webdav_path_not_permitted" || !strings.Contains(S(r["message"]), "ordinary project") {
 				t.Fatal(r)
@@ -171,7 +171,7 @@ func TestParityDAVBooleansEmptyImageAndReservedPaths(t *testing.T) {
 	f.mu.Lock()
 	f.projection["filesAvailable"] = false
 	f.mu.Unlock()
-	if result := l.Transfer(context.Background(), tr, "webdav_download_files", M{"remote_paths": []any{"image.png"}, "local_directory": "revoked"}); result["reason"] != "tool_not_permitted" {
+	if result := l.Transfer(context.Background(), tr, "download_runcove_files", M{"remote_paths": []any{"image.png"}, "local_directory": "revoked"}); result["code"] != "tool_not_permitted" {
 		t.Fatal(result)
 	}
 	if _, e := os.Stat(filepath.Join(tr.Workspace, "reserved-output")); !os.IsNotExist(e) {
@@ -206,16 +206,16 @@ func TestParityDAVStrongETagAndFailureKinds(t *testing.T) {
 		return false
 	})
 	args := M{"file_path": "source.txt", "remote_path": "hello.txt", "overwrite": true}
-	if r := l.Transfer(context.Background(), tr, "webdav_upload", args); r["status"] != "completed" {
+	if r := l.Transfer(context.Background(), tr, "upload_runcove_file", args); r["status"] != "completed" {
 		t.Fatal("HEAD fallback", r)
 	}
 	weakHead.Store(true)
-	if r := l.Transfer(context.Background(), tr, "webdav_upload", args); r["code"] != "webdav_version_unavailable" {
+	if r := l.Transfer(context.Background(), tr, "upload_runcove_file", args); r["code"] != "webdav_version_unavailable" {
 		t.Fatal(r)
 	}
 	weakHead.Store(false)
 	concurrent.Store(true)
-	if r := l.Transfer(context.Background(), tr, "webdav_upload", args); r["code"] != "webdav_file_exists" {
+	if r := l.Transfer(context.Background(), tr, "upload_runcove_file", args); r["code"] != "webdav_file_exists" {
 		t.Fatal(r)
 	}
 	f.mu.Lock()
@@ -227,7 +227,7 @@ func TestParityDAVStrongETagAndFailureKinds(t *testing.T) {
 	O(f.projection["webdav"])["accessMode"] = "READ_ONLY"
 	f.mu.Unlock()
 	tr.Target["mode"] = "READ_ONLY"
-	if r := l.Transfer(context.Background(), tr, "webdav_upload", args); r["code"] != "webdav_read_only" {
+	if r := l.Transfer(context.Background(), tr, "upload_runcove_file", args); r["code"] != "webdav_read_only" {
 		t.Fatal(r)
 	}
 	f.mu.Lock()
@@ -235,7 +235,7 @@ func TestParityDAVStrongETagAndFailureKinds(t *testing.T) {
 	f.mu.Unlock()
 	tr.Target["mode"] = "FULL"
 	for _, in := range []M{{"file_path": "source.txt", "remote_path": "folder", "overwrite": true}, {"file_path": "missing", "remote_path": "new.txt"}, {"file_path": "../escape", "remote_path": "new.txt"}} {
-		if r := l.Transfer(context.Background(), tr, "webdav_upload", in); r["status"] != "failed" {
+		if r := l.Transfer(context.Background(), tr, "upload_runcove_file", in); r["status"] != "failed" {
 			t.Fatal(r)
 		}
 	}
@@ -246,7 +246,7 @@ func TestParityDAVStrongETagAndFailureKinds(t *testing.T) {
 		}
 		return false
 	})
-	if r := l.Transfer(context.Background(), tr, "webdav_upload", args); r["reason"] != "tool_not_permitted" {
+	if r := l.Transfer(context.Background(), tr, "upload_runcove_file", args); r["code"] != "tool_not_permitted" {
 		t.Fatal(r)
 	}
 	f.setDAVHook(nil)
@@ -256,7 +256,7 @@ func TestParityDAVStrongETagAndFailureKinds(t *testing.T) {
 	outside := t.TempDir()
 	os.WriteFile(filepath.Join(outside, "secret"), []byte("secret"), 0600)
 	if e := os.Symlink(outside, filepath.Join(tr.Workspace, "escape")); e == nil {
-		if r := l.Transfer(context.Background(), tr, "webdav_upload", M{"file_path": "escape/secret", "remote_path": "new.txt"}); r["status"] != "failed" {
+		if r := l.Transfer(context.Background(), tr, "upload_runcove_file", M{"file_path": "escape/secret", "remote_path": "new.txt"}); r["status"] != "failed" {
 			t.Fatal("source escape accepted", r)
 		}
 		f.mu.Lock()

@@ -11,7 +11,7 @@ onMounted(load)
 <template>
     <section class="orchestration-settings">
       <label class="require-delivery"><input type="checkbox" :checked="enabled" :disabled="busy||!loaded" aria-describedby="delivery-policy-description" @change="change" /><span>启用交付要求</span></label>
-      <div id="delivery-policy-description"><p>对已启用交付工具的主助手，正常完成但未交付时，自动补充要求并继续执行。你可以随时停止。</p><p>从下一轮生效；关闭后不再自动补交付。子代理不适用。</p></div>
+      <div id="delivery-policy-description"><p>对已启用交付工具的主助手，每次普通输入正常完成但未交付时，自动补充一次交付要求。补充后仍未交付就结束，不会反复续轮。你可以随时停止。</p><p>在主助手一轮正常结束后检查此开关；关闭后不再自动补交付。子代理不适用。</p></div>
       <p v-if="loaded&&available" class="delivery-assistants">适用助手：{{ assistants.join('、') }}</p><p v-else-if="loaded">当前没有可使用交付工具的主助手，此设置暂不触发自动续轮。</p>
       <p v-if="error" role="alert">{{ error }}</p>
     </section>

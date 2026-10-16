@@ -2,6 +2,7 @@ package tuck
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"golang.org/x/image/draw"
@@ -25,6 +27,70 @@ import (
 )
 
 const MaxUploadBytes = 16 << 20
+
+const TaskArtifactsDirectory = "artifacts"
+
+// Each fixed artifact directory is opened beneath its verified parent. Reject
+// links and substitutions so a type directory cannot redirect writes elsewhere.
+func openArtifactRoot(task M, kind string) (*os.Root, error) {
+	if e := writableTaskWorkspace(task); e != nil {
+		return nil, e
+	}
+	root, e := taskRoot(task)
+	if e != nil {
+		return nil, e
+	}
+	for _, name := range []string{TaskArtifactsDirectory, kind} {
+		if e = root.Mkdir(name, 0700); e != nil && !os.IsExist(e) {
+			root.Close()
+			return nil, e
+		}
+		info, err := root.Lstat(name)
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			root.Close()
+			return nil, Problem(409, "artifact_directory_changed", "产物目录必须是任务内的普通目录，不能使用链接")
+		}
+		next, err := root.OpenRoot(name)
+		root.Close()
+		if err != nil {
+			return nil, err
+		}
+		opened, err := next.Stat(".")
+		if err != nil || !os.SameFile(info, opened) {
+			next.Close()
+			return nil, Problem(409, "artifact_directory_changed", "产物目录已改变")
+		}
+		root = next
+	}
+	return root, nil
+}
+
+func checkArtifactRoot(task M, kind string, root *os.Root) error {
+	workspace, e := filepath.EvalSymlinks(S(task["workspace"]))
+	if e != nil {
+		return e
+	}
+	expected := filepath.Join(workspace, TaskArtifactsDirectory, kind)
+	actual, e := filepath.EvalSymlinks(expected)
+	if e != nil || actual != expected {
+		return Problem(409, "artifact_directory_changed", "产物目录已改变")
+	}
+	current, e := os.Stat(expected)
+	opened, readErr := root.Stat(".")
+	if e != nil || readErr != nil || !os.SameFile(current, opened) {
+		return Problem(409, "artifact_directory_changed", "产物目录已改变")
+	}
+	return nil
+}
+
+// none may retain the engine's default directory for native reads, but Tuck
+// must never treat it as an explicitly selected writable task workspace.
+func writableTaskWorkspace(task M) error {
+	if S(task["workspaceMode"]) == "none" || S(task["workspace"]) == "" {
+		return Problem(409, "workspace_required", "此操作需要自动或指定的任务工作目录；无目录模式不允许 Tuck 写入引擎默认目录")
+	}
+	return nil
+}
 
 func MIMEType(path string) string {
 	ext := strings.ToLower(filepath.Ext(path))
@@ -105,6 +171,166 @@ type Files struct {
 	Models  *Models
 }
 
+type InspectedAttachment struct {
+	Path, MIME string
+	Bytes      []byte
+	RawBytes   int64
+}
+
+// Inspection is read-only and accepts any file location inside the task root,
+// not just Tuck's managed artifact folders. No external URL or cache is used.
+func (f *Files) ReadInspectionAttachments(ctx context.Context, task M, paths []any) ([]InspectedAttachment, error) {
+	if len(paths) < 1 || len(paths) > 4 {
+		return nil, Problem(422, "invalid_arguments", "附件识别每次需要 1–4 个文件")
+	}
+	root, e := taskRoot(task)
+	if e != nil {
+		return nil, e
+	}
+	defer root.Close()
+	result := []InspectedAttachment{}
+	identities := []os.FileInfo{}
+	rawTotal, preparedTotal := 0, 0
+	for _, value := range paths {
+		if e := ctxError(ctx); e != nil {
+			return nil, e
+		}
+		path := S(value)
+		if path == "" || strings.Contains(path, "://") || strings.HasPrefix(path, "data:") {
+			return nil, Problem(422, "invalid_arguments", "请提供工作目录内的文件路径，不支持 URL 或 base64")
+		}
+		if filepath.IsAbs(path) {
+			path, e = filepath.Rel(S(task["workspace"]), path)
+			if e != nil {
+				return nil, Problem(403, "path_outside_workspace", "附件不在任务工作目录内")
+			}
+		}
+		path, e = relativeFile(path, false)
+		if e != nil {
+			return nil, e
+		}
+		info, err := root.Stat(path)
+		if err != nil || !info.Mode().IsRegular() {
+			return nil, Problem(422, "attachment_unavailable", "附件必须是工作目录内可读的普通文件；不能通过链接逃出目录")
+		}
+		if info.Size() > MaxUploadBytes || int64(rawTotal)+info.Size() > 48<<20 {
+			return nil, Problem(413, "attachment_limit", "识别附件每件最多 16 MiB，合计最多 48 MiB")
+		}
+		handle, err := root.Open(path)
+		if err != nil {
+			return nil, Problem(422, "attachment_unavailable", "无法读取附件")
+		}
+		opened, err := handle.Stat()
+		if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
+			handle.Close()
+			return nil, Problem(409, "attachment_changed", "附件在读取前已改变")
+		}
+		for _, previous := range identities {
+			if os.SameFile(previous, opened) {
+				handle.Close()
+				return nil, Problem(422, "invalid_arguments", "不能重复识别同一文件")
+			}
+		}
+		raw, err := io.ReadAll(io.LimitReader(handle, MaxUploadBytes+1))
+		handle.Close()
+		if e := ctxError(ctx); e != nil {
+			return nil, e
+		}
+		rawTotal += len(raw)
+		if err != nil || len(raw) > MaxUploadBytes || rawTotal > 48<<20 {
+			return nil, Problem(413, "attachment_limit", "附件读取失败或超过大小限制")
+		}
+		if ImageType(raw) == "" {
+			return nil, Problem(422, "attachment_type_unsupported", "附件识别目前只支持 PNG、JPEG、GIF、WebP 图片；其他文件请使用对应读取工具")
+		}
+		prepared, mime, err := PrepareModelImage(raw)
+		if err != nil {
+			return nil, Problem(422, "attachment_invalid_image", "附件图片损坏或超过像素限制，请使用可正常解码且不超过 4000 万像素的图片")
+		}
+		preparedTotal += len(prepared)
+		if preparedTotal > MaxUploadBytes {
+			return nil, Problem(413, "attachment_limit", "模型图片表示合计超过 16 MiB，请减少或缩小图片")
+		}
+		identities = append(identities, opened)
+		result = append(result, InspectedAttachment{Path: filepath.ToSlash(path), MIME: mime, Bytes: prepared, RawBytes: int64(len(raw))})
+	}
+	current, err := os.Stat(S(task["workspace"]))
+	opened, openErr := root.Stat(".")
+	if err != nil || openErr != nil || !os.SameFile(current, opened) {
+		return nil, Problem(409, "workspace_changed", "任务目录已改变")
+	}
+	return result, nil
+}
+
+// Read references through the task root, preserving original pixels and order.
+// No network input or temporary reference files are created.
+func (f *Files) ReadImageReferences(ctx context.Context, task M, paths []any) ([]ImageReference, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	if len(paths) > 4 {
+		return nil, Problem(422, "invalid_arguments", "参考图最多 4 张")
+	}
+	root, e := taskRoot(task)
+	if e != nil {
+		return nil, e
+	}
+	defer root.Close()
+	var result []ImageReference
+	var identities []os.FileInfo
+	total := 0
+	for _, value := range paths {
+		if e = ctxError(ctx); e != nil {
+			return nil, e
+		}
+		path, err := relativeFile(S(value), true)
+		if err != nil {
+			return nil, err
+		}
+		info, err := root.Stat(path)
+		if err != nil || !info.Mode().IsRegular() {
+			return nil, Problem(422, "invalid_image_reference", "参考图必须是任务目录内可读的普通图片文件")
+		}
+		if info.Size() > MaxUploadBytes || int64(total)+info.Size() > 48<<20 {
+			return nil, Problem(413, "image_reference_limit", "参考图每张最多 16 MiB，合计最多 48 MiB")
+		}
+		handle, err := root.Open(path)
+		if err != nil {
+			return nil, Problem(422, "invalid_image_reference", "无法读取任务目录内的参考图")
+		}
+		opened, err := handle.Stat()
+		if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
+			handle.Close()
+			return nil, Problem(409, "image_reference_changed", "参考图文件已改变")
+		}
+		for _, previous := range identities {
+			if os.SameFile(previous, opened) {
+				handle.Close()
+				return nil, Problem(422, "invalid_image_reference", "参考图不能重复引用同一文件")
+			}
+		}
+		raw, err := io.ReadAll(io.LimitReader(handle, MaxUploadBytes+1))
+		handle.Close()
+		if e = ctxError(ctx); e != nil {
+			return nil, e
+		}
+		total += len(raw)
+		if err != nil || len(raw) > MaxUploadBytes || total > 48<<20 {
+			return nil, Problem(413, "image_reference_limit", "参考图读取失败或超过大小限制")
+		}
+		mimeType := ImageType(raw)
+		if !Contains([]string{"image/png", "image/jpeg", "image/webp"}, mimeType) {
+			return nil, Problem(422, "invalid_image_reference", "参考图只支持 PNG、JPEG 或 WebP")
+		}
+		if _, _, err = decodeImage(raw); err != nil {
+			return nil, Problem(422, "invalid_image_reference", "参考图无法解码或像素超过限制")
+		}
+		identities = append(identities, opened)
+		result = append(result, ImageReference{Bytes: raw, MIME: mimeType})
+	}
+	return result, nil
+}
+
 func (f *Files) List(task M) ([]any, error) {
 	result := []any{}
 	if S(task["workspace"]) == "" || S(task["workspaceMode"]) == "none" {
@@ -154,7 +380,7 @@ func (f *Files) editable(task M) error {
 	if S(task["parentTaskId"]) != "" || B(task["archived"]) {
 		return Problem(409, "readonly_task", "子会话是只读历史")
 	}
-	return nil
+	return writableTaskWorkspace(task)
 }
 func (f *Files) Upload(task M, data M) (M, error) {
 	if e := f.editable(task); e != nil {
@@ -191,27 +417,31 @@ func (f *Files) Upload(task M, data M) (M, error) {
 			return nil, Problem(400, "invalid_image", "图片无法读取或像素过大")
 		}
 	}
-	root, e := taskRoot(task)
+	root, e := openArtifactRoot(task, "uploads")
 	if e != nil {
 		return nil, e
 	}
 	defer root.Close()
-	if e = root.MkdirAll("uploads", 0700); e != nil {
-		return nil, e
-	}
 	id := ID()
-	path := "uploads/" + id + "-" + name
-	handle, e := root.OpenFile(filepath.FromSlash(path), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	fileName := "upload_" + id + "-" + name
+	path := TaskArtifactsDirectory + "/uploads/" + fileName
+	handle, e := root.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if e != nil {
 		return nil, e
 	}
+	published := false
+	defer func() {
+		if !published {
+			_ = root.Remove(fileName)
+		}
+	}()
 	_, e = handle.Write(raw)
 	if e == nil {
 		e = handle.Sync()
 	}
 	closeErr := handle.Close()
 	if e != nil || closeErr != nil {
-		root.Remove(filepath.FromSlash(path))
+		root.Remove(fileName)
 		if e != nil {
 			return nil, e
 		}
@@ -224,6 +454,9 @@ func (f *Files) Upload(task M, data M) (M, error) {
 		mimeType = "application/octet-stream"
 	}
 	attachment := M{"id": id, "name": name, "path": path, "mime": mimeType, "size": len(raw), "sha256": Hash(raw), "kind": kind}
+	if e = checkArtifactRoot(task, "uploads", root); e != nil {
+		return nil, e
+	}
 	files, e := f.List(task)
 	if e != nil {
 		return nil, e
@@ -239,6 +472,7 @@ func (f *Files) Upload(task M, data M) (M, error) {
 	if e != nil {
 		return nil, e
 	}
+	published = true
 	return attachment, nil
 }
 func (f *Files) attachments(task M, ids []string) ([]M, error) {
@@ -264,8 +498,8 @@ func (f *Files) attachments(task M, ids []string) ([]M, error) {
 			return nil, Problem(400, "attachment_not_found", "附件不存在或不属于当前会话")
 		}
 		if S(item["kind"]) == "image" {
-			if !Contains(f.Models.find(S(task["modelId"]))["inputModalities"], "IMAGE") {
-				return nil, Problem(409, "image_unsupported", "当前模型不支持图片或图片能力未确认，请切换模型或移除图片")
+			if !Contains(f.Models.find(S(task["modelId"]))["inputModalities"], "IMAGE") && !f.canInspect(task) {
+				return nil, Problem(409, "image_unsupported", "当前聊天模型不支持图片；请启用附件识别工具并配置识图模型，或切换到支持图片的聊天模型")
 			}
 			images += I(item["size"])
 		}
@@ -288,11 +522,15 @@ func (f *Files) Prepare(task M, prompt string, ids []string) (M, []any, error) {
 	images := []any{}
 	items := []any{}
 	content := prompt
+	directImages := Contains(f.Models.find(S(task["modelId"]))["inputModalities"], "IMAGE")
 	if len(attachments) > 0 {
 		if content != "" {
 			content += "\n"
 		}
 		content += "User attachments are already saved in this task's local working directory. The paths below are relative to that directory.\nTo read their contents, use the local tools: read_file for one file or read_multiple_files for multiple files. No remote download is needed."
+		if !directImages && f.canInspect(task) {
+			content += "\nThis conversation model does not accept images. Only file paths, not image pixels, are included here. Use inspect_attachments with attachments and request to inspect images using the configured vision model; do not claim to have seen them before receiving its result."
+		}
 	}
 	for _, item := range attachments {
 		path, e := relativeFile(S(item["path"]), false)
@@ -326,7 +564,9 @@ func (f *Files) Prepare(task M, prompt string, ids []string) (M, []any, error) {
 			if e != nil {
 				return nil, nil, e
 			}
-			images = append(images, M{"type": "document", "document": M{"name": item["name"], "mime_type": mime, "size": len(encoded), "source": M{"inline_data": base64.StdEncoding.EncodeToString(encoded)}}})
+			if directImages {
+				images = append(images, M{"type": "document", "document": M{"name": item["name"], "mime_type": mime, "size": len(encoded), "source": M{"inline_data": base64.StdEncoding.EncodeToString(encoded)}}})
+			}
 		} else {
 			handle.Close()
 		}
@@ -345,7 +585,32 @@ func (f *Files) Prepare(task M, prompt string, ids []string) (M, []any, error) {
 	}
 	return native, blocks, nil
 }
+
+func (f *Files) canInspect(task M) bool {
+	if f.Models.Local == nil || f.Models.Local.inspectionAllowed(task, S(task["agent"])) != nil {
+		return false
+	}
+	_, e := f.Models.InspectionModel(S(task["agent"]))
+	return e == nil
+}
 func (f *Files) Serve(w http.ResponseWriter, r *http.Request, task M) error {
+	if r.URL.Query().Has("inspection") {
+		var images []InspectedAttachment
+		var e error
+		if r.URL.Query().Get("source") == "runcove" {
+			images, e = f.remoteInspectionPreview(r, task)
+		} else {
+			images, e = f.ReadInspectionAttachments(r.Context(), task, []any{r.URL.Query().Get("path")})
+		}
+		if e != nil {
+			return e
+		}
+		w.Header().Set("Content-Type", images[0].MIME)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cache-Control", "no-store")
+		http.ServeContent(w, r, filepath.Base(images[0].Path), time.Time{}, bytes.NewReader(images[0].Bytes))
+		return nil
+	}
 	path, e := relativeFile(r.URL.Query().Get("path"), false)
 	if e != nil {
 		return e
@@ -444,6 +709,89 @@ func (f *Files) Save(task M, data M) error {
 	}
 	_, e = f.Manager.Update(S(task["id"]), func(t M) error { t["artifacts"] = files; return nil })
 	return e
+}
+
+// SaveGeneratedImages publishes originals and exact submitted prompts together.
+// Rollback removes only files exclusively created by this call.
+func (f *Files) SaveGeneratedImages(ctx context.Context, task M, images []GeneratedImage, prompt string) ([]M, error) {
+	if e := f.editable(task); e != nil {
+		return nil, e
+	}
+	root, e := openArtifactRoot(task, "images")
+	if e != nil {
+		return nil, e
+	}
+	defer root.Close()
+	dir := TaskArtifactsDirectory + "/images"
+	published := false
+	created := []string{}
+	defer func() {
+		if !published {
+			for _, path := range created {
+				_ = root.Remove(path)
+			}
+		}
+	}()
+	write := func(path string, content []byte) error {
+		if e := ctxError(ctx); e != nil {
+			return e
+		}
+		handle, e := root.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if e != nil {
+			return e
+		}
+		created = append(created, path)
+		_, e = handle.Write(content)
+		if e == nil {
+			e = handle.Sync()
+		}
+		closeErr := handle.Close()
+		if e != nil {
+			return e
+		}
+		return closeErr
+	}
+	files := []M{}
+	for _, image := range images {
+		ext := map[string]string{"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}[image.MIME]
+		if ext == "" {
+			return nil, Problem(422, "invalid_image", "不支持的图片格式")
+		}
+		base := "img_" + ID()
+		path, promptPath := base+ext, base+".prompt.txt"
+		if e = write(path, image.Bytes); e != nil {
+			return nil, e
+		}
+		if e = write(promptPath, []byte(prompt)); e != nil {
+			return nil, e
+		}
+		files = append(files, M{"path": dir + "/" + path, "promptPath": dir + "/" + promptPath, "mime": image.MIME, "size": len(image.Bytes), "sha256": Hash(image.Bytes)})
+	}
+	if e = checkArtifactRoot(task, "images", root); e != nil {
+		return nil, e
+	}
+	artifacts, e := f.List(task)
+	if e != nil {
+		return nil, e
+	}
+	_, e = f.Manager.Update(S(task["id"]), func(current M) error {
+		if e := ctxError(ctx); e != nil {
+			return e
+		}
+		if e := f.editable(current); e != nil {
+			return e
+		}
+		if current["turnId"] != task["turnId"] || current["workspace"] != task["workspace"] {
+			return Problem(409, "task_changed", "生成期间任务已改变")
+		}
+		current["artifacts"] = artifacts
+		return nil
+	})
+	if e != nil {
+		return nil, e
+	}
+	published = true
+	return files, nil
 }
 
 func decodeImage(raw []byte) (image.Image, bool, error) {

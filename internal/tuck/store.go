@@ -247,6 +247,42 @@ func (s *Store) Messages(id string, start, count int) ([]M, error) {
 func (s *Store) Message(id string, index int) (M, error) {
 	return decodeRow(s.DB.QueryRow("SELECT payload_json FROM messages WHERE task_id=? AND position=?", id, index))
 }
+
+// Fork presentation comes only from unambiguous parent facts. A reused call
+// with missing or conflicting identity must never acquire another call's access.
+func (s *Store) InspectionPresentations(id string) (map[string]M, error) {
+	rows, err := s.DB.Query(`SELECT json_extract(block.value,'$.data') FROM messages,
+	 json_each(messages.payload_json,'$.blocks') AS block WHERE task_id=?
+	 AND json_extract(block.value,'$.type')='tool-call'
+	 AND json_extract(block.value,'$.data.name')='inspect_attachments'`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result, invalid := map[string]M{}, map[string]bool{}
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		value, err := DecodeJSON([]byte(raw), maxStoredJSON)
+		if err != nil {
+			return nil, err
+		}
+		data := O(value)
+		key, presentation := inspectionCallKey(data), O(data["presentation"])
+		workspace := O(presentation["workspace"])
+		if S(workspace["subject"]) == "" || S(workspace["space"]) == "" || S(workspace["resourceId"]) == "" || result[key] != nil && string(JSON(O(result[key]["workspace"]))) != string(JSON(workspace)) {
+			invalid[key] = true
+		}
+		if invalid[key] {
+			delete(result, key)
+		} else {
+			result[key] = presentation
+		}
+	}
+	return result, rows.Err()
+}
 func (s *Store) LiveMessages(id string) ([]M, error) {
 	rows, err := s.DB.Query("SELECT payload_json FROM messages WHERE task_id=? AND json_extract(payload_json,'$.live')=1 ORDER BY position", id)
 	if err != nil {

@@ -1,0 +1,13 @@
+import type {WorkspacePolicy} from '../../../../shared/workspace-mode.mjs'
+export type ModelParameters = {contextWindow?:number;maxOutputTokens?:number;temperature?:number;topP?:number}
+export type Model = {modelId:string;upstreamModelKey:string;displayName:string;enabled:boolean;contextWindow:number;maxOutputTokens:number;inputModalities:string[];capabilities:string[];reasoningEfforts?:string[];temperature?:number;topP?:number}
+export type Provider = {id:string;displayName:string;enabled:boolean;protocol:string;baseUrl:string;apiKey?:string;hasApiKey?:boolean;models:Model[]}
+export type Agent = {description?:string;instruction:string;modelId?:string;max_iterations:number;max_consecutive_tool_calls?:number;readonly?:boolean;sub_agents?:string[];disabledEnterpriseMcp?:string[];disabledTuckTools?:string[];toolsets:Record<string,unknown>[]}
+export type Assistant = {workspace?:WorkspacePolicy;agent:string;displayName:string;description?:string;taskConcurrency?:number;deliveryTool?:boolean;deliveryRetentionCount?:number}
+export type Mcp = {name:string;displayName?:string;url:string;enabled:boolean;authToken?:string;hasAuthToken?:boolean;agents:string[];tools?:string[]}
+export type McpState = {status:'pending'|'ready'|'unavailable'|'disabled';validated:boolean;toolCount:number;error?:string|null}
+export type LocalMcpState = McpState & {name:string;url:string;enabled:boolean}
+export type ManagedProvider = {providerId:string;displayName:string;enabled:boolean;protocol:string}
+export type ManagedModel = ModelParameters & {modelId:string;providerId:string;displayName:string;enabled:boolean;selectable:boolean;reason?:string;settingsKey:string;platformDefinedFields:string[];settingsSource?:string;inputModalities:string[];capabilities:string[];reasoningEfforts?:string[]}
+export type ManagedMcp = McpState & {mcpServerId:string;displayName:string;enabled:boolean;settingsKey:string}
+export type Settings = {localMcpState?:Record<string,LocalMcpState>;lockedSections?:string[];modelCatalog?:Array<{modelId:string;displayName:string;source?:string}>;agentNames?:string[];savedModelIds:string[];toolsetTypes:string[];revision:string;pending:boolean;mode:string;managedProviders:ManagedProvider[];managedModels:ManagedModel[];managedMcp:ManagedMcp[];config:{providers:Provider[];defaultModelId:string;platformModelSettings?:Record<string,ModelParameters>;platformMcpTools?:Record<string,string[]>;agents:Record<string,Agent>;workbench:{defaultAgent:string;deliveryRetentionCount?:number;assistants:Assistant[]};localMcp:Mcp[];modelDefaults:{contextWindow:number;maxOutputTokens:number}}}

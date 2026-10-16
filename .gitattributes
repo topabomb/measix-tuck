@@ -1,0 +1,2 @@
+# pnpm hashes dependency patches; keep their bytes stable across Windows/Linux.
+frontend/patches/*.patch text eol=lf

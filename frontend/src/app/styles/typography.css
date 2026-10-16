@@ -1,0 +1,36 @@
+/* Shared by the workspace and portals. Colors remain exclusively theme-owned. */
+:root {
+  --tuck-font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  --tuck-font-caption: 12px;
+  --tuck-line-caption: 18px;
+  --tuck-font-ui: 13px;
+  --tuck-line-ui: 20px;
+  --tuck-font-body: 14px;
+  --tuck-line-body: 23px;
+  --tuck-font-title: 16px;
+  --tuck-line-title: 24px;
+}
+:is(.app-shell, .agent-app.live-workspace, .tuck-modal, .agent-popover, .media-preview-dialog) {
+  font-family: var(--tuck-font-family);
+  font-size: var(--tuck-font-ui);
+  line-height: var(--tuck-line-ui);
+}
+:is(.app-shell, .agent-app.live-workspace, .tuck-modal, .agent-popover, .media-preview-dialog) :is(button, input, select, textarea) {
+  font-family: inherit;
+}
+:is(.tuck-modal, .agent-popover, .media-preview-dialog) h2 {
+  font-size: var(--tuck-font-title);
+  line-height: var(--tuck-line-title);
+  font-weight: 600;
+}
+:is(.tuck-modal, .agent-popover) :is(button, input, select, label) { font-size: var(--tuck-font-ui); }
+:is(.tuck-modal, .agent-popover) small { font-size: var(--tuck-font-caption); line-height: var(--tuck-line-caption); }
+
+/* Page returns share one text-link treatment; each page owns its spacing. */
+.app-shell .back-link {
+  display:inline-flex; align-items:center; gap:4px; min-height:20px;
+  padding:0; border:0; border-radius:0; background:transparent;
+  color:var(--tuck-accent); font:var(--tuck-font-ui)/var(--tuck-line-ui) var(--tuck-font-family);
+  text-decoration:none; cursor:pointer;
+}
+.app-shell .back-link:hover { background:transparent; text-decoration:underline; }

@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "id": "ocean",
+  "name": "海洋",
+  "scheme": "dark",
+  "colors": {
+    "background": "#101b26",
+    "surface": "#152331",
+    "raised": "#1d3042",
+    "hover": "#284258",
+    "border": "#47627b",
+    "text": "#e2effb",
+    "muted": "#a7bfd4",
+    "accent": "#8dcfff",
+    "accentText": "#102436",
+    "success": "#99d8b5",
+    "warning": "#e7c987",
+    "danger": "#ffa8a2"
+  }
+}

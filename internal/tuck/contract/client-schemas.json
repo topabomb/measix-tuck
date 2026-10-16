@@ -1,0 +1,1603 @@
+{
+  "definitions": {
+    "PlatformEnrollmentMaterial": {
+      "description": "Versioned native scan/paste material; not an HTTP enrollment request. See Control Protocol section 8. The explicit deployment public HTTP/HTTPS origin is used, never the browser origin or an internal Hub/Relay address.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "kind",
+        "platformUrl",
+        "code",
+        "expiresAt"
+      ],
+      "properties": {
+        "formatVersion": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "PLATFORM_ENROLLMENT"
+          ]
+        },
+        "platformUrl": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 1024
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}[Tt](?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,9})?(?:[Zz]|\\+00:00)$"
+        }
+      }
+    },
+    "Discovery": {
+      "type": "object",
+      "required": [
+        "product",
+        "protocolVersion",
+        "deploymentId",
+        "deploymentName",
+        "clientApiBase",
+        "runtimeApiBase",
+        "supportedSnapshotSchemaVersions"
+      ],
+      "properties": {
+        "product": {
+          "type": "string",
+          "enum": [
+            "MEASIX_AGENT_PLATFORM"
+          ]
+        },
+        "protocolVersion": {
+          "type": "string",
+          "enum": [
+            "1"
+          ]
+        },
+        "deploymentId": {
+          "$ref": "#/definitions/DeploymentId"
+        },
+        "deploymentName": {
+          "type": "string"
+        },
+        "clientApiBase": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "runtimeApiBase": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "supportedSnapshotSchemaVersions": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "DeploymentId": {
+      "type": "string",
+      "pattern": "^dep_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "EnrollmentExchangeResponse": {
+      "type": "object",
+      "required": [
+        "deploymentId",
+        "userId",
+        "deviceId",
+        "sessionId",
+        "accessToken",
+        "accessTokenExpiresAt",
+        "refreshToken",
+        "refreshExpiresAt",
+        "sessionIdleExpiresAt"
+      ],
+      "properties": {
+        "deploymentId": {
+          "$ref": "#/definitions/DeploymentId"
+        },
+        "userId": {
+          "$ref": "#/definitions/UserId"
+        },
+        "deviceId": {
+          "$ref": "#/definitions/DeviceId"
+        },
+        "sessionId": {
+          "$ref": "#/definitions/SessionId"
+        },
+        "accessToken": {
+          "type": "string"
+        },
+        "accessTokenExpiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "refreshToken": {
+          "type": "string"
+        },
+        "refreshExpiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "sessionIdleExpiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "UserId": {
+      "type": "string",
+      "pattern": "^usr_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "DeviceId": {
+      "type": "string",
+      "pattern": "^dev_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "SessionId": {
+      "type": "string",
+      "pattern": "^ses_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "RefreshResponse": {
+      "type": "object",
+      "required": [
+        "accessToken",
+        "accessTokenExpiresAt",
+        "refreshToken",
+        "refreshExpiresAt",
+        "sessionIdleExpiresAt"
+      ],
+      "properties": {
+        "accessToken": {
+          "type": "string"
+        },
+        "accessTokenExpiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "refreshToken": {
+          "type": "string"
+        },
+        "refreshExpiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "sessionIdleExpiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "Bootstrap": {
+      "type": "object",
+      "required": [
+        "deployment",
+        "user",
+        "device",
+        "session",
+        "supportedSnapshotSchemaVersions",
+        "managedState"
+      ],
+      "properties": {
+        "deployment": {
+          "type": "object",
+          "required": [
+            "deploymentId",
+            "name"
+          ],
+          "properties": {
+            "deploymentId": {
+              "$ref": "#/definitions/DeploymentId"
+            },
+            "name": {
+              "type": "string"
+            }
+          }
+        },
+        "user": {
+          "type": "object",
+          "required": [
+            "userId",
+            "displayName"
+          ],
+          "properties": {
+            "userId": {
+              "$ref": "#/definitions/UserId"
+            },
+            "displayName": {
+              "type": "string"
+            }
+          }
+        },
+        "device": {
+          "type": "object",
+          "required": [
+            "deviceId",
+            "status"
+          ],
+          "properties": {
+            "deviceId": {
+              "$ref": "#/definitions/DeviceId"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "ACTIVE",
+                "REVOKED"
+              ]
+            }
+          }
+        },
+        "session": {
+          "type": "object",
+          "required": [
+            "sessionId",
+            "expiresAt",
+            "sessionIdleExpiresAt"
+          ],
+          "properties": {
+            "sessionId": {
+              "$ref": "#/definitions/SessionId"
+            },
+            "expiresAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "sessionIdleExpiresAt": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        },
+        "supportedSnapshotSchemaVersions": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "managedState": {
+          "$ref": "#/definitions/ManagedState"
+        }
+      }
+    },
+    "ManagedState": {
+      "type": "object",
+      "required": [
+        "runtimeStatus",
+        "activeManagedGeneration",
+        "managedStateRevision",
+        "syncRequired",
+        "runtimeBlocked"
+      ],
+      "properties": {
+        "runtimeStatus": {
+          "type": "string",
+          "enum": [
+            "READY",
+            "ACTIVATING",
+            "DEGRADED"
+          ]
+        },
+        "activeManagedGeneration": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "managedStateRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "syncRequired": {
+          "type": "boolean"
+        },
+        "targetManagedGeneration": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "runtimeBlocked": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ManagedSnapshot": {
+      "type": "object",
+      "required": [
+        "deploymentId",
+        "schemaVersion",
+        "managedGeneration",
+        "releaseId",
+        "snapshotHash",
+        "providers",
+        "models",
+        "tts",
+        "asr",
+        "mcp",
+        "policy",
+        "metadata",
+        "assistants",
+        "starters"
+      ],
+      "properties": {
+        "webdav": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WebDAVDefinition"
+          }
+        },
+        "deploymentId": {
+          "$ref": "#/definitions/DeploymentId"
+        },
+        "schemaVersion": {
+          "type": "integer",
+          "enum": [
+            5
+          ]
+        },
+        "managedGeneration": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "releaseId": {
+          "$ref": "#/definitions/ReleaseId"
+        },
+        "snapshotHash": {
+          "$ref": "#/definitions/Sha256Hash"
+        },
+        "providers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ProviderDefinition"
+          }
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ModelDefinition"
+          }
+        },
+        "imageGenerators": {
+          "type": "array",
+          "description": "Additive Snapshot v4 field; omission means an empty list.",
+          "items": {
+            "$ref": "#/definitions/ImageGenerationDefinition"
+          }
+        },
+        "tts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TtsDefinition"
+          }
+        },
+        "asr": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AsrDefinition"
+          }
+        },
+        "mcp": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/McpDefinition"
+          }
+        },
+        "policy": {
+          "$ref": "#/definitions/ManagedPolicy"
+        },
+        "metadata": {
+          "type": "object",
+          "required": [
+            "publishedAt"
+          ],
+          "properties": {
+            "publishedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "publishedByUserId": {
+              "$ref": "#/definitions/UserId"
+            }
+          }
+        },
+        "assistants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ManagedAssistantDefinition"
+          }
+        },
+        "starters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AssistantStarterDefinition"
+          }
+        }
+      }
+    },
+    "WebDAVDefinition": {
+      "type": "object",
+      "required": [
+        "resourceId",
+        "displayName",
+        "enabled",
+        "clientProtocol",
+        "authOwnership",
+        "rootPathTemplate",
+        "purpose"
+      ],
+      "properties": {
+        "resourceId": {
+          "$ref": "#/definitions/DAVResourceId"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "purpose": {
+          "type": "string",
+          "enum": [
+            "WORKSPACE_FILE_EXCHANGE"
+          ]
+        },
+        "clientProtocol": {
+          "type": "string",
+          "enum": [
+            "WEBDAV"
+          ]
+        },
+        "authOwnership": {
+          "type": "string",
+          "enum": [
+            "ENTERPRISE_MANAGED"
+          ]
+        },
+        "rootPathTemplate": {
+          "type": "string",
+          "pattern": "^/runtime/v1/resources/dav_[0-9a-f-]{36}/spaces/\\{agentSpaceId\\}/dav/$"
+        }
+      }
+    },
+    "DAVResourceId": {
+      "type": "string",
+      "pattern": "^dav_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "ReleaseId": {
+      "type": "string",
+      "pattern": "^rel_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "Sha256Hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "ProviderDefinition": {
+      "type": "object",
+      "required": [
+        "providerId",
+        "displayName",
+        "clientProtocol",
+        "enabled"
+      ],
+      "properties": {
+        "providerId": {
+          "$ref": "#/definitions/ProviderId"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "clientProtocol": {
+          "type": "string",
+          "enum": [
+            "OPENAI_CHAT_COMPLETIONS",
+            "OPENAI_RESPONSES",
+            "GOOGLE_GENERATE_CONTENT",
+            "ANTHROPIC_MESSAGES"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ProviderId": {
+      "type": "string",
+      "pattern": "^prv_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "ModelDefinition": {
+      "type": "object",
+      "required": [
+        "modelId",
+        "providerId",
+        "displayName",
+        "upstreamModelKey",
+        "runtimePath",
+        "inputModalities",
+        "outputModalities",
+        "capabilities",
+        "enabled"
+      ],
+      "properties": {
+        "modelId": {
+          "$ref": "#/definitions/ModelId"
+        },
+        "providerId": {
+          "$ref": "#/definitions/ProviderId"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "upstreamModelKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runtimePath": {
+          "type": "string",
+          "pattern": "^/[^?#]*$"
+        },
+        "inputModalities": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": [
+              "TEXT",
+              "IMAGE"
+            ]
+          }
+        },
+        "outputModalities": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": [
+              "TEXT"
+            ]
+          }
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "TOOL",
+              "REASONING"
+            ]
+          }
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ModelId": {
+      "type": "string",
+      "pattern": "^mdl_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "ImageGenerationDefinition": {
+      "type": "object",
+      "required": [
+        "imageId",
+        "displayName",
+        "clientProtocol",
+        "upstreamModelKey",
+        "runtimePath",
+        "maxImagesPerRequest",
+        "allowedSizes",
+        "enabled"
+      ],
+      "properties": {
+        "imageId": {
+          "$ref": "#/definitions/ImageGenerationId"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "clientProtocol": {
+          "type": "string",
+          "enum": [
+            "OPENAI_IMAGES_GENERATIONS",
+            "DASHSCOPE_MULTIMODAL_GENERATION"
+          ]
+        },
+        "upstreamModelKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runtimePath": {
+          "type": "string",
+          "pattern": "^/[^?#]*$"
+        },
+        "maxImagesPerRequest": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 6
+        },
+        "allowedSizes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^(auto|[1-9][0-9]*x[1-9][0-9]*)$"
+          }
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ImageGenerationId": {
+      "type": "string",
+      "pattern": "^img_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "TtsDefinition": {
+      "type": "object",
+      "required": [
+        "ttsId",
+        "displayName",
+        "clientProtocol",
+        "enabled"
+      ],
+      "properties": {
+        "ttsId": {
+          "$ref": "#/definitions/TtsId"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "clientProtocol": {
+          "type": "string",
+          "enum": [
+            "OPENAI_AUDIO_SPEECH",
+            "GEMINI_GENERATE_CONTENT_TTS",
+            "MIMO_CHAT_COMPLETIONS_TTS",
+            "SYSTEM_TTS"
+          ]
+        },
+        "upstreamModelKey": {
+          "type": "string",
+          "minLength": 1,
+          "x-go-type-skip-optional-pointer": true
+        },
+        "voice": {
+          "type": "string",
+          "minLength": 1,
+          "x-go-type-skip-optional-pointer": true
+        },
+        "runtimePath": {
+          "type": "string",
+          "pattern": "^/[^?#]*$",
+          "x-go-type-skip-optional-pointer": true
+        },
+        "voiceDesignPrompt": {
+          "type": "string",
+          "minLength": 1,
+          "x-go-type-skip-optional-pointer": true
+        },
+        "speechRate": {
+          "type": "number",
+          "format": "double",
+          "exclusiveMinimum": 0
+        },
+        "pitch": {
+          "type": "number",
+          "format": "double",
+          "exclusiveMinimum": 0
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "TtsId": {
+      "type": "string",
+      "pattern": "^tts_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "AsrDefinition": {
+      "type": "object",
+      "required": [
+        "asrId",
+        "displayName",
+        "clientProtocol",
+        "upstreamModelKey",
+        "runtimePath",
+        "enabled"
+      ],
+      "properties": {
+        "asrId": {
+          "$ref": "#/definitions/AsrId"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "clientProtocol": {
+          "type": "string",
+          "enum": [
+            "OPENAI_AUDIO_TRANSCRIPTIONS",
+            "DASHSCOPE_HTTP_ASR",
+            "OPENAI_REALTIME_TRANSCRIPTION",
+            "DASHSCOPE_REALTIME_ASR"
+          ]
+        },
+        "upstreamModelKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "language": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sampleRate": {
+          "type": "integer",
+          "enum": [
+            8000,
+            16000,
+            24000
+          ]
+        },
+        "vadThreshold": {
+          "type": "number",
+          "format": "double",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "silenceDurationMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "prefixPaddingMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runtimePath": {
+          "type": "string",
+          "pattern": "^/[^?#]*$"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "AsrId": {
+      "type": "string",
+      "pattern": "^asr_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "McpDefinition": {
+      "type": "object",
+      "required": [
+        "mcpServerId",
+        "displayName",
+        "clientProtocol",
+        "runtimePath",
+        "authOwnership",
+        "enabled",
+        "allowedTools",
+        "toolAccessMode"
+      ],
+      "properties": {
+        "mcpServerId": {
+          "$ref": "#/definitions/McpServerId"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "clientProtocol": {
+          "type": "string",
+          "enum": [
+            "MCP_STREAMABLE_HTTP"
+          ]
+        },
+        "runtimePath": {
+          "type": "string",
+          "pattern": "^/[^?#]*$"
+        },
+        "authOwnership": {
+          "type": "string",
+          "enum": [
+            "ENTERPRISE_MANAGED",
+            "NONE"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "toolAccessMode": {
+          "description": "ALL follows dynamic discovery without additional invocation confirmation or published-contract hash locking; ALLOWLIST restricts to a nonempty reviewed list with explicit per-tool approval policy.",
+          "type": "string",
+          "enum": [
+            "ALL",
+            "ALLOWLIST"
+          ]
+        },
+        "allowedTools": {
+          "type": "array",
+          "x-uniqueProperty": "name",
+          "items": {
+            "$ref": "#/definitions/McpToolGrant"
+          }
+        }
+      }
+    },
+    "McpServerId": {
+      "type": "string",
+      "pattern": "^mcp_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "McpToolGrant": {
+      "type": "object",
+      "required": [
+        "name",
+        "contractHash",
+        "approvalPolicy"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^*]+$"
+        },
+        "contractHash": {
+          "$ref": "#/definitions/Sha256Hash"
+        },
+        "approvalPolicy": {
+          "description": "AUTO adds no enterprise confirmation; REQUIRE_CONFIRMATION requires user approval before each invocation. Independent of tool selection and does not bypass existing runtime or system permissions. Required explicitly; no decoder default.",
+          "type": "string",
+          "enum": [
+            "AUTO",
+            "REQUIRE_CONFIRMATION"
+          ]
+        }
+      }
+    },
+    "ManagedPolicy": {
+      "type": "object",
+      "description": "Current policy. All five admission flags are required; all ten defaults are optional and remain unset when omitted.",
+      "required": [
+        "policyId",
+        "allowLocalProviders",
+        "allowLocalTts",
+        "allowLocalAsr",
+        "allowLocalMcp",
+        "allowLocalAssistants"
+      ],
+      "properties": {
+        "policyId": {
+          "$ref": "#/definitions/PolicyId"
+        },
+        "allowLocalProviders": {
+          "type": "boolean"
+        },
+        "allowLocalTts": {
+          "type": "boolean"
+        },
+        "allowLocalAsr": {
+          "type": "boolean"
+        },
+        "allowLocalMcp": {
+          "type": "boolean"
+        },
+        "allowLocalAssistants": {
+          "type": "boolean",
+          "description": "Allows user assistants; referenced resources remain independently governed."
+        },
+        "defaultModelId": {
+          "$ref": "#/definitions/ModelId"
+        },
+        "defaultFastModelId": {
+          "$ref": "#/definitions/ModelId"
+        },
+        "defaultTitleModelId": {
+          "$ref": "#/definitions/ModelId"
+        },
+        "defaultAttachmentInspectionModelId": {
+          "$ref": "#/definitions/ModelId"
+        },
+        "defaultSuggestionModelId": {
+          "$ref": "#/definitions/ModelId"
+        },
+        "defaultCompressModelId": {
+          "$ref": "#/definitions/ModelId"
+        },
+        "defaultImageGenerationId": {
+          "$ref": "#/definitions/ImageGenerationId"
+        },
+        "defaultTtsId": {
+          "$ref": "#/definitions/TtsId"
+        },
+        "defaultAsrId": {
+          "$ref": "#/definitions/AsrId"
+        },
+        "defaultAssistantId": {
+          "$ref": "#/definitions/AssistantDefinitionId"
+        }
+      }
+    },
+    "PolicyId": {
+      "type": "string",
+      "pattern": "^pol_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "AssistantDefinitionId": {
+      "type": "string",
+      "pattern": "^asd_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "ManagedAssistantDefinition": {
+      "type": "object",
+      "required": [
+        "assistantDefinitionId",
+        "displayName",
+        "systemPrompt",
+        "modelId",
+        "memorySeed",
+        "mcpBindings",
+        "enabled"
+      ],
+      "properties": {
+        "assistantDefinitionId": {
+          "$ref": "#/definitions/AssistantDefinitionId"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "systemPrompt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "modelId": {
+          "$ref": "#/definitions/ModelId"
+        },
+        "memorySeed": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "mcpBindings": {
+          "description": "Mandatory MCP servers for this assistant in unpublished Snapshot v5. Empty means no mandatory servers. Users may explicitly select other enabled enterprise servers from the same Snapshot; absence does not deny access. Missing or null is invalid in published Client snapshots and remains unauthored in Admin drafts. Mandatory bindings and their tool restrictions cannot be removed or bypassed by user preferences.",
+          "type": "array",
+          "x-uniqueProperty": "mcpServerId",
+          "items": {
+            "$ref": "#/definitions/AssistantMcpBinding"
+          }
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "AssistantMcpBinding": {
+      "type": "object",
+      "required": [
+        "mcpServerId",
+        "toolSelection",
+        "toolNames"
+      ],
+      "properties": {
+        "mcpServerId": {
+          "$ref": "#/definitions/McpServerId"
+        },
+        "toolSelection": {
+          "description": "ALL adds no assistant tool restriction for this mandatory server; ALLOWLIST requires a nonempty list within server permissions. Removing the binding removes the mandatory selection and its assistant tool restriction, but users may explicitly select the server while it remains enabled. Duplicate user selection cannot bypass a mandatory binding.",
+          "type": "string",
+          "enum": [
+            "ALL",
+            "ALLOWLIST"
+          ]
+        },
+        "toolNames": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[^*]+$"
+          }
+        }
+      }
+    },
+    "AssistantStarterDefinition": {
+      "type": "object",
+      "required": [
+        "starterId",
+        "assistantDefinitionId",
+        "title",
+        "prompt",
+        "sortOrder",
+        "enabled",
+        "openingSnapshot"
+      ],
+      "properties": {
+        "starterId": {
+          "$ref": "#/definitions/StarterId"
+        },
+        "assistantDefinitionId": {
+          "$ref": "#/definitions/AssistantDefinitionId"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sortOrder": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "openingSnapshot": {
+          "$ref": "#/definitions/StarterOpeningSnapshot",
+          "x-go-type": "*StarterOpeningSnapshot",
+          "x-omitempty": true
+        }
+      }
+    },
+    "StarterId": {
+      "type": "string",
+      "pattern": "^str_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "StarterOpeningSnapshot": {
+      "type": "object",
+      "required": [
+        "format",
+        "systemPrompt",
+        "initialContexts"
+      ],
+      "properties": {
+        "format": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "systemPrompt": {
+          "type": "string",
+          "description": "Frozen effective System resolved at publication. Consume verbatim, including empty text; never inherit or append the current assistant System on the client."
+        },
+        "initialContexts": {
+          "type": "array",
+          "x-uniqueProperty": "id",
+          "description": "Ordered context blocks; IDs must be unique within this opening.",
+          "items": {
+            "$ref": "#/definitions/StarterInitialContext"
+          }
+        }
+      }
+    },
+    "StarterInitialContext": {
+      "type": "object",
+      "required": [
+        "id",
+        "content"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "content": {
+          "type": "string"
+        }
+      }
+    },
+    "ManagedSnapshotV4": {
+      "type": "object",
+      "required": [
+        "deploymentId",
+        "schemaVersion",
+        "managedGeneration",
+        "releaseId",
+        "snapshotHash",
+        "providers",
+        "models",
+        "tts",
+        "asr",
+        "mcp",
+        "policy",
+        "metadata",
+        "assistants",
+        "starters"
+      ],
+      "properties": {
+        "deploymentId": {
+          "$ref": "#/definitions/DeploymentId"
+        },
+        "schemaVersion": {
+          "type": "integer",
+          "enum": [
+            4
+          ]
+        },
+        "managedGeneration": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "releaseId": {
+          "$ref": "#/definitions/ReleaseId"
+        },
+        "snapshotHash": {
+          "$ref": "#/definitions/Sha256Hash"
+        },
+        "providers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ProviderDefinition"
+          }
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ModelDefinition"
+          }
+        },
+        "imageGenerators": {
+          "type": "array",
+          "description": "Additive Snapshot v4 field; omission means an empty list.",
+          "items": {
+            "$ref": "#/definitions/ImageGenerationDefinition"
+          }
+        },
+        "tts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TtsDefinition"
+          }
+        },
+        "asr": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AsrDefinition"
+          }
+        },
+        "mcp": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/McpDefinitionV4"
+          }
+        },
+        "policy": {
+          "$ref": "#/definitions/ManagedPolicy"
+        },
+        "metadata": {
+          "type": "object",
+          "required": [
+            "publishedAt"
+          ],
+          "properties": {
+            "publishedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "publishedByUserId": {
+              "$ref": "#/definitions/UserId"
+            }
+          }
+        },
+        "assistants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ManagedAssistantDefinitionV4"
+          }
+        },
+        "starters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AssistantStarterDefinitionV4"
+          }
+        }
+      }
+    },
+    "McpDefinitionV4": {
+      "type": "object",
+      "required": [
+        "mcpServerId",
+        "displayName",
+        "clientProtocol",
+        "runtimePath",
+        "authOwnership",
+        "enabled"
+      ],
+      "properties": {
+        "mcpServerId": {
+          "$ref": "#/definitions/McpServerId"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "clientProtocol": {
+          "type": "string",
+          "enum": [
+            "MCP_STREAMABLE_HTTP"
+          ]
+        },
+        "runtimePath": {
+          "type": "string",
+          "pattern": "^/[^?#]*$"
+        },
+        "authOwnership": {
+          "type": "string",
+          "enum": [
+            "ENTERPRISE_MANAGED",
+            "NONE"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ManagedAssistantDefinitionV4": {
+      "type": "object",
+      "required": [
+        "assistantDefinitionId",
+        "displayName",
+        "systemPrompt",
+        "modelId",
+        "memorySeed",
+        "mcpServerIds",
+        "enabled"
+      ],
+      "properties": {
+        "assistantDefinitionId": {
+          "$ref": "#/definitions/AssistantDefinitionId"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "systemPrompt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "modelId": {
+          "$ref": "#/definitions/ModelId"
+        },
+        "memorySeed": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "mcpServerIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/McpServerId"
+          }
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "AssistantStarterDefinitionV4": {
+      "type": "object",
+      "required": [
+        "starterId",
+        "assistantDefinitionId",
+        "title",
+        "prompt",
+        "sortOrder",
+        "enabled"
+      ],
+      "properties": {
+        "starterId": {
+          "$ref": "#/definitions/StarterId"
+        },
+        "assistantDefinitionId": {
+          "$ref": "#/definitions/AssistantDefinitionId"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "sortOrder": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "WorkspaceProjection": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "serviceState",
+        "state",
+        "bindingRevision",
+        "mcpAvailable",
+        "filesAvailable",
+        "mcpReason",
+        "filesReason"
+      ],
+      "properties": {
+        "fileExchangeWebdavResourceId": {
+          "$ref": "#/definitions/DAVResourceId"
+        },
+        "webdav": {
+          "$ref": "#/definitions/WorkspaceDAVProjection"
+        },
+        "schemaVersion": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "UNPROVISIONED",
+            "CONNECTING",
+            "CONNECTED",
+            "DISCONNECTING",
+            "DISCONNECTED",
+            "RESTORING",
+            "DELETING",
+            "DELETED",
+            "NEEDS_ATTENTION"
+          ]
+        },
+        "bindingRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "agentSpaceId": {
+          "$ref": "#/definitions/AgentSpaceId"
+        },
+        "mcpServerId": {
+          "$ref": "#/definitions/McpServerId"
+        },
+        "mcpAvailable": {
+          "type": "boolean"
+        },
+        "filesAvailable": {
+          "type": "boolean"
+        },
+        "mcpReason": {
+          "type": "string"
+        },
+        "filesReason": {
+          "type": "string"
+        },
+        "observedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "operationId": {
+          "$ref": "#/definitions/WorkspaceOperationId"
+        },
+        "serviceState": {
+          "type": "string",
+          "enum": [
+            "NOT_CONFIGURED",
+            "DISABLED",
+            "ENABLED"
+          ],
+          "description": "Configured enable intent, independent of this user lifecycle and remote health. ENABLED does not imply filesAvailable."
+        }
+      }
+    },
+    "WorkspaceDAVProjection": {
+      "type": "object",
+      "required": [
+        "resourceId",
+        "available",
+        "reason"
+      ],
+      "properties": {
+        "resourceId": {
+          "$ref": "#/definitions/DAVResourceId"
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "accessMode": {
+          "$ref": "#/definitions/DAVAccessMode"
+        },
+        "bindingRevision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1
+        }
+      }
+    },
+    "DAVAccessMode": {
+      "type": "string",
+      "enum": [
+        "READ_ONLY",
+        "FULL"
+      ]
+    },
+    "AgentSpaceId": {
+      "type": "string",
+      "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "WorkspaceOperationId": {
+      "type": "string",
+      "pattern": "^wop_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "WorkspaceFileList": {
+      "type": "object",
+      "required": [
+        "entries"
+      ],
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkspaceFileEntry"
+          }
+        },
+        "usedBytes": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 0
+        },
+        "availableBytes": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 0
+        }
+      }
+    },
+    "WorkspaceFileEntry": {
+      "type": "object",
+      "required": [
+        "path",
+        "kind"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "FILE",
+            "DIRECTORY"
+          ]
+        },
+        "size": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 0
+        },
+        "modifiedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "etag": {
+          "type": "string"
+        }
+      }
+    },
+    "WorkspaceFileMutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "path"
+      ],
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "MKCOL",
+            "MOVE",
+            "COPY",
+            "DELETE"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "destination": {
+          "type": "string"
+        },
+        "sourceEtag": {
+          "type": "string"
+        },
+        "targetEtag": {
+          "type": "string"
+        },
+        "overwrite": {
+          "type": "boolean"
+        },
+        "recursiveConfirmed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "WorkspaceFileResult": {
+      "type": "object",
+      "required": [
+        "outcome",
+        "failures",
+        "truncated"
+      ],
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "SUCCEEDED",
+            "PARTIAL",
+            "UNKNOWN"
+          ]
+        },
+        "failures": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkspaceFileFailure"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "WorkspaceFileFailure": {
+      "type": "object",
+      "required": [
+        "path",
+        "status",
+        "code"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "status": {
+          "type": "integer"
+        },
+        "code": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

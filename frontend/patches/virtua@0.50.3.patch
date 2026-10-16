@@ -1,0 +1,13 @@
+diff --git a/lib/vue/index.js b/lib/vue/index.js
+index 2ec6eb5b4c466054826227d7f6410f447f9b7531..92297268a2a71f434f633cf771f65ce209bb3f06 100644
+--- a/lib/vue/index.js
++++ b/lib/vue/index.js
+@@ -396,7 +396,7 @@ var {min: a, max: u, abs: f, floor: d} = Math, p = (e, t, r) => a(r, u(t, e)), m
+                                 e[l] = t;
+                             });
+                         }
+-                        u[i] = q(e.N() + t, s), r && a();
++                        u[i] = q(e.N() + t, s), e.R(1, q(u[i], s)), r && a();
+                     }), n[1](!0);
+                 },
+                 p() {

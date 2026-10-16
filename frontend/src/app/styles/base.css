@@ -1,0 +1,14 @@
+/* Document host only; no component or page layout rules. */
+:root {
+  color-scheme: var(--tuck-scheme,dark);
+  /* Inherited by scroll containers, including dialogs teleported to body.
+     Native geometry/interaction stays intact; only the colors are themed. */
+  scrollbar-color: var(--tuck-muted,#9ba7b8) var(--tuck-surface,#101722);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  background: var(--tuck-background,#070a0f);
+  color: var(--tuck-accent,#e7edf4);
+}
+html, body, #app { width:100%; height:100%; margin:0; }
+body { overflow:hidden; }
+@media (forced-colors: active) { :root { scrollbar-color:auto; } }

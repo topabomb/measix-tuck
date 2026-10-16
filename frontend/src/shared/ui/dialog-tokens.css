@@ -1,0 +1,8 @@
+/* Shared popup geometry; components retain layout and lifecycle ownership. */
+:root {
+  --tuck-dialog-radius: 12px;
+  --tuck-dialog-padding: 12px;
+  --tuck-dialog-gap: 8px;
+  --tuck-dialog-header-height: 44px;
+  --tuck-dialog-control-height: 32px;
+}

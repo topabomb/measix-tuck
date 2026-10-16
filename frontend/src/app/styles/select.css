@@ -1,0 +1,44 @@
+/* Keep the native select semantics and keyboard behavior, with theme-owned colors. */
+:is(.app-shell, .tuck-modal, .agent-popover, .login-page) select {
+  color-scheme: var(--tuck-scheme);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@supports (appearance: base-select) {
+  :is(.app-shell, .tuck-modal, .agent-popover, .login-page) select:not([multiple]):not([size]),
+  :is(.app-shell, .tuck-modal, .agent-popover, .login-page) select:not([multiple]):not([size])::picker(select) {
+    appearance: base-select;
+  }
+  :is(.app-shell, .tuck-modal, .agent-popover, .login-page) select:not([multiple]):not([size]) {
+    align-items: center;
+  }
+  :is(.app-shell, .tuck-modal, .agent-popover, .login-page) select::picker(select) {
+    font: inherit;
+    color: var(--tuck-text);
+    background: var(--tuck-surface);
+    border: 1px solid var(--tuck-border);
+    border-radius: 8px;
+    padding: 4px;
+    max-height: min(320px, 50vh);
+    overflow: auto;
+  }
+  :is(.app-shell, .tuck-modal, .agent-popover, .login-page) select option {
+    padding: 7px 10px;
+    border-radius: 4px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  :is(.app-shell, .tuck-modal, .agent-popover, .login-page) select option:hover {
+    background: var(--tuck-hover);
+  }
+  :is(.app-shell, .tuck-modal, .agent-popover, .login-page) select option:checked {
+    color: var(--tuck-accentText);
+    background: var(--tuck-accent);
+  }
+  :is(.app-shell, .tuck-modal, .agent-popover, .login-page) select option:focus-visible {
+    outline: 2px solid var(--tuck-accent);
+    outline-offset: -2px;
+  }
+  :is(.app-shell, .tuck-modal, .agent-popover, .login-page) select::picker-icon { color: var(--tuck-muted); }
+}

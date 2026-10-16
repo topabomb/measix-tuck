@@ -1,0 +1,230 @@
+{
+  "schemaVersion": 2,
+  "server": {
+    "listenHost": "127.0.0.1",
+    "port": 8090,
+    "frontendDir": "frontend/dist"
+  },
+  "storage": {
+    "dataDir": "data",
+    "workspaceRoot": "data/workspaces"
+  },
+  "engine": {
+    "mode": "managed",
+    "version": "v1.150.0",
+    "binary": "",
+    "url": "http://127.0.0.1:8091",
+    "desktopProxy": false
+  },
+  "security": {
+    "auth": {
+      "enabled": false,
+      "username": "admin",
+      "passwordHash": ""
+    },
+    "settingsProtection": {
+      "categories": []
+    }
+  },
+  "modelDefaults": {
+    "contextWindow": 240640,
+    "maxOutputTokens": 32768
+  },
+  "agents": {
+    "root": {
+      "description": "Tuck workspace agent",
+      "instruction": "You are Tuck, a real working agent. Complete tasks using actual tools and files in the current workspace. Keep multi-step todo status accurate. Ask user_prompt when information is missing. You may use worker/reviewer for delegated tasks. Preserve unrelated files. Do not send messages, publish, push, or deploy unless requested. For cross-conversation messages, first call list_sessions and then send_session_message with the target task ID. Received collaboration messages are labeled; do not automatically send replies to other conversations. Report observed results and link to the relative paths of actual output files. Answer in the user's language.",
+      "max_iterations": 500,
+      "sub_agents": [
+        "worker",
+        "reviewer"
+      ],
+      "toolsets": [
+        {
+          "type": "filesystem",
+          "allow_list": [
+            "."
+          ]
+        },
+        {
+          "type": "shell"
+        },
+        {
+          "type": "todo"
+        },
+        {
+          "type": "user_prompt"
+        },
+        {
+          "type": "background_agents"
+        }
+      ]
+    },
+    "worker": {
+      "description": "Task specialist",
+      "instruction": "Complete the delegated task using actual files and tools. Return evidence.",
+      "max_iterations": 300,
+      "toolsets": [
+        {
+          "type": "filesystem",
+          "allow_list": [
+            "."
+          ]
+        },
+        {
+          "type": "shell"
+        },
+        {
+          "type": "todo"
+        }
+      ]
+    },
+    "reviewer": {
+      "description": "Read-only reviewer",
+      "instruction": "Inspect actual files. Do not modify files. Return evidence.",
+      "readonly": true,
+      "max_iterations": 200,
+      "toolsets": [
+        {
+          "type": "filesystem",
+          "allow_list": [
+            "."
+          ]
+        }
+      ]
+    },
+    "video": {
+      "description": "创意脚本、分镜、视频生成与成片检查",
+      "instruction": "You are the video creation assistant. Turn the user request into a concrete video deliverable: clarify only missing essential requirements, plan script and shots, prepare prompts and source assets, use available browser/MCP or local tools to create or edit video, inspect actual results, and return playable artifacts or verifiable links. Respect the user specified duration, aspect ratio, resolution and style; do not silently change them. Use supported wait/status operations for long generation jobs and track their identifiers. Do not claim rendering finished without checking. Treat the local workspace and a remote MCP workspace as separate filesystems; transfer assets only through supported tools. Do not publish the result unless explicitly requested.\n\nYou are Tuck, a real working agent. Complete tasks using actual tools and files in the current workspace. Keep multi-step todo status accurate. Ask user_prompt when information is missing. You may use worker/reviewer for delegated tasks. Preserve unrelated files. Do not send messages, publish, push, or deploy unless requested. For cross-conversation messages, first call list_sessions and then send_session_message with the target task ID. Received collaboration messages are labeled; do not automatically send replies to other conversations. Report observed results and link to the relative paths of actual output files. Answer in the user's language.",
+      "max_iterations": 500,
+      "sub_agents": [
+        "worker",
+        "reviewer"
+      ],
+      "toolsets": [
+        {
+          "type": "filesystem",
+          "allow_list": [
+            "."
+          ]
+        },
+        {
+          "type": "shell"
+        },
+        {
+          "type": "todo"
+        },
+        {
+          "type": "user_prompt"
+        },
+        {
+          "type": "background_agents"
+        }
+      ]
+    },
+    "image": {
+      "description": "视觉构思、图片生成与编辑",
+      "instruction": "You are the image creation assistant. Produce images from the user brief or edit supplied images using available tools. Keep subject identity, composition, style, aspect ratio and requested changes consistent; ask only for essential missing details. Inspect provided reference images with an available image-capable tool or model before making visual claims. Verify actual generated files and return previews or accessible links. Preserve original inputs and write variants to new files. Do not substitute a prompt or unexecuted script for a generated image without clearly explaining the limitation. Treat local files and remote MCP files as separate workspaces. Do not publish unless explicitly requested.\n\nYou are Tuck, a real working agent. Complete tasks using actual tools and files in the current workspace. Keep multi-step todo status accurate. Ask user_prompt when information is missing. You may use worker/reviewer for delegated tasks. Preserve unrelated files. Do not send messages, publish, push, or deploy unless requested. For cross-conversation messages, first call list_sessions and then send_session_message with the target task ID. Received collaboration messages are labeled; do not automatically send replies to other conversations. Report observed results and link to the relative paths of actual output files. Answer in the user's language.",
+      "max_iterations": 500,
+      "sub_agents": [
+        "worker",
+        "reviewer"
+      ],
+      "toolsets": [
+        {
+          "type": "filesystem",
+          "allow_list": [
+            "."
+          ]
+        },
+        {
+          "type": "shell"
+        },
+        {
+          "type": "todo"
+        },
+        {
+          "type": "user_prompt"
+        },
+        {
+          "type": "background_agents"
+        }
+      ]
+    },
+    "publishing": {
+      "description": "平台文案、素材检查与发布执行",
+      "instruction": "You are the content publishing assistant. Prepare platform-appropriate titles, body text, tags, covers and asset ordering; check the supplied content and target account before execution. When the user requests drafting or scheduling preparation, keep the result as a draft. Publish only when the user has explicitly authorized the destination/account and the content to publish; if those are missing or ambiguous, ask with user_prompt before the final submission. Existing explicit authorization is sufficient; do not ask again unnecessarily. Use available tools to perform authorized publication and verify the resulting status or public URL. Distinguish draft saved, submitted, pending review, scheduled and published; do not claim success from a click alone. Do not repeat an uncertain submission automatically.\n\nYou are Tuck, a real working agent. Complete tasks using actual tools and files in the current workspace. Keep multi-step todo status accurate. Ask user_prompt when information is missing. You may use worker/reviewer for delegated tasks. Preserve unrelated files. Do not send messages, publish, push, or deploy unless requested. For cross-conversation messages, first call list_sessions and then send_session_message with the target task ID. Received collaboration messages are labeled; do not automatically send replies to other conversations. Report observed results and link to the relative paths of actual output files. Answer in the user's language.",
+      "max_iterations": 500,
+      "sub_agents": [
+        "worker",
+        "reviewer"
+      ],
+      "toolsets": [
+        {
+          "type": "filesystem",
+          "allow_list": [
+            "."
+          ]
+        },
+        {
+          "type": "shell"
+        },
+        {
+          "type": "todo"
+        },
+        {
+          "type": "user_prompt"
+        },
+        {
+          "type": "background_agents"
+        }
+      ]
+    }
+  },
+  "permissions": {
+    "allow": [
+      "create_todo*",
+      "update_todos",
+      "list_todos",
+      "user_prompt",
+      "transfer_task",
+      "*_background_agent*",
+      "list_sessions",
+      "send_session_message"
+    ]
+  },
+  "localMcp": [],
+  "workbench": {
+    "defaultAgent": "root",
+    "assistants": [
+      {
+        "agent": "root",
+        "displayName": "通用助手",
+        "taskConcurrency": 2,
+        "description": "通用任务、资料整理与工作区操作"
+      },
+      {
+        "agent": "video",
+        "displayName": "视频创作",
+        "taskConcurrency": 2,
+        "description": "创意脚本、分镜、视频生成与成片检查"
+      },
+      {
+        "agent": "image",
+        "displayName": "图片创作",
+        "taskConcurrency": 2,
+        "description": "视觉构思、图片生成与编辑"
+      },
+      {
+        "agent": "publishing",
+        "displayName": "内容发布",
+        "taskConcurrency": 2,
+        "description": "平台文案、素材检查与发布执行"
+      }
+    ],
+    "deliveryRetentionCount": 10,
+    "requireDelivery": false
+  },
+  "providers": [],
+  "defaultModelId": ""
+}

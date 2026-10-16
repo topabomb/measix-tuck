@@ -1,0 +1,11 @@
+{
+  "accessToken": "synthetic.access.token",
+  "accessTokenExpiresAt": "2026-09-12T00:15:00Z",
+  "deploymentId": "dep_550e8400-e29b-41d4-a716-446655440000",
+  "deviceId": "dev_550e8400-e29b-41d4-a716-446655440000",
+  "refreshExpiresAt": "2026-09-19T00:00:00Z",
+  "refreshToken": "synthetic-refresh-token",
+  "sessionId": "ses_550e8400-e29b-41d4-a716-446655440000",
+  "sessionIdleExpiresAt": "2026-09-19T00:00:00Z",
+  "userId": "usr_550e8400-e29b-41d4-a716-446655440000"
+}

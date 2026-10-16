@@ -1,0 +1,12 @@
+{
+  "clientApiBase": "/api/client/v1",
+  "deploymentId": "dep_550e8400-e29b-41d4-a716-446655440000",
+  "deploymentName": "S0.2 Integration",
+  "product": "MEASIX_AGENT_PLATFORM",
+  "protocolVersion": "1",
+  "runtimeApiBase": "/runtime/v1",
+  "supportedSnapshotSchemaVersions": [
+    4,
+    5
+  ]
+}

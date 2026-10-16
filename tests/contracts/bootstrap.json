@@ -1,0 +1,31 @@
+{
+  "deployment": {
+    "deploymentId": "dep_550e8400-e29b-41d4-a716-446655440000",
+    "name": "S0.2 Integration"
+  },
+  "device": {
+    "deviceId": "dev_550e8400-e29b-41d4-a716-446655440000",
+    "status": "ACTIVE"
+  },
+  "managedState": {
+    "activeManagedGeneration": 42,
+    "managedStateRevision": 77,
+    "runtimeBlocked": true,
+    "runtimeStatus": "READY",
+    "syncRequired": true,
+    "targetManagedGeneration": 42
+  },
+  "session": {
+    "expiresAt": "2026-09-19T00:00:00Z",
+    "sessionId": "ses_550e8400-e29b-41d4-a716-446655440000",
+    "sessionIdleExpiresAt": "2026-09-19T00:00:00Z"
+  },
+  "supportedSnapshotSchemaVersions": [
+    4,
+    5
+  ],
+  "user": {
+    "displayName": "Contract User",
+    "userId": "usr_550e8400-e29b-41d4-a716-446655440000"
+  }
+}

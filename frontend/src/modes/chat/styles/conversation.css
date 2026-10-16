@@ -1,0 +1,63 @@
+/* Production adapter for Engine surfaces. Never style controls owned by product children here.
+   Vertical message spacing lives inside measured .node-seat elements. */
+.agent-app.live-workspace :deep(.conversation-shell) { position:relative; z-index:0; container:chat-column / inline-size; --chat-auxiliary-row-height:26px; --conversation-row-gap:4px; grid-template-rows:var(--workbench-header-height) minmax(0,1fr) auto; --conversation-content-width:1100px; --conversation-gutter:12px; --conversation-header-leading-space:0px; }
+.history-fetch-status { position:absolute; z-index:15; top:4px; left:50%; transform:translateX(-50%); max-width:calc(100% - 24px); padding:3px 8px; border:1px solid var(--tuck-border); border-radius:6px; background:var(--tuck-surface); color:var(--tuck-muted); font-size:var(--tuck-font-caption); white-space:nowrap; }
+.history-fetch-status button { padding:0; border:0; background:transparent; color:var(--tuck-accent); font:inherit; cursor:pointer; }
+.agent-app.live-workspace :deep(.conversation-header) { position:relative; z-index:30; gap:12px; background:var(--tuck-background); backdrop-filter:none; padding-left:14px; }
+.agent-app.live-workspace :deep(.conversation-heading) { flex:1; overflow:visible; }
+.agent-app.live-workspace :deep(.conversation-title) { flex:1; overflow:visible; }
+.agent-app.live-workspace :deep(.conversation-header-actions) { flex-shrink:0; }
+.agent-app.live-workspace :deep(.session-stats-line), .agent-app.live-workspace :deep(.composer-hint), .agent-app.live-workspace :deep(.context-meter), .agent-app.live-workspace :deep(.header-stop) { display:none; }
+.agent-app.live-workspace :deep(.composer-shell) { padding:0 calc(var(--conversation-gutter) + var(--conversation-scrollbar-width,0px)) 4px var(--conversation-gutter); max-height:72dvh; overflow:visible; background:var(--tuck-background); }
+.agent-app.live-workspace :deep(.conversation-title .root-title) { font-size:var(--tuck-font-title); }
+.agent-app.live-workspace :deep(.pending-copy p) { max-height:110px; overflow:auto; overflow-wrap:anywhere; }
+.agent-app.live-workspace :deep(.turn-outcome-banner) { max-height:100px; overflow:auto; overflow-wrap:anywhere; }
+.agent-app.live-workspace :deep(.composer-extension) { flex:1; }
+.agent-app.live-workspace :deep(.markdown-body p) { font:inherit; margin-block:6px; }
+.agent-app.live-workspace :deep(.node-seat) { padding-inline:max(var(--conversation-gutter),calc((100% - var(--conversation-content-width))/2)); }
+.agent-app.live-workspace :deep(.message-card.markdown-card.role-assistant .markdown-body) { padding-left:3px; padding-bottom:4px; }
+.agent-app.live-workspace :deep(.message-card.markdown-card.role-user .markdown-body) { padding:6px 10px; }
+.agent-app.live-workspace :deep(.jump-latest) { bottom:4px; height:30px; min-height:30px; box-sizing:border-box; padding:0 9px; line-height:20px; border-color:var(--tuck-border); background:var(--tuck-raised); color:var(--tuck-text); backdrop-filter:none; box-shadow:0 3px 12px #0002; }
+.agent-app.live-workspace :deep(.jump-latest:hover) { background:var(--tuck-hover); }
+.agent-app.live-workspace :deep(.jump-latest > em) { min-width:18px; padding:0 4px; line-height:20px; background:var(--tuck-surface); color:var(--tuck-muted); }
+.agent-app.live-workspace :deep(.conversation-header-context) { flex-shrink:0; }
+.agent-app.live-workspace :deep(.shiki-host .shiki) { font-size:12px !important; line-height:1.6 !important; }
+.agent-app.live-workspace, .agent-app.live-workspace :deep(.conversation-shell) { font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif; }
+.agent-app.live-workspace :deep(.message-card) { box-shadow:none; }
+.agent-app.live-workspace :deep(.code-card pre), .agent-app.live-workspace :deep(.diff-card > pre) { max-height:min(45dvh,360px); }
+.agent-app.live-workspace :deep(.shiki-host), .agent-app.live-workspace :deep(.shiki-host .shiki) { background:var(--tuck-code-background) !important; }
+.agent-app.live-workspace :deep(.node-seat:has(> .agent-activity)) { padding-block:2px; }
+.agent-app.live-workspace :deep(.node-seat:has(> .agent-activity[data-open=false])) { padding-block:0; }
+.agent-app.live-workspace :deep(.node-seat:has(> .role-user)) { padding-block:8px 4px; }
+.agent-app.live-workspace :deep(.node-seat:has(> .continuation)) { padding-block:0 4px; }
+.agent-app.live-workspace :deep(.message-card.markdown-card.role-user > header) { display:none; }
+.agent-app.live-workspace :deep(.message-card.markdown-card.role-assistant > header) { min-height:24px; padding:0 3px 4px; font-size:var(--tuck-font-caption); font-weight:500; }
+.agent-app.live-workspace :deep(.message-author > small) { display:none; }
+.agent-app.live-workspace :deep(.markdown-body) { font-size:var(--tuck-font-body); line-height:var(--tuck-line-body); }
+.agent-app.live-workspace :deep(.markdown-body > :first-child) { margin-top:0; }
+.agent-app.live-workspace :deep(.markdown-body > :last-child) { margin-bottom:0; }
+.agent-app.live-workspace :deep(.message-author) { justify-content:flex-start; }
+.agent-app.live-workspace :deep(.message-author .streaming-label) { margin-left:auto; }
+.agent-app.live-workspace :deep(.run-status) { font-size:var(--tuck-font-caption); height:30px; box-sizing:border-box; }
+@container chat-column (max-width:760px) {
+  .agent-app.live-workspace :deep(.conversation-header) { padding-inline:10px; gap:6px; }
+  .agent-app.live-workspace :deep(.conversation-heading) { gap:6px; }
+  .agent-app.live-workspace :deep(.conversation-header-actions) { gap:4px; }
+}
+.mobile-header-item{display:none}
+@media(max-width:760px) {
+  .agent-app.live-workspace :deep(.conversation-shell) { --conversation-gutter:10px; }
+  .agent-app.live-workspace :deep(.conversation-header) {padding-inline:6px;gap:4px}
+  .agent-app.live-workspace :deep(.conversation-heading) {gap:4px}
+  .agent-app.live-workspace :deep(.conversation-header-actions) {gap:0}
+  .agent-app.live-workspace :deep(.conversation-header-actions>.reference-header-action),.agent-app.live-workspace :deep(.delivery-summary-entry>.reference-header-action){display:none}
+  .agent-app.live-workspace :deep(.tuck-session-menu>summary),.sidebar-control{width:44px;height:44px}
+  .mobile-header-item{display:block}
+  .tuck-session-menu-items{max-height:calc(var(--app-visible-height,100dvh) - 76px);overflow:auto;z-index:50}
+  .tuck-session-menu-items>button,.tuck-session-menu-items>a{box-sizing:border-box;display:flex;align-items:center;min-height:44px;padding:8px 10px;text-decoration:none;color:var(--tuck-text);font-size:var(--tuck-font-ui);border-radius:6px}
+}
+
+@container chat-column (max-width:600px) {
+  .agent-app.live-workspace :deep(.run-status) { width:28px; min-width:28px; padding:0; justify-content:center; }
+  .agent-app.live-workspace :deep(.run-status-label) { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+}

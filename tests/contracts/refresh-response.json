@@ -1,0 +1,7 @@
+{
+  "accessToken": "synthetic.rotated.access",
+  "accessTokenExpiresAt": "2026-09-12T01:15:00Z",
+  "refreshExpiresAt": "2026-09-19T01:00:00Z",
+  "refreshToken": "synthetic-rotated-refresh",
+  "sessionIdleExpiresAt": "2026-09-19T01:00:00Z"
+}

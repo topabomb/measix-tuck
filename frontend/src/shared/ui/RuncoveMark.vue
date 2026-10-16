@@ -1,0 +1,2 @@
+<!-- Approved Runcove / 工舱 glyph from vi-website/src/visuals.py. -->
+<template><svg viewBox="0 0 64 64" fill="currentColor" aria-hidden="true"><path d="m32 9 22 12v26L32 59 10 47V21L32 9Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="m10 21 22 12 22-12M32 33v26" fill="none" stroke="currentColor" stroke-width="3"/><path d="m24 19 8-4 13 7-8 4-13-7Z"/><path d="M20 29v10l6 3V32l-6-3Z"/></svg></template>

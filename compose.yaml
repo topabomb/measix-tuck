@@ -1,0 +1,21 @@
+services:
+  tuck:
+    image: measix-tuck:local
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - type: bind
+        source: ./deploy/config
+        target: /config
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./deploy/data
+        target: /data
+        bind:
+          create_host_path: false
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    stop_grace_period: 30s

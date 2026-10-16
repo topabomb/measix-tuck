@@ -1,0 +1,29 @@
+/* Product controls, including body-teleported dialogs. Keep the ring inside
+   the control so scrolling/virtualized containers cannot clip its edges. */
+:is(.app-shell, .agent-app.live-workspace, .tuck-modal, .agent-popover, .media-preview-dialog, .tuck-connect, .login-page)
+  :is(button, input, select, textarea, a[href], summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--tuck-accent);
+  outline-offset: -2px;
+}
+
+:is(.app-shell, .agent-app.live-workspace, .tuck-modal, .agent-popover, .media-preview-dialog, .tuck-connect, .login-page)
+  :is(button, a[href], summary, [tabindex]):focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Accent-filled actions need a contrasting ring on their own background. */
+:is(.app-shell, .agent-app.live-workspace, .tuck-modal, .login-page) :is(button.primary, button[type=submit]):focus-visible {
+  outline-color: var(--tuck-accentText);
+}
+
+/* The composer already marks its enclosing input box. */
+.agent-app.live-workspace textarea[data-testid=composer-input]:focus-visible {
+  outline: none;
+}
+
+@media (forced-colors: active) {
+  :is(.app-shell, .agent-app.live-workspace, .tuck-modal, .agent-popover, .media-preview-dialog, .tuck-connect, .login-page)
+    :is(button, input, select, textarea, a[href], summary, [tabindex]):focus-visible {
+    outline-color: Highlight;
+  }
+}

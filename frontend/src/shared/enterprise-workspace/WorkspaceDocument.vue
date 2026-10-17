@@ -130,7 +130,7 @@ onBeforeUnmount(()=>{adjacentController?.abort();window.removeEventListener('poi
       <a class="ew-direct-download ew-doc-action" :href="mediaURL.replace('preview=1','preview=0')" download aria-label="下载" title="下载文件"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12m-4-4 4 4 4-4M5 16v5h14v-5" /></svg><span>下载</span></a>
       <button class="ew-direct-reload ew-doc-action ew-doc-icon" :disabled="pending || owner.state.busy" aria-label="重新读取" title="重新读取文件" @click="act(reload)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 7v5h-5m5 0a8 8 0 1 0-2 6" /></svg></button>
       <details ref="more" class="ew-more" @keydown.esc.stop.prevent="dismissMore">
-        <summary role="button" class="ew-doc-icon" aria-label="文档操作" title="更多文件操作" @click="closeOtherMenu('more')"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 12h.1m6.9 0h.1m6.9 0h.1" stroke-width="4" /></svg></summary>
+        <summary role="button" class="ew-doc-icon" aria-label="文档操作" title="当前文件操作" @click="closeOtherMenu('more')"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3H5v18h5M12 3v5h6M12 3l6 5v2M16 12h2l.5 1.6 1.4.8 1.6-.3 1 1.8-1.1 1.2v1.6l1.1 1.2-1 1.8-1.6-.3-1.4.8L18 22h-2l-.5-1.6-1.4-.8-1.6.3-1-1.8 1.1-1.2v-1.6l-1.1-1.2 1-1.8 1.6.3 1.4-.8Z" /><circle cx="17" cy="17" r="1.7" /></svg></summary>
         <div @click="closeMore">
           <button v-if="source" :disabled="saveDisabled" @click="save(true)">另存为</button>
           <a class="ew-menu-download" :href="mediaURL.replace('preview=1','preview=0')" download><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12m-4-4 4 4 4-4M5 16v5h14v-5" /></svg>下载</a>

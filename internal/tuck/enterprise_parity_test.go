@@ -1,12 +1,14 @@
 package tuck
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -124,7 +126,7 @@ func TestParityWorkspaceUploadCancelAndHeaderTimeout(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	// Exercise the actual response-header timeout without waiting fifteen seconds.
+	// Exercise the response-header timeout with a short injected budget.
 	e.client.Transport = newTransport(40 * time.Millisecond)
 	f.setDAVHook(func(w http.ResponseWriter, r *http.Request, name string) bool {
 		if name == "slow.mp4" {
@@ -168,6 +170,59 @@ func TestParityWorkspaceUploadCancelAndHeaderTimeout(t *testing.T) {
 	}
 	if time.Since(start) > 2*time.Second {
 		t.Fatal("media failure blocked controls")
+	}
+}
+
+func TestWorkspaceUploadWaitsForServerConfirmation(t *testing.T) {
+	f := newWorkspaceFixture(t)
+	_, server, query := f.proxy(t)
+	payload := bytes.Repeat([]byte{'x'}, 8<<20)
+	var received atomic.Int64
+	f.setDAVHook(func(w http.ResponseWriter, r *http.Request, name string) bool {
+		if r.Method != "PUT" {
+			return false
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			return true
+		}
+		received.Store(int64(len(body)))
+		// Regress the production failure: the old client cut off confirmation
+		// after 15 seconds even though the entire 8 MiB had reached Core.
+		timer := time.NewTimer(16 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			WriteJSON(w, 200, M{"outcome": "SUCCEEDED", "failures": []any{}, "truncated": false})
+		case <-r.Context().Done():
+		}
+		return true
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, "PUT", server.URL+"/api/enterprise-workspace/content?"+query+"&path=confirmation.bin", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	result, err := ReadJSON(response.Body, 4<<20)
+	if response.StatusCode != 200 || err != nil || result["outcome"] != "SUCCEEDED" || received.Load() != int64(len(payload)) {
+		t.Fatal(response.StatusCode, result, received.Load(), err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	writes := 0
+	for _, call := range f.calls {
+		if call["method"] == "PUT" {
+			writes++
+		}
+	}
+	if writes != 1 {
+		t.Fatal("upload was replayed", writes)
 	}
 }
 

@@ -81,7 +81,9 @@ export function useDocumentPreview(options:PreviewOptions) {
       const request=new AbortController(),abort=()=>request.abort();let timedOut=false
       signal.addEventListener('abort',abort,{once:true})
       if(readSignal!==signal)readSignal.addEventListener('abort',abort,{once:true})
-      const timeout=setTimeout(()=>{timedOut=true;request.abort()},30_000)
+      // Optional embedded resources may be skipped to finish the document.
+      // The foreground image uses the server's transfer inactivity limit.
+      const timeout=background?setTimeout(()=>{timedOut=true;request.abort()},30_000):undefined
       try {return await options.read(target,limit,target===path&&etag?{'If-Match':etag}:{},request.signal,background)}
       catch(cause){if(timedOut&&!signal.aborted&&!readSignal.aborted)throw new Error(`${label}读取超时，请重试`);throw cause}
       finally{clearTimeout(timeout);signal.removeEventListener('abort',abort);if(readSignal!==signal)readSignal.removeEventListener('abort',abort)}

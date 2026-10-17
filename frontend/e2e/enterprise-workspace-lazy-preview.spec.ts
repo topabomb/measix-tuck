@@ -117,7 +117,7 @@ test('one raster path upgrades from a thumbnail to the larger visible display si
   await expect.poll(()=>frame.locator('#large').evaluate(node=>(node as HTMLImageElement).naturalWidth)).toBeGreaterThanOrEqual(900)
 })
 
-test('a continuously slow stylesheet times out and does not prevent later styles or HTML rendering',async({page})=>{
+test('an optional stylesheet budget does not prevent later styles or HTML rendering',async({page})=>{
   core.put('slow.css','body{color:red}')
   core.put('later.css','h1{color:rgb(12,34,56)}')
   core.put('slow-style.html','<link rel="stylesheet" href="slow.css"><link rel="stylesheet" href="later.css"><h1>正文不能被样式卡住</h1><img src="sample.png">')
@@ -137,6 +137,25 @@ test('a continuously slow stylesheet times out and does not prevent later styles
     await panel.getByRole('button',{name:'预览说明与链接',exact:true}).click()
     await expect(panel.locator('.ew-links')).toContainText('样式不可用：slow.css')
   }finally{release?.()}
+})
+
+test('a foreground image waits beyond the optional resource budget and can still finish',async({page})=>{
+  await page.clock.install()
+  let finish:(()=>void)|undefined
+  await page.route('**/api/enterprise-workspace/content?**',async route=>{
+    if(route.request().method()==='GET'&&new URL(route.request().url()).searchParams.get('path')==='sample.png')await new Promise<void>(resolve=>{finish=resolve})
+    try{await route.continue()}catch{}
+  })
+  try{
+    const task=await app.manager.create({title:'图片传输不按总时长中断'})
+    await page.goto(app.url+`/#/chat/conversations/${task.id}?ew=1&wide=1&file=sample.png`)
+    const panel=page.getByRole('complementary',{name:'企业工作区'})
+    await expect.poll(()=>!!finish).toBe(true)
+    await page.clock.fastForward(30_100)
+    await expect(panel.getByRole('alert')).toHaveCount(0)
+    finish!()
+    await expect(panel.getByRole('img',{name:'sample.png',exact:true})).toBeVisible()
+  }finally{finish?.()}
 })
 
 for(const dirty of [false,true])test(`file tab quota ${dirty?'protects drafts and reports full tabs':'evicts clean tabs without disturbing the file target'}`,async({page})=>{

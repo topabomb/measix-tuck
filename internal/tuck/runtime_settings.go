@@ -553,7 +553,7 @@ func DiscoverTools(ctx context.Context, app *App, data M) (M, error) {
 		if token != "" {
 			headers.Set("Authorization", "Bearer "+token)
 		}
-		ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, mcpDiscoveryTimeout)
 		defer cancel()
 		tools, e := verifyRemote(ctx, app.Models.MCP.client, S(entry["url"]), headers)
 		if e != nil {

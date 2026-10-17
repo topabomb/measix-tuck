@@ -340,6 +340,8 @@ func downloadGeneratedImage(ctx context.Context, address string) ([]byte, error)
 	transport := newTransport(60 * time.Second)
 	transport.Proxy = nil
 	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		ctx, cancel := context.WithTimeout(ctx, httpConnectTimeout)
+		defer cancel()
 		host, port, e := net.SplitHostPort(addr)
 		if e != nil {
 			return nil, e
@@ -356,9 +358,11 @@ func downloadGeneratedImage(ctx context.Context, address string) ([]byte, error)
 		if len(ips) == 0 {
 			return nil, Problem(502, "image_url", "图片地址无法解析")
 		}
-		return (&net.Dialer{Timeout: 30 * time.Second}).DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+		return (&net.Dialer{Timeout: httpConnectTimeout}).DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
 	}
 	defer transport.CloseIdleConnections()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	req, e := http.NewRequestWithContext(ctx, "GET", address, nil)
 	if e != nil {
 		return nil, e
@@ -367,6 +371,7 @@ func downloadGeneratedImage(ctx context.Context, address string) ([]byte, error)
 	if e != nil {
 		return nil, e
 	}
+	resp.Body = watchIdle(resp.Body, fileTransferIdleTimeout, cancel)
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		return nil, Problem(502, "image_download", "图片下载失败")

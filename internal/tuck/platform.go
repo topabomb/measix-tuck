@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -189,8 +190,17 @@ func NewPlatform(store *Store, config *Config) (*Platform, error) {
 	return p, nil
 }
 func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
+const httpConnectTimeout = 30 * time.Second
+
 func newTransport(headerTimeout time.Duration) *http.Transport {
-	return &http.Transport{Proxy: http.ProxyFromEnvironment, MaxIdleConns: 64, MaxIdleConnsPerHost: 16, IdleConnTimeout: 90 * time.Second, ResponseHeaderTimeout: headerTimeout, ForceAttemptHTTP2: true}
+	return &http.Transport{
+		Proxy:               http.ProxyFromEnvironment,
+		DialContext:         (&net.Dialer{Timeout: httpConnectTimeout, KeepAlive: 30 * time.Second}).DialContext,
+		TLSHandshakeTimeout: 10 * time.Second, ExpectContinueTimeout: time.Second,
+		MaxIdleConns: 64, MaxIdleConnsPerHost: 16, IdleConnTimeout: 90 * time.Second,
+		ResponseHeaderTimeout: headerTimeout, ForceAttemptHTTP2: true,
+	}
 }
 
 const platformFormatVersion = 2

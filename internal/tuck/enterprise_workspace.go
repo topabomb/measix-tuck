@@ -4,13 +4,18 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"errors"
 	"io"
+	"log/slog"
+	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"path"
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -26,7 +31,9 @@ type EnterpriseWorkspace struct {
 }
 
 func NewEnterpriseWorkspace(p *Platform) *EnterpriseWorkspace {
-	return &EnterpriseWorkspace{Platform: p, client: &http.Client{Transport: newTransport(15 * time.Second), CheckRedirect: noRedirect}, leases: map[string]workspaceLease{}}
+	// Core can wait 90 seconds for DAV response headers after forwarding the
+	// body. Leave room for that confirmation instead of canceling it first.
+	return &EnterpriseWorkspace{Platform: p, client: &http.Client{Transport: newTransport(120 * time.Second), CheckRedirect: noRedirect}, leases: map[string]workspaceLease{}}
 }
 func workspaceIdentity(b M) string {
 	if b == nil {
@@ -100,7 +107,7 @@ func (e *EnterpriseWorkspace) Handle(w http.ResponseWriter, r *http.Request) err
 		}
 		operation, cancelOperation := context.WithCancel(ctx)
 		if method == "PUT" {
-			body = watchRequestIdle(io.NopCloser(body), 120*time.Second, cancelOperation)
+			body = watchRequestIdle(io.NopCloser(body), fileTransferIdleTimeout, cancelOperation)
 		}
 		request, er := http.NewRequestWithContext(operation, method, target, body)
 		if er != nil {
@@ -115,15 +122,31 @@ func (e *EnterpriseWorkspace) Handle(w http.ResponseWriter, r *http.Request) err
 		if method == "PUT" && r.ContentLength >= 0 {
 			request.ContentLength = r.ContentLength
 		}
+		started := time.Now()
+		var sentAt atomic.Int64
+		request = request.WithContext(httptrace.WithClientTrace(request.Context(), &httptrace.ClientTrace{WroteRequest: func(info httptrace.WroteRequestInfo) {
+			if info.Err == nil {
+				sentAt.Store(time.Now().UnixNano())
+			}
+		}}))
 		upstream, er := e.client.Do(request)
 		if er != nil {
+			var networkError net.Error
+			confirmationWait := int64(-1)
+			if sent := sentAt.Load(); sent > 0 {
+				confirmationWait = time.Since(time.Unix(0, sent)).Milliseconds()
+			}
+			slog.Warn("enterprise workspace transport failed", "event", "workspace.transport_failed", "operationId", id,
+				"method", method, "resource", resource, "elapsedMs", time.Since(started).Milliseconds(),
+				"confirmationWaitMs", confirmationWait, "timeout", errors.As(er, &networkError) && networkError.Timeout(),
+				"requestCanceled", ctx.Err() != nil, "operationCanceled", operation.Err() != nil)
 			cancelOperation()
 			if method == "GET" || method == "HEAD" {
 				return nil, Problem(502, "workspace_unreachable", "无法连接企业文件服务")
 			}
 			return nil, Problem(502, "workspace_result_unknown", "连接中断，操作结果未知，请刷新核对")
 		}
-		upstream.Body = watchIdle(upstream.Body, 120*time.Second, cancelOperation)
+		upstream.Body = watchIdle(upstream.Body, fileTransferIdleTimeout, cancelOperation)
 		if er = assertIdentity(); er != nil {
 			upstream.Body.Close()
 			return nil, er

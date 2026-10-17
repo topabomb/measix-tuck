@@ -22,6 +22,8 @@ import (
 
 var mcpVersions = []string{"2025-11-25", "2025-06-18", "2025-03-26"}
 
+const mcpDiscoveryTimeout = 20 * time.Second
+
 func ToolHash(tool M) (string, error) {
 	var valid func(any) bool
 	valid = func(v any) bool {
@@ -695,7 +697,7 @@ func (c *MCPConnections) Discover(ctx context.Context, key string) error {
 	}
 	entry.discoverMu.Lock()
 	defer entry.discoverMu.Unlock()
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, mcpDiscoveryTimeout)
 	defer cancel()
 	stop := context.AfterFunc(entry.ctx, cancel)
 	defer stop()

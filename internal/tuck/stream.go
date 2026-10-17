@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+const fileTransferIdleTimeout = 120 * time.Second
+
 // Only inactivity ends file transfers; native executions and MCP/SSE do not use
 // this wrapper. Cancellation belongs to this HTTP operation, not its transport.
 type idleReadCloser struct {

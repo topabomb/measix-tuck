@@ -16,7 +16,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"time"
 )
 
 func WorkspacePath(value string, root bool) (string, error) {
@@ -105,7 +104,7 @@ func (l *LocalTools) remote(ctx context.Context, turn *toolTurn, path, method st
 	}
 	operation, cancel := context.WithCancel(ctx)
 	if body != nil {
-		body = watchRequestIdle(io.NopCloser(body), 30*time.Second, cancel)
+		body = watchRequestIdle(io.NopCloser(body), fileTransferIdleTimeout, cancel)
 	}
 	request, e := http.NewRequestWithContext(operation, method, S(turn.Target["root"])+encodeRemote(path), body)
 	if e != nil {
@@ -126,7 +125,7 @@ func (l *LocalTools) remote(ctx context.Context, turn *toolTurn, path, method st
 		cancel()
 		return nil, e
 	}
-	response.Body = watchIdle(response.Body, 30*time.Second, cancel)
+	response.Body = watchIdle(response.Body, fileTransferIdleTimeout, cancel)
 	return response, nil
 }
 

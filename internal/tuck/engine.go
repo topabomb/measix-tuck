@@ -75,6 +75,8 @@ func (e *Engine) State() M {
 	return M{"status": e.state, "state": e.state, "version": e.version, "error": e.lastError, "external": e.options.External}
 }
 func EngineVersion(ctx context.Context, binary string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
 	out, err := exec.CommandContext(ctx, binary, "version").CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("engine version: %w", err)

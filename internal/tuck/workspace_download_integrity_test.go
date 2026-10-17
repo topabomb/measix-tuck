@@ -45,7 +45,7 @@ func TestDAVDownloadRejectsSuccessfulIncompleteOrChangedBody(t *testing.T) {
 				_, _ = w.Write([]byte(body))
 				return true
 			})
-			result := toolOutput("download_runcove_files", l.Transfer(context.Background(), turn, "download_runcove_files", M{"remote_paths": []any{"hello.txt", "second.txt"}, "local_directory": "out", "overwrite": true}))
+			result := modelContent.ToolResult("download_runcove_files", l.Transfer(context.Background(), turn, "download_runcove_files", M{"remote_paths": []any{"hello.txt", "second.txt"}, "local_directory": "out", "overwrite": true}))
 			failures := A(result["errors"])
 			if result["status"] != "partial" || len(failures) != 1 || O(failures[0])["code"] != "webdav_version_changed" || O(failures[0])["field"] != "remote_paths[1]" {
 				t.Fatal("incomplete or different content was accepted", result)

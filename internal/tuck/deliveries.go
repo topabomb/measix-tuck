@@ -73,16 +73,7 @@ func (d *Deliveries) CheckWorkspace(path string) error {
 	return nil
 }
 func (d *Deliveries) Available(task M) bool {
-	if S(task["parentTaskId"]) != "" || d.Models == nil {
-		return false
-	}
-	for _, v := range A(AssistantCatalog(d.Models.Config())["items"]) {
-		a := O(v)
-		if a["agent"] == task["agent"] {
-			return a["deliveryTool"] != false
-		}
-	}
-	return false
+	return d.Models != nil && Contains(configuredTuckTools(d.Models.Config(), S(task["agent"]), S(task["parentTaskId"]) == ""), "deliver_result")
 }
 func (d *Deliveries) recover() error {
 	root, e := os.OpenRoot(d.Root)
@@ -261,7 +252,7 @@ func (d *Deliveries) Submit(ctx context.Context, turn *toolTurn, args M) (result
 			}
 		}
 	}()
-	fail := func(code, message string) M {
+	fail := func(code string) M {
 		if code == "insufficient_storage" || code == "persistence_failed" {
 			d.Manager.mu.Lock()
 			if task := d.Manager.tasks[turn.TaskID]; task != nil && S(task["turnId"]) == turn.TurnID {
@@ -274,21 +265,21 @@ func (d *Deliveries) Submit(ctx context.Context, turn *toolTurn, args M) (result
 			}
 			d.Manager.mu.Unlock()
 		}
-		result := toolFailure(code, message)
+		result := modelContent.Failure(code)
 		if activeField != "" {
 			result["field"] = activeField
 		}
 		return result
 	}
 	if e := d.Local.current(turn); e != nil {
-		return fail("tool_not_permitted", e.Error())
+		return fail("tool_not_permitted")
 	}
 	summary, ok := args["summary"].(string)
 	if !ok || strings.TrimSpace(summary) == "" || utf8.RuneCountInString(summary) > 1000 || !noUnknown(args, "summary", "files") || args["files"] != nil && !isArray(args["files"]) {
-		return fail("invalid_arguments", "Provide a nonempty summary of at most 1,000 characters. Optional files must be a list.")
+		return fail("invalid_arguments")
 	}
 	if len(A(args["files"])) > 10 {
-		return fail("invalid_arguments", fmt.Sprintf("Received %d files; maximum 10. Select the key files or package the necessary files into an archive.", len(A(args["files"]))))
+		return fail("delivery_file_limit")
 	}
 	var root *os.Root
 	var e error
@@ -296,20 +287,20 @@ func (d *Deliveries) Submit(ctx context.Context, turn *toolTurn, args M) (result
 	for _, v := range A(args["files"]) {
 		ref, e := parseToolFile(v, true)
 		if e != nil {
-			return fail(Code(e), e.Error())
+			return fail(Code(e))
 		}
 		hasLocal = hasLocal || ref.Source == "local"
 	}
 	if hasLocal {
 		if e := checkTurnWorkspace(turn); e != nil {
-			return fail(Code(e), e.Error())
+			return fail(Code(e))
 		}
 		if turn.Workspace == "" {
-			return fail("invalid_workspace", "The external runtime working directory is unknown.")
+			return fail("invalid_workspace")
 		}
 		root, e = os.OpenRoot(turn.Workspace)
 		if e != nil {
-			return fail("file_not_readable", "The working directory is unavailable.")
+			return fail("file_not_readable")
 		}
 		defer root.Close()
 	}
@@ -319,29 +310,32 @@ func (d *Deliveries) Submit(ctx context.Context, turn *toolTurn, args M) (result
 		entry := O(v)
 		activeField = fmt.Sprintf("files[%d].path", index)
 		if !noUnknown(entry, "source", "path", "description") || !stringField(entry["path"], 1, 4096) || entry["description"] != nil && !stringField(entry["description"], 1, 1000) {
-			return fail("invalid_arguments", "Each file needs a relative path and optional nonempty description.")
+			return fail("invalid_arguments")
 		}
 		ref, e := parseToolFile(entry, true)
 		if e != nil {
-			return fail(Code(e), e.Error())
+			return fail(Code(e))
 		}
 		if ref.Source == "runcove" {
 			if e = d.Local.remoteGate(ctx, turn); e != nil {
-				return fail(Code(e), e.Error())
+				return fail(Code(e))
 			}
 			meta, e := d.Local.metadata(ctx, turn, ref.Path, false)
 			if e != nil {
-				return fail(Code(e), e.Error())
+				return fail(Code(e))
 			}
 			if meta.Kind != "file" || meta.Bytes < 0 || !strongETag(meta.ETag) {
-				return fail("file_not_readable", "A remote delivery file is not readable or has no verifiable version.")
+				return fail("file_not_readable")
 			}
-			if meta.Bytes > MaxDeliveryFile || total+meta.Bytes > MaxDeliveryBytes {
-				return fail("delivery_too_large", "Remote files exceed the delivery size limits.")
+			if meta.Bytes > MaxDeliveryFile {
+				return fail("file_too_large")
+			}
+			if total+meta.Bytes > MaxDeliveryBytes {
+				return fail("delivery_too_large")
 			}
 			key := "runcove:" + ref.Path
 			if seen[key] {
-				return fail("invalid_arguments", "List each file once.")
+				return fail("invalid_arguments")
 			}
 			seen[key] = true
 			total += meta.Bytes
@@ -354,36 +348,36 @@ func (d *Deliveries) Submit(ctx context.Context, turn *toolTurn, args M) (result
 		}
 		path, e := relativeFile(S(entry["path"]), true)
 		if e != nil {
-			return fail("invalid_arguments", e.Error())
+			return fail("invalid_arguments")
 		}
 		parent := ""
 		for _, part := range strings.Split(filepath.ToSlash(path), "/") {
 			parent = filepath.Join(parent, part)
 			info, e := root.Lstat(parent)
 			if e != nil {
-				return fail("file_not_found", "A listed file does not exist.")
+				return fail("file_not_found")
 			}
 			if info.Mode()&os.ModeSymlink != 0 {
-				return fail("path_outside_workspace", "Delivery paths must not contain symbolic links or directory junctions.")
+				return fail("path_outside_workspace")
 			}
 		}
 		handle, e := root.Open(path)
 		if e != nil {
-			return fail("file_not_readable", "A listed file cannot be read.")
+			return fail("file_not_readable")
 		}
 		info, e := handle.Stat()
 		if e != nil || !info.Mode().IsRegular() {
 			handle.Close()
-			return fail("invalid_arguments", "Delivery entries must be readable regular files.")
+			return fail("invalid_arguments")
 		}
 		if info.Size() > MaxDeliveryFile {
 			handle.Close()
-			return fail("file_too_large", "Each delivery file must be at most 512 MiB.")
+			return fail("file_too_large")
 		}
 		total += info.Size()
 		if total > MaxDeliveryBytes {
 			handle.Close()
-			return fail("delivery_too_large", "The delivery files must total at most 2 GiB.")
+			return fail("delivery_too_large")
 		}
 		key := path
 		if runtime.GOOS == "windows" {
@@ -391,13 +385,13 @@ func (d *Deliveries) Submit(ctx context.Context, turn *toolTurn, args M) (result
 		}
 		if seen[key] {
 			handle.Close()
-			return fail("invalid_arguments", "List each file once.")
+			return fail("invalid_arguments")
 		}
 		seen[key] = true
 		for _, other := range sources {
 			if os.SameFile(info, other.info) {
 				handle.Close()
-				return fail("invalid_arguments", "List each underlying file once.")
+				return fail("invalid_arguments")
 			}
 		}
 		metadata := M{"id": ID(), "path": filepath.ToSlash(path), "sizeBytes": info.Size(), "mimeType": MIMEType(path)}
@@ -409,28 +403,28 @@ func (d *Deliveries) Submit(ctx context.Context, turn *toolTurn, args M) (result
 	free, e := availableBytes(d.Root)
 	activeField = ""
 	if e != nil || free < uint64(total)+(256<<20) {
-		return fail("insufficient_storage", "Not enough free space to preserve this delivery.")
+		return fail("insufficient_storage")
 	}
 	id := ID()
 	staging = filepath.Join(".staging", id)
 	storage, e := os.OpenRoot(d.Root)
 	if e != nil {
-		return fail("snapshot_failed", "Delivery storage unavailable.")
+		return fail("snapshot_failed")
 	}
 	defer storage.Close()
 	if e = storage.MkdirAll(filepath.Join(staging, "files"), 0700); e != nil {
-		return fail("snapshot_failed", "Cannot create delivery snapshot.")
+		return fail("snapshot_failed")
 	}
 	files := []any{}
 	buffer := make([]byte, 128<<10)
 	for index, source := range sources {
 		activeField = fmt.Sprintf("files[%d].path", index)
 		if ctx.Err() != nil {
-			return fail("delivery_canceled", "The delivery was canceled before it was committed.")
+			return fail("delivery_canceled")
 		}
 		target, e := storage.OpenFile(filepath.Join(staging, "files", S(source.metadata["id"])), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 		if e != nil {
-			return fail("snapshot_failed", "Cannot create delivery file.")
+			return fail("snapshot_failed")
 		}
 		hash := sha256.New()
 		var reader io.Reader = source.file
@@ -440,13 +434,13 @@ func (d *Deliveries) Submit(ctx context.Context, turn *toolTurn, args M) (result
 			body, meta, err := d.Local.openRemoteFile(ctx, turn, source.path, MaxDeliveryFile)
 			if err != nil {
 				target.Close()
-				return fail(Code(err), err.Error())
+				return fail(Code(err))
 			}
 			remote = body
 			if meta.ETag != source.remote.ETag || meta.Bytes != size {
 				body.Close()
 				target.Close()
-				return fail("file_changed", "A remote file changed before copying.")
+				return fail("file_changed")
 			}
 			reader = body
 		}
@@ -460,22 +454,22 @@ func (d *Deliveries) Submit(ctx context.Context, turn *toolTurn, args M) (result
 		target.Close()
 		if e != nil {
 			if ctx.Err() != nil {
-				return fail("delivery_canceled", "The delivery was canceled before it was committed.")
+				return fail("delivery_canceled")
 			}
-			return fail("snapshot_failed", "Delivery file copy failed.")
+			return fail("snapshot_failed")
 		}
 		if n != size {
-			return fail("file_changed", "A file changed while copying.")
+			return fail("file_changed")
 		}
 		if source.remote != nil {
 			if e = d.Local.remoteGate(ctx, turn); e != nil {
-				return fail(Code(e), e.Error())
+				return fail(Code(e))
 			}
 		} else {
 			after, statErr := source.file.Stat()
 			disk, sourceErr := root.Lstat(source.path)
 			if statErr != nil || sourceErr != nil || after.Size() != size || !after.ModTime().Equal(source.info.ModTime()) || !os.SameFile(source.info, disk) || disk.Mode()&os.ModeSymlink != 0 {
-				return fail("file_changed", "A file changed while copying. Wait for its writer to finish.")
+				return fail("file_changed")
 			}
 		}
 
@@ -483,41 +477,41 @@ func (d *Deliveries) Submit(ctx context.Context, turn *toolTurn, args M) (result
 		files = append(files, source.metadata)
 	}
 	if e = d.Local.current(turn); e != nil {
-		return fail("tool_not_permitted", e.Error())
+		return fail("tool_not_permitted")
 	}
 	activeField = ""
 	if ctx.Err() != nil {
-		return fail("delivery_canceled", "The delivery was canceled before it was committed.")
+		return fail("delivery_canceled")
 	}
 	if e = syncDirectory(filepath.Join(d.Root, staging, "files")); e != nil {
-		return fail("snapshot_failed", e.Error())
+		return fail("snapshot_failed")
 	}
 	if e = syncDirectory(filepath.Join(d.Root, staging)); e != nil {
-		return fail("snapshot_failed", e.Error())
+		return fail("snapshot_failed")
 	}
 	final = filepath.Join("snapshots", turn.TaskID, id)
 	if e = storage.MkdirAll(filepath.Dir(final), 0700); e != nil {
-		return fail("snapshot_failed", e.Error())
+		return fail("snapshot_failed")
 	}
 	if e = storage.Rename(staging, final); e != nil {
-		return fail("snapshot_failed", e.Error())
+		return fail("snapshot_failed")
 	}
 	staging = ""
 	if e = syncDirectory(filepath.Join(d.Root, filepath.Dir(final))); e != nil {
-		return fail("snapshot_failed", e.Error())
+		return fail("snapshot_failed")
 	}
 	for _, parent := range []string{"snapshots", ".staging"} {
 		if e = syncDirectory(filepath.Join(d.Root, parent)); e != nil {
-			return fail("snapshot_failed", e.Error())
+			return fail("snapshot_failed")
 		}
 	}
 	value := M{"id": id, "taskId": turn.TaskID, "turnId": turn.TurnID, "createdAt": NowMS(), "summary": strings.TrimSpace(summary), "fileCount": len(files), "totalBytes": total, "files": files}
 	saved, e := d.commit(ctx, turn, value)
 	if e != nil {
 		if errors.Is(e, context.Canceled) || errors.Is(e, context.DeadlineExceeded) || Code(e) == "delivery_canceled" {
-			return fail("delivery_canceled", "The delivery was canceled before it was committed.")
+			return fail("delivery_canceled")
 		}
-		return fail("persistence_failed", "Delivery could not be saved. Check files and storage before continuing.")
+		return fail("persistence_failed")
 	}
 	committed = true
 	result = M{"status": "completed", "delivery_id": saved["id"], "version": saved["version"], "turn_id": saved["turnId"], "file_count": saved["fileCount"], "total_bytes": saved["totalBytes"], "view_url": "#/chat/conversations/" + turn.TaskID + "/delivery?version=" + fmt.Sprint(I(saved["version"]))}

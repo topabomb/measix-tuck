@@ -228,7 +228,7 @@ func (m *Models) GenerateImage(ctx context.Context, config, binding M, input Ima
 		if ctx.Err() != nil {
 			return nil, ctxError(ctx)
 		}
-		return nil, modelTransportError(e, "image_unreachable")
+		return nil, modelContent.TransportError(e, "image_unreachable")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -236,14 +236,14 @@ func (m *Models) GenerateImage(ctx context.Context, config, binding M, input Ima
 		if ctx.Err() != nil {
 			return nil, ctxError(ctx)
 		}
-		return nil, modelToolError(resp.StatusCode, payload, m.Secret, strings.TrimPrefix(headers.Get("Authorization"), "Bearer "))
+		return nil, modelContent.UpstreamError(resp.StatusCode, payload, m.Secret, strings.TrimPrefix(headers.Get("Authorization"), "Bearer "))
 	}
 	payload, e := ReadJSON(resp.Body, 72<<20)
 	if ctx.Err() != nil {
 		return nil, ctxError(ctx)
 	}
 	if e != nil {
-		return nil, modelTransportError(e, "invalid_image_response")
+		return nil, modelContent.TransportError(e, "invalid_image_response")
 	}
 	items := A(payload["data"])
 	if len(items) != input.Count {
@@ -275,7 +275,7 @@ func (m *Models) GenerateImage(ctx context.Context, config, binding M, input Ima
 			return nil, ctxError(ctx)
 		}
 		if e != nil {
-			return nil, modelTransportError(e, "invalid_image_response")
+			return nil, modelContent.TransportError(e, "invalid_image_response")
 		}
 		total += len(raw)
 		if len(raw) > MaxUploadBytes || total > 48<<20 {

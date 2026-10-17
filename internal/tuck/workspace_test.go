@@ -175,7 +175,7 @@ func (f *workspaceFixture) turn(t *testing.T) (*LocalTools, *toolTurn) {
 		t.Fatal(e)
 	}
 	t.Cleanup(finish)
-	turn := l.turns[headers["X-Tuck-Workspace-Turn"]]
+	turn := l.turns[headers["X-Tuck-Turn"]]
 	if turn.Target == nil {
 		t.Fatal("workspace not exposed", f.p.platform.Error())
 	}

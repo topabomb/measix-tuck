@@ -303,7 +303,7 @@ func TestInspectionSelectionAndErrors(t *testing.T) {
 	})
 	raw := testPNG(t, 20, 12, false)
 	_, e = f.models.InspectAttachments(context.Background(), c, f.platform.Binding(), model, "inspect", []InspectedAttachment{{Path: "ok.png", MIME: "image/png", Bytes: raw}})
-	if Code(e) != "upstream_rejected" || toolError(e)["upstream_code"] != "unsupported_image" || strings.Contains(e.Error(), S(f.controls["token"])) || calls.Load() != 1 {
+	if Code(e) != "upstream_rejected" || modelContent.Error(e)["upstream_code"] != "unsupported_image" || strings.Contains(e.Error(), S(f.controls["token"])) || calls.Load() != 1 {
 		t.Fatal("rejection/redaction/retry", e, calls.Load())
 	}
 	f.change(func() { O(f.controls["state"])["runtimeBlocked"] = true })
@@ -399,7 +399,7 @@ func TestInspectionUploadTextOnlyAndPermissions(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer finish()
-	turn := app.Local.turns[headers["X-Tuck-Workspace-Turn"]]
+	turn := app.Local.turns[headers["X-Tuck-Turn"]]
 	args := M{"attachments": inspectionTestRefs([]string{S(upload["path"])}), "request": "Inspect"}
 	if result := app.Local.inspectAttachments(context.Background(), turn, "unknown-agent", args); result["code"] != "tool_not_permitted" {
 		t.Fatal(result)

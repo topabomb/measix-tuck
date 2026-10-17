@@ -4,9 +4,13 @@
 
 下文 `?` 表示可采用默认值。原生工具经过模型协议转换后，部分可选字段会出现在 `required` 中并允许 `null`；此时应按模型收到的 schema 填写 `null`，不能照抄省略字段的示意调用。七个 Tuck 工具的成功字段、英文错误类型及可选字段遵守[工具返回合同](tool-results.md)，外部和原生工具保持原合同。
 
-Tuck 自实现工具统一不加来源或分组前缀：`list_sessions`、`send_session_message`、`deliver_result`、`upload_runcove_file`、`download_runcove_files`、`generate_images`、`inspect_attachments`。名称采用动词在前、对象在后，保留会话、Runcove 等必要限定。工具及参数描述统一由 [tool_descriptions.go](../internal/tuck/tool_descriptions.go) 定义并通过 ResolveToolText 返回；资源名和英文原文见本文末尾。
+Tuck 自实现工具统一不加来源或分组前缀：`list_sessions`、`send_session_message`、`deliver_result`、`upload_runcove_file`、`download_runcove_files`、`generate_images`、`inspect_attachments`。名称采用动词在前、对象在后，保留会话、Runcove 等必要限定。工具定义与全部 Tuck 自组织提示词遵守 [模型可见内容的唯一入口](architecture.md#模型可见内容的唯一入口)，资源标识和工具文字展示见本文末尾。
 
-本机 MCP 使用官方公开配置省略 `name`，因此引擎直接暴露工具原名；内部端点及目录 Cookie 仍分别管理职责，没有合并权限或生命周期。不添加旧工具别名，不改写已有原生历史。第三方/平台 MCP 的命名空间规则不变。依据：[官方 MCP 配置](https://docs.docker.com/ai/docker-agent/tools/mcp/)。
+Tuck 原生工具集统一采用一套进程内 MCP 服务和一个工具入口；服务级 `instructions`、工具描述及权限边界见 [架构约定](architecture.md#tuck-原生工具集与-mcp)。本文定义工具的参数、返回和许可合同。
+
+服务级 `instructions` 本期只用一句英文列出本次实际装配的工具名，由统一内容入口从最终工具定义派生；标准字段是字符串，内部名称数组不能直接作为协议值。空集、单工具及配置应用后的重新装配规则均以架构约定为准，不额外注入工具使用流程或交付要求。
+
+本机 MCP 使用官方公开配置省略 `name`，因此引擎直接暴露工具原名；保留上述七个名称，不添加旧工具别名，不改写已有原生历史。目录 Cookie 和执行权限按既有职责管理。第三方/平台 MCP 的命名空间规则不变。依据：[官方 MCP 配置](https://docs.docker.com/ai/docker-agent/tools/mcp/)。
 
 ## 装配与工作目录
 
@@ -32,7 +36,7 @@ Tuck 自实现工具统一不加来源或分组前缀：`list_sessions`、`send_
 
 ## 文生图：1 个
 
-`generate_images` 由现有本机 workspace MCP 提供；当前提供给工作台主助手，要求有效 turn、可写本地任务目录和助手工具许可。不依赖企业 DAV，可在 Agent 的 Tuck 工具设置中停用；原生审批仍由 Docker Agent 负责。
+`generate_images` 由统一的 Tuck 进程内 MCP 工具集提供；提供给工作台主助手，要求有效 turn、可写本地任务目录和助手工具许可。不依赖企业 DAV，可在 Agent 的 Tuck 工具设置中停用；原生审批仍由 Docker Agent 负责。
 
 原图与提示词遵守 [任务文件规范](task-files.md)，写入任务目录下 `artifacts/images/`。`none` 模式不提供此工具，也不调用生图供应商。助手工作目录配置只决定新任务默认值，已有任务继续使用创建时确定的实际目录。
 
@@ -104,7 +108,7 @@ Tuck 自实现工具统一不加来源或分组前缀：`list_sessions`、`send_
 
 可选整数 `limit` 默认 10、范围 1–100。按已有创建时间和最近一轮开始/结束时间中较新值排序，不新增持久化活动状态。返回 `{status: "completed", sessions: [...]}`，每项包含 `task_id`、`title`、`assistant_name` 和 `status`，仅确有待处理交互时提供 `pending_interaction`。只列出当前未归档主会话，不包含原生子会话。后续发送使用这里的精确 `task_id`，不能使用标题或后台任务 ID 代替。 Tuck 会话 ID 为服务端生成的 16 位随机 base62；原生工具调用、后台任务和问题的 `elicitation_id` 保持原生值，不能按 Tuck ID 格式改写或推断。
 
-工具通过 POST 调用既有 `/api/tools/list-sessions`，避免原生 GET API 工具只接受字符串参数的限制；HTTP GET 入口继续可用，使用默认数量。POST 拒绝无效 limit 和未知字段。
+通过统一 Tuck MCP 工具入口调用；`limit` 按 schema 接收整数，拒绝无效值和未知字段，不另装配 HTTP API 工具。
 
 ### `send_session_message`
 
@@ -113,7 +117,9 @@ Tuck 自实现工具统一不加来源或分组前缀：`list_sessions`、`send_
 | `target_task_id: string` | 是 | `list_sessions` 返回的目标主会话 ID |
 | `message: string` | 是 | 去除首尾空白后非空的消息；输入长度最多 100,000 字符 |
 
-目标必须是未归档主会话。执行中的会话收到立即补充；空闲会话启动新轮；等待审批或回答等交互的会话拒绝投递。消息带协作来源标记，成功结果如下：
+长度按 Unicode 字符计数。添加协作来源标记后的完整消息仍受 Tuck 单条消息的 100,000 字符上限约束，因此接近上限时还需为标记留出空间；中文和 emoji 不按 UTF-8 字节数重复扣减额度。
+
+目标必须是未归档主会话。执行中的会话经原生 `/steer` 提交补充；空闲会话经 Submit 排队，队列未暂停时启动新轮；等待审批或回答等交互的会话拒绝投递。消息经统一内容入口附带协作来源标记，提交不保证模型已立即消费。实际提交后响应或记录无法确认时返回 `unknown / session_message_unconfirmed`，须核查目标后再决定是否重发；提交前的错误保留对应业务类型。成功结果如下：
 
 ```json
 {"status":"accepted"}
@@ -221,9 +227,9 @@ Tuck 自实现工具统一不加来源或分组前缀：`list_sessions`、`send_
 
 参数为必填 `summary` 和可选 `files`。摘要支持 Markdown，通常 1–3 句，最多 1,000 字符；只列出需要交付的关键文件，每项必填 `path`，选填 `source`（local/runcove，默认 local）和可省略的 `description`；path 相对所选来源根目录。Runcove 文件必须来自本轮已授权的工作区，直接流入现有交付暂存并形成快照，不先写任务目录；无本地目录仍可交付远程文件。文件读取失败不提交新版本。无需文件时省略 `files`，`files: []` 或 `null` 同样表示无文件。不提供由模型填写的 request_id、版本号或会话身份。
 
-一次最多 10 个关键文件；未变文件仅在使用本次成果必需时附带，不重复提交历史整套文件。单文件不超过 512 MiB，合计不超过 2 GiB。成功后保存独立副本并增加版本；普通对话和任务频道使用相同记录回看。源文件后续修改、删除或任务归档不会改变历史交付。路径、链接、复制期间的变化及文件大小均由服务验证，失败整次不建版。持久化与保留规则见 [交付存储合同](database-design.md#交付与清理)，实际模型描述与参数以 [工具定义](../internal/tuck/local_tools.go) 为准。
+一次最多 10 个关键文件；未变文件仅在使用本次成果必需时附带，不重复提交历史整套文件。单文件不超过 512 MiB，合计不超过 2 GiB。成功后保存独立副本并增加版本；普通对话和任务频道使用相同记录回看。源文件后续修改、删除或任务归档不会改变历史交付。路径、链接、复制期间的变化及文件大小均由服务验证，失败整次不建版。持久化与保留规则见 [交付存储合同](database-design.md#交付与清理)，实际模型描述与参数以 [工具定义](../internal/tuck/model_content_tools.go) 为准。
 
-维护入口：唯一配置为 tuck.config.json；原生装配在 internal/tuck/engine_config.go，会话协作在 app.go / tasks.go，本机 MCP 在 local_tools.go，生图协议在 image_generation.go，DAV 在 workspace_tools.go，企业代理在 mcp.go，交付在 deliveries.go。更改名称、参数或执行规则时同步本文、配置合同和对应测试。
+维护入口：唯一配置为 tuck.config.json；原生装配在 internal/tuck/engine_config.go，会话协作在 interactions.go / tasks.go，统一 MCP 在 local_tools.go，内容入口在 model_content.go，自动交付规则在 orchestration.go，生图协议在 image_generation.go，DAV 在 workspace_tools.go，企业代理在 mcp.go，交付在 deliveries.go。更改名称、参数或执行规则时同步本文、配置合同和对应测试。
 
 对应测试和真实服务验收要求见 [验证指南](verification.md#真实服务与已知限制)；本工具目录不声明当前部署已完成所有真实副作用验收。
 
@@ -231,20 +237,22 @@ Tuck 自实现工具统一不加来源或分组前缀：`list_sessions`、`send_
 
 两张入口卡片分别进入原生工具同页列表和 Tuck 工具开关列表。`agents.<agent>.disabledTuckTools` 支持 `list_sessions`、`send_session_message`、`upload_runcove_file`、`download_runcove_files`、`generate_images`、`inspect_attachments`，缺省全部启用，保存并应用后按 Agent 过滤原生运行时的工具目录。附件识别允许只读 Agent 使用。交付沿用 `workbench.assistants[].deliveryTool`。停用不会改变其他 Agent；原有主/子代理边界和企业文件权限保持有效。
 
-## 描述资源与编排边界
+## 模型可见内容与编排边界
 
-已实现：Tuck 的七个工具和全部参数描述集中在 `tool_descriptions.go`，以 `tuck.<工具名>.description` 和 `tuck.<工具名>.param.<参数路径>` 标识；动态模型/提供商文字也有独立资源名。调用处不散落描述正文，缺失资源或必要占位值属于明确错误。参数 schema、权限与执行仍归既有 owner。
+Tuck 自组织的模型可见内容统一经过 `model_content.go` 的调用界面，内部按文字资源、工具定义和结果投影克制拆分，范围及职责见 [架构约定](architecture.md#模型可见内容的唯一入口)。工具文字沿用 `tuck.<工具名>.description` 和 `tuck.<工具名>.param.<参数路径>` 等稳定资源标识；服务级工具名清单、自动补交付及其他模型内容由入口对应的构造函数生成。编排策略决定业务需要，Manager 负责运行协调和提交校验，业务 owner 保留权限及执行职责；调用者不能绕过入口直接拼接文字或调用子模块。
 
-规划中：未来编排可引用 Tuck、外部 MCP、Docker Agent 内置工具的来源身份和选择配置；本期不实现编排运行器或描述覆盖系统。外部 MCP 原始合同和哈希不得被本地文案改写破坏；引擎内置工具仅按实际版本的公开能力配置，不读取或改写引擎内部实现。模型和提供商显示值不能代替稳定工具身份。
+编排可引用 Tuck、外部 MCP、Docker Agent 内置工具的来源身份和选择配置；工具使用指导与真正修改工具 description 的边界见 [上下文披露与编排](architecture.md#上下文披露与编排)。本期只整理已有规则及内容路径，不启用工具描述优化或新的编排运行器。外部 MCP 原始合同和哈希不得被本地文案改写破坏；引擎内置工具仅按实际版本的公开能力配置，不读取或改写引擎内部实现。模型和提供商显示值不能代替稳定工具身份。
 
 <!-- tool-text-resources:start -->
+
+下表是统一资源的工具文字展示，不是另一份独立文案来源；资源导出与合同校验共同维护一致性，不能仅在文档中修改模型文案。
 
 | 资源名 | 英文描述原文 |
 | --- | --- |
 | `tuck.list_sessions.description` | List Tuck conversations and their task IDs to find a conversation to contact. |
 | `tuck.list_sessions.param.limit` | Number of conversations to return, from 1 to 100; default 10. |
 | `tuck.send_session_message.description` | Send a message to a Tuck conversation as requested by the user. When needed, ask for a reply in the message and explain what feedback is needed. Acceptance means the message was received, not that the task is complete. |
-| `tuck.send_session_message.param.target_task_id` | Target conversation task ID, available from list_sessions. |
+| `tuck.send_session_message.param.target_task_id` | Target conversation task ID. |
 | `tuck.send_session_message.param.message` | Message to send; when a reply is needed, explain what feedback you want. |
 | `tuck.deliver_result.description` | Submit the results as a new delivery version with a brief summary and, when needed, key files from the task working directory or the connected Runcove workspace. |
 | `tuck.deliver_result.param.summary` | Briefly describe the completed work. |

@@ -607,7 +607,7 @@ func (m *Manager) prepare(task M, prompt string, ids []string) (M, []any, error)
 	if prompt != "" {
 		blocks = append(blocks, newBlock("prompt:"+S(task["turnId"]), "markdown", M{"markdown": prompt}))
 	}
-	return M{"role": "user", "content": prompt}, blocks, nil
+	return modelContent.UserMessage(prompt, nil, false, false), blocks, nil
 }
 func (m *Manager) Submit(id, prompt string, ids []string, expected any, source M) (M, error) {
 	text, err := promptText(prompt, len(ids) > 0)
@@ -770,7 +770,7 @@ func (m *Manager) drain(ctx context.Context, id string, run *taskRun) {
 			return
 		}
 		entry := Clone(O(A(task["queue"])[0]))
-		if S(O(entry["source"])["kind"]) == "delivery_required" && (!B(O(m.Config()["workbench"])["requireDelivery"]) || !m.deliveryEnabled(task)) {
+		if S(O(entry["source"])["kind"]) == "delivery_required" && (S(O(entry["source"])["forTurnId"]) != S(task["turnId"]) || !B(O(m.Config()["workbench"])["requireDelivery"]) || !m.deliveryEnabled(task)) {
 			task["queue"] = A(task["queue"])[1:]
 			task["queuedPrompts"] = len(A(task["queue"]))
 			runErr = m.publishLocked(task, M{"type": "state", "task": task}, nil)
@@ -874,15 +874,18 @@ func (m *Manager) drain(ctx context.Context, id string, run *taskRun) {
 		}
 		// A reminder is one follow-up to ordinary input, never a source of
 		// another reminder. The native completion remains the execution fact.
-		if reason == "completed" && S(O(entry["source"])["kind"]) != "delivery_required" && B(O(m.Config()["workbench"])["requireDelivery"]) && m.deliveryEnabled(task) {
+		facts := deliveryFacts{Reason: reason, SourceKind: S(O(entry["source"])["kind"]), TurnID: S(task["turnId"]), Enabled: B(O(m.Config()["workbench"])["requireDelivery"]), Permitted: m.deliveryEnabled(task)}
+		if facts.eligible() {
 			has, e := m.options.Store.HasDelivery(id, S(task["turnId"]))
 			if e != nil {
 				runErr = e
 				m.mu.Unlock()
 				return
 			}
-			if !has {
-				entry := M{"id": ID(), "prompt": DeliveryReminder(), "source": M{"kind": "delivery_required", "forTurnId": task["turnId"], "templateVersion": 2}}
+			facts.Delivered = has
+			if turnID := deliveryFollowup(facts); turnID != "" {
+				entry := modelContent.DeliverySupplement(turnID)
+				entry["id"] = ID()
 				task["queue"] = append([]any{entry}, A(task["queue"])...)
 				task["queuedPrompts"] = len(A(task["queue"]))
 				task["deliveryContinuationForTurnId"] = task["turnId"]
@@ -919,13 +922,7 @@ func OOrNil(v any) M {
 	return O(v)
 }
 func (m *Manager) deliveryEnabled(t M) bool {
-	for _, v := range A(m.AssistantCatalog()["items"]) {
-		a := O(v)
-		if S(a["agent"]) == S(t["agent"]) {
-			return a["deliveryTool"] != false
-		}
-	}
-	return false
+	return Contains(configuredTuckTools(m.Config(), S(t["agent"]), S(t["parentTaskId"]) == ""), "deliver_result")
 }
 func (m *Manager) waitStopped(id string) bool {
 	t, err := m.Get(id)
@@ -1422,10 +1419,4 @@ func (m *Manager) waitSending(ctx context.Context, id string) bool {
 	case <-ctx.Done():
 		return false
 	}
-}
-func DeliveryReminder() string {
-	return `<tuck_automation type="delivery_required">
-This is an automated message from Tuck, not text written by the user.
-The previous turn completed without a delivery. Call deliver_result with a brief summary of the results, using no more than 1,000 characters. Include only key files if file delivery is needed.
-</tuck_automation>`
 }

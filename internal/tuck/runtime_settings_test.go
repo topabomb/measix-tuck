@@ -109,14 +109,14 @@ func TestLocalMCPTaskTurnOwnership(t *testing.T) {
 		}
 		t.Cleanup(finish)
 		tasks = append(tasks, task)
-		keys = append(keys, h["X-Tuck-Workspace-Turn"])
+		keys = append(keys, h["X-Tuck-Turn"])
 		finishes = append(finishes, finish)
 	}
 	send := func(session, key, method string, params M) (*http.Response, error) {
 		params = Merge(params, M{"_meta": M{"io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": M{}, "io.modelcontextprotocol/clientInfo": M{"name": "ownership", "version": "1"}}})
-		r, _ := http.NewRequest("POST", f.p.models.URL+"/workspace-tools", strings.NewReader(string(JSON(M{"jsonrpc": "2.0", "id": float64(1), "method": method, "params": params}))))
+		r, _ := http.NewRequest("POST", f.p.models.URL+"/tuck-tools?agent=root", strings.NewReader(string(JSON(M{"jsonrpc": "2.0", "id": float64(1), "method": method, "params": params}))))
 		r.Header.Set("Authorization", "Bearer "+f.p.models.Secret)
-		r.Header.Set("X-Tuck-Workspace-Turn", key)
+		r.Header.Set("X-Tuck-Turn", key)
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Accept", "application/json, text/event-stream")
 		r.Header.Set("Mcp-Protocol-Version", "2026-07-28")
@@ -125,7 +125,7 @@ func TestLocalMCPTaskTurnOwnership(t *testing.T) {
 			r.Header.Set("Mcp-Name", S(params["name"]))
 		}
 		if session != "" {
-			r.AddCookie(&http.Cookie{Name: "tuck-workspace-catalog", Value: session})
+			r.AddCookie(&http.Cookie{Name: toolCatalogCookie("root"), Value: session})
 		}
 		return http.DefaultClient.Do(r)
 	}
@@ -135,7 +135,7 @@ func TestLocalMCPTaskTurnOwnership(t *testing.T) {
 	}
 	session := ""
 	for _, cookie := range r.Cookies() {
-		if cookie.Name == "tuck-workspace-catalog" {
+		if cookie.Name == toolCatalogCookie("root") {
 			session = cookie.Value
 		}
 	}

@@ -1,6 +1,6 @@
 # 配置合同
 
-唯一用户配置是 `tuck.config.json`，由 `tuck init` 创建。无凭据模板在 [default-config.json](../internal/tuck/contract/default-config.json)，也可用 `tuck config-template` 输出；init 生成本机独立的 `security.credentialKey`，已有文件不覆盖。所有相对路径以配置目录解析，不读取 .env 或历史启动环境覆盖。字段及类型校验以 [config.go](../internal/tuck/config.go) 为准，安装步骤见 [README](../README.md#快速开始)。
+唯一用户配置是 `tuck.config.json`，由 `tuck init` 创建。基础配置在 [default-config.json](../internal/tuck/contract/default-config.json)，默认 Agent 指令和描述由 `model_content` 组合；用 `tuck config-template` 输出完整无凭据模板，不能直接复制基础 JSON 作为用户配置。init 生成本机独立的 `security.credentialKey`，已有文件不覆盖。所有相对路径以配置目录解析，不读取 .env 或历史启动环境覆盖。字段及类型校验以 [config.go](../internal/tuck/config.go) 为准，安装步骤见 [README](../README.md#快速开始)。
 
 ## 结构与默认值
 
@@ -69,6 +69,14 @@ Agent 可通过 `agents.<name>.imageGenerator` 覆盖生图资源，值与全局
 ## 附件识别模型
 
 附件识别的全局默认位于“提供商与模型”；各 Agent 的 Tuck 工具页可开启“识别附件”并覆盖识图模型。模型需声明 TEXT、IMAGE 输入，无需 TOOL；未指定时沿用平台明确下发的默认识图模型。明确选择失效时不回退。工具只读，支持任务目录任意位置的图片；参数、子代理及上下文边界见[附件识别](attachment-inspection.md)。新增字段可省略，不改变已有数据解释，不需要数据库迁移。
+
+## Tuck 原生工具集
+
+Tuck 自实现工具使用服务进程内的统一 MCP 入口，不通过 `localMcp` 登记为外部连接。`agents.<name>.disabledTuckTools` 和助手的 `deliveryTool` 继续控制工具许可，主/子代理、只读和资源条件共同决定装配集合；每个 Agent 最多生成一个 Tuck MCP toolset，没有工具可装配时省略。
+
+工具定义和服务级 `instructions` 从同一集合经 `model_content` 生成；本期说明只列工具名，不提供单独的数组配置、规则编辑器或持久化副本。工具开关按既有保存与应用流程生效，重新装配后验证对应说明已进入模型请求；单纯保存不能当作已应用。`requireDelivery` 保留运行中更新语义，由自动交付策略提出补充请求，Manager 校验并提交，不通过修改初始化 instructions 表达。内容与生命周期合同见 [架构约定](architecture.md#tuck-原生工具集与-mcp)。
+
+工具使用指导、任务背景及编排审查按 [上下文披露与编排](architecture.md#上下文披露与编排) 扩展，不新增 MCP instructions 配置来代替这些职责。本期不增加编排代理分类设置或背景生成开关；默认 Agent 文案由统一内容入口供给初始化，已有用户保存的指令不被静默改写。
 
 ## 本地 MCP 工具选择
 

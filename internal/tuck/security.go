@@ -55,7 +55,6 @@ func retryError(code, message string, seconds int) error {
 type Security struct {
 	Store          *Store
 	Config         *Config
-	InternalToken  string
 	Now            func() int64
 	mu             sync.Mutex
 	checks         int
@@ -69,7 +68,7 @@ func NewSecurity(store *Store, config *Config) (*Security, error) {
 	if e != nil {
 		return nil, e
 	}
-	s := &Security{Store: store, Config: config, InternalToken: Token(), Now: NowMS, dummy: dummy, watches: map[string]map[string]context.CancelFunc{}}
+	s := &Security{Store: store, Config: config, Now: NowMS, dummy: dummy, watches: map[string]map[string]context.CancelFunc{}}
 	s.activeIdentity = s.identity()
 	config.mu.Lock()
 	config.onApplied = s.syncIdentity
@@ -123,9 +122,6 @@ func (s *Security) Origin(r *http.Request) (*url.URL, error) {
 	}
 	return u, nil
 }
-func (s *Security) Internal(r *http.Request) bool {
-	return strings.HasPrefix(r.URL.Path, "/api/tools/") && IsLoopback(peerIP(r)) && Equal(r.Header.Get("Authorization"), "Bearer "+s.InternalToken)
-}
 func cookieValue(r *http.Request, name string) string {
 	c, e := r.Cookie(name)
 	if e != nil {
@@ -150,9 +146,6 @@ func (s *Security) Session(r *http.Request) (M, error) {
 	return M{"token_hash": hash, "identity": identity, "csrf": csrf, "expires_at": expires}, nil
 }
 func (s *Security) Authorize(r *http.Request) (M, error) {
-	if s.Internal(r) {
-		return nil, nil
-	}
 	if _, e := s.Origin(r); e != nil {
 		return nil, e
 	}

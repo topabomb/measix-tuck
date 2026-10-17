@@ -20,9 +20,9 @@ if (!process.env.TUCK_TEST_ENGINE) {
  process.env.TUCK_TEST_ENGINE = installed.engine.binary ? resolve(root,installed.engine.binary) : resolve(root,installed.storage.dataDir,'engines',installed.engine.version,binary);
 }
 await access(process.env.TUCK_TEST_ENGINE);
-const { launch } = await import('../tests/fixtures/bridge.mjs');
+const { launch, defaultConfig } = await import('../tests/fixtures/bridge.mjs');
 const { workspaceFixture } = await import('../tests/fixtures/workspace-fixture.mjs');
-const config = JSON.parse(await readFile('internal/tuck/contract/default-config.json', 'utf8'));
+const config = defaultConfig();
 config.providers = [{ id:'demo',displayName:'演示供应商',enabled:true,protocol:'OPENAI_CHAT_COMPLETIONS',baseUrl:'http://127.0.0.1:1/v1',apiKey:'demo-only',models:[{modelId:'demo-model',displayName:'演示模型',enabled:true,upstreamModelKey:'demo',inputModalities:['TEXT','IMAGE'],capabilities:['TOOL'],contextWindow:128000,maxOutputTokens:8192}]}];
 config.defaultModelId = 'demo-model';
 for (const assistant of config.workbench.assistants) { assistant.workspace={mode:'auto'}; assistant.deliveryTool=true; }

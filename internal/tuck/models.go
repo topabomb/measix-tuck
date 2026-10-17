@@ -13,19 +13,19 @@ import (
 const AgentRequestBytes = 100 << 20
 
 type Models struct {
-	Platform                  *Platform
-	Store                     *Store
-	Settings                  *Config
-	Secret, URL, WorkbenchURL string
-	MCP                       *MCPConnections
-	Local                     *LocalTools
-	mu                        sync.RWMutex
-	config                    M
-	catalog                   []M
-	server                    *http.Server
-	ctx                       context.Context
-	cancel                    context.CancelFunc
-	client                    *http.Client
+	Platform    *Platform
+	Store       *Store
+	Settings    *Config
+	Secret, URL string
+	MCP         *MCPConnections
+	Local       *LocalTools
+	mu          sync.RWMutex
+	config      M
+	catalog     []M
+	server      *http.Server
+	ctx         context.Context
+	cancel      context.CancelFunc
+	client      *http.Client
 }
 
 func NewModels(config *Config, store *Store, platform *Platform) (*Models, error) {

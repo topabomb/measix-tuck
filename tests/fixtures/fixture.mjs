@@ -1,7 +1,6 @@
 // Deterministic model fixture. The backend under test is always Go.
 import {createServer} from 'node:http';
-import {readFile} from 'node:fs/promises';
-import {launch,until} from './bridge.mjs';
+import {launch,until,defaultConfig} from './bridge.mjs';
 export {until};
 const pause=ms=>new Promise(done=>setTimeout(done,ms));
 const listen=server=>new Promise((done,fail)=>server.once('error',fail).listen(0,'127.0.0.1',done));
@@ -96,7 +95,7 @@ export async function fixture(options={}) {
   });
   await listen(model);
 
- const config=JSON.parse(await readFile(new URL('../../internal/tuck/contract/default-config.json',import.meta.url),'utf8'));
+ const config=defaultConfig();
  config.agents.root.instruction='Follow the requested test task.';
  config.agents.root.max_iterations=maxIterations;
  config.agents.root.sub_agents=['worker'];

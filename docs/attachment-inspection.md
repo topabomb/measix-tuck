@@ -22,11 +22,11 @@
 
 不继承主 Agent 的覆盖值，不使用聊天模型或目录首项兜底。明确指定但失效时报告 `inspection_model_unavailable`；未配置时报告 `inspection_model_required`。设置页提供全局默认和各 Agent 的覆盖下拉框；配置保护继续按 providers / agents 分类。禁用项为 `agents.<name>.disabledTuckTools` 中的 `inspect_attachments`；只读 Agent 可使用。
 
-原生子代理也可独立选择模型。生成公开 YAML 时为各 Agent 配置带固定 Agent 标识的本机 MCP URL；工具执行仍要求活跃主任务 turn header，并核对该 Agent 属于任务根 Agent 或其配置的子代理树。各 Agent 的 MCP 目录及 Cookie 分开，复用已有 SDK peer 生命周期；不从原生内部状态猜当前 Agent，也不建立新的子代理调度或会话。
+原生子代理也可独立选择模型。各 Agent 通过同一个 Tuck MCP 入口携带明确调用者身份；工具执行仍要求活跃主任务 turn header，并核对该 Agent 属于任务根 Agent 或其配置的子代理树。目录、说明和资源选择依据该 Agent 的许可，不继承主助手全部工具；SDK 连接及目录身份按调用者隔离，不为附件识别另建 MCP 服务，也不从原生内部状态猜当前 Agent 或建立新的子代理调度。
 
 ## 执行与上下文边界
 
-`Files.ReadInspectionAttachments` 读取本地图片；`LocalTools.readToolAttachments` 根据显式来源复用本地读取或既有远程传输，并统一校验合计大小；`LocalTools` 校验参数、Agent 许可、任务/轮次、目录及平台身份；`Models.InspectAttachments` 只执行一次无状态模型请求。识图模型只收到固定的证据与不确定性指令、按序标注的图片及本次 request，不携带主聊天历史、主助手系统提示或任何工具。Responses 使用完整 input 与 `store=false`，没有 previous_response_id。
+`Files.ReadInspectionAttachments` 读取本地图片；`LocalTools.readToolAttachments` 根据显式来源复用本地读取或既有远程传输，并统一校验合计大小；`LocalTools` 校验参数、Agent 许可、任务/轮次、目录及平台身份；`model_content` 统一组织识图指令、按序图片标签和本次 request 的模型可见结构；`Models.InspectAttachments` 负责协议编码并执行一次无状态模型请求。识图模型不接收主聊天历史、主助手系统提示或任何工具。Responses 使用完整 input 与 `store=false`，没有 previous_response_id。唯一入口及内部职责见 [架构约定](architecture.md#模型可见内容的唯一入口)。
 
 沿用共享模型客户端的 180 秒响应头等待上限，不设置附件识别总期限或独立计时器。远端服务可以提前返回自己的超时错误；用户取消仍沿原调用上下文传播。
 
@@ -38,7 +38,7 @@
 
 ## 不支持多模态时的实际行为
 
-官方 v1.150.0（`5277e7842058fc3fbb9943a6e88bc05a1c8e6fe2`）已通过隔离测试核对：公开模型配置的 `capabilities.image=false` 时，MCP 图片仍保存在公开 session 历史，但后续聊天请求不包含图片像素，且不会因此产生错误。不能从工具成功或界面有图推断模型已看见图片。生图工具在此情况下明确返回提示，建议按返回路径调用附件识别。
+官方 v1.150.0（`5277e7842058fc3fbb9943a6e88bc05a1c8e6fe2`）已通过隔离测试核对：公开模型配置的 `capabilities.image=false` 时，MCP 图片仍保存在公开 session 历史，但后续聊天请求不包含图片像素，且不会因此产生错误。不能从工具成功或界面有图推断模型已看见图片。生图工具在此情况下明确说明模型理解限制；只有附件识别确已获许可并可用时才建议调用它，避免提示使用已禁用工具。
 
 用户上传图片时：聊天模型声明 IMAGE 则继续原有原生多模态输入；纯文本模型只有在附件识别已配置且获许可时，才允许提交图片，发送给聊天模型的只是文件路径与调用识别工具的明确指引，浏览器也显示此区别。不会自动调用识图或自动替换用户选择的聊天模型。未配置时前后端均给出可操作错误。
 
@@ -47,8 +47,6 @@
 ## 规划与验收
 
 PDF、音视频、Office 等附件类型尚未实施；名称和参数不限定图片，未来根据明确的媒体读取和线协议合同增加类型，不将 IMAGE 声明扩大解释为通用附件支持。TTS、ASR 不属于本期。
-
-Android 参考实现位于 `rikkahub_mcp/app/src/main/java/net/weero/measix/pilot/data/ai/tools/AttachmentInspectionTool.kt`：借鉴两个参数、独立单次识别、按序标签、文字结果及明确失败；不复制其专用 `/upload` 限制或远程 URL 获取。
 
 协议依据：[OpenAI 图片输入](https://developers.openai.com/api/docs/guides/images-vision)、[Docker Agent 模型配置](https://docker.github.io/docker-agent/concepts/models/)、[Docker Agent 工具](https://docker.github.io/docker-agent/concepts/tools/)。当前行为以官方二进制隔离测试为准，不依赖引擎源码内部实现或 SQLite。
 

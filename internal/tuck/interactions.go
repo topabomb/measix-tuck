@@ -3,7 +3,9 @@ package tuck
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
@@ -111,7 +113,7 @@ func (m *Manager) ResolveInteraction(ctx context.Context, id string, response M)
 	m.mu.Unlock()
 	defer func() { m.mu.Lock(); delete(m.resolving, id); m.mu.Unlock() }()
 	path := nativePath(snapshot, "/resume")
-	body := M{"confirmation": "reject", "reason": "User rejected the proposed action"}
+	body := M{"confirmation": "reject", "reason": modelContent.ApprovalRejectionReason()}
 	if kind == "approval" {
 		if B(response["approved"]) {
 			body = M{"confirmation": "approve", "reason": ""}
@@ -212,13 +214,19 @@ func (m *Manager) Steer(ctx context.Context, id, prompt string, ids []string, so
 	record := &steeringRecord{hash: Hash([]byte(trimEnd(S(native["content"])))), after: cursor, status: "pending", index: -1, turnID: S(snapshot["turnId"])}
 	m.steering[id] = append(m.steering[id], record)
 	m.mu.Unlock()
+	submissionError := func(err error) error {
+		if S(source["kind"]) == "collaboration" {
+			return Problem(Status(err), "session_message_unconfirmed", "跨会话消息提交结果未确认")
+		}
+		return err
+	}
 	_, requestErr := m.options.Engine.Request(ctx, "POST", nativePath(snapshot, "/steer"), M{"messages": []M{native}})
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	task = m.tasks[id]
 	if requestErr != nil && record.status != "delivered" {
 		m.forgetSteeringLocked(id, record)
-		return nil, requestErr
+		return nil, submissionError(requestErr)
 	}
 	label := "用户立即补充"
 	if S(source["kind"]) == "collaboration" {
@@ -236,11 +244,11 @@ func (m *Manager) Steer(ctx context.Context, id, prompt string, ids []string, so
 	}
 	msg, err := m.appendLocked(task, entry)
 	if err != nil {
-		return nil, err
+		return nil, submissionError(err)
 	}
 	record.index = I(msg["index"])
 	if err = m.updateSteeringLocked(task, record); err != nil {
-		return nil, err
+		return nil, submissionError(err)
 	}
 	if record.status != "pending" {
 		m.forgetSteeringLocked(id, record)
@@ -436,4 +444,63 @@ func (m *Manager) restoreSteeringLocked() error {
 		}
 	}
 	return nil
+}
+
+// ListSessions returns product facts. Model field selection belongs to modelContent.
+func (m *Manager) ListSessions(args M) (M, error) {
+	limit := 10
+	if !noUnknown(args, "limit") || args["limit"] != nil && !Integer(args["limit"], 1, 100) {
+		return nil, Problem(400, "invalid_arguments", "列表数量必须是 1–100 的整数")
+	}
+	if args["limit"] != nil {
+		limit = I(args["limit"])
+	}
+	tasks := m.List()
+	activity := func(task M) int64 {
+		created, _ := time.Parse(time.RFC3339Nano, S(task["createdAt"]))
+		timing := O(task["turnTiming"])
+		return max(created.UnixMilli(), int64(N(timing["startedAt"])), int64(N(timing["endedAt"])))
+	}
+	sort.SliceStable(tasks, func(i, j int) bool { return activity(tasks[i]) > activity(tasks[j]) })
+	sessions := []any{}
+	catalog := A(m.AssistantCatalog()["items"])
+	for _, task := range tasks {
+		if B(task["archived"]) || S(task["parentTaskId"]) != "" {
+			continue
+		}
+		name := S(task["assistantName"])
+		for _, v := range catalog {
+			if O(v)["agent"] == task["agent"] {
+				name = S(O(v)["displayName"])
+			}
+		}
+		sessions = append(sessions, M{"task_id": task["id"], "title": task["title"], "assistant_name": name, "status": task["status"], "pending_interaction": O(task["pendingInteraction"])["kind"]})
+		if len(sessions) == limit {
+			break
+		}
+	}
+	return M{"status": "completed", "sessions": sessions}, nil
+}
+func (m *Manager) SendSessionMessage(ctx context.Context, args M) (M, error) {
+	if !noUnknown(args, "target_task_id", "message") || !stringField(args["target_task_id"], 1, 1024) || !stringField(args["message"], 1, 100000) || strings.TrimSpace(S(args["message"])) == "" {
+		return nil, Problem(400, "invalid_message", "目标及消息无效")
+	}
+	task, e := m.Get(strings.TrimSpace(S(args["target_task_id"])))
+	if e != nil {
+		return nil, e
+	}
+	if B(task["archived"]) || S(task["parentTaskId"]) != "" {
+		return nil, Problem(409, "invalid_target", "目标必须是未归档的主会话")
+	}
+	if task["pendingInteraction"] != nil {
+		return nil, Problem(409, "interaction_pending", "目标正在等待审批或回答")
+	}
+	message := modelContent.Collaboration(S(args["message"]))
+	if _, err := promptText(message, false); err != nil {
+		return nil, Problem(400, "invalid_message", "消息过长")
+	}
+	if _, e = m.Steer(ctx, S(task["id"]), message, nil, M{"kind": "collaboration"}); e != nil {
+		return nil, e
+	}
+	return M{"status": "accepted"}, nil
 }

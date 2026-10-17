@@ -315,7 +315,7 @@ func TestParityNativeAttachments(t *testing.T) {
 					data = S(O(p["image_url"])["url"])
 				}
 			}
-			for _, fragment := range []string{S(file["path"]), S(image["path"]), "already saved in this task's local working directory", "paths below are relative to that directory", "read_file for one file or read_multiple_files for multiple files", "No remote download is needed"} {
+			for _, fragment := range []string{S(file["path"]), S(image["path"]), "already saved in this task's local working directory", "paths below are relative to that directory", "Use available local tools to read them.", "No remote download is needed"} {
 				if !strings.Contains(text, fragment) {
 					t.Fatal("attachment guidance missing", fragment, text)
 				}
@@ -923,7 +923,7 @@ func TestParityNativeDeliveryContinuation(t *testing.T) {
 	}
 	// Genuine user input can independently receive one reminder, even when
 	// its text happens to equal Tuck's reminder template.
-	done = runAppTask(t, app, lid, DeliveryReminder())
+	done = runAppTask(t, app, lid, modelContent.DeliveryReminder())
 	if I(done["turnCount"]) != 4 || len(A(done["queue"])) != 0 {
 		t.Fatal(done)
 	}
@@ -1078,7 +1078,7 @@ func TestParityNativeDeliveryNullableAndLimit(t *testing.T) {
 	done := runAppTask(t, app, id, "delivery shape")
 	mu.Lock()
 	defer mu.Unlock()
-	if len(outputs) != 3 || !strings.Contains(S(outputs[0]["content"]), "49") || !strings.Contains(strings.ToLower(S(outputs[0]["content"])), "archive") {
+	if len(outputs) != 3 || !strings.Contains(S(outputs[0]["content"]), "10") || !strings.Contains(strings.ToLower(S(outputs[0]["content"])), "archive") {
 		t.Fatal(outputs)
 	}
 	files := O(O(schema["properties"])["files"])

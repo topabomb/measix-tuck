@@ -12,6 +12,7 @@ const root=fileURLToPath(new URL('../../',import.meta.url));
 const executable=resolve(root,'.local',process.platform==='win32'?'tuck-fixture.exe':'tuck-fixture');
 const official=process.env.TUCK_TEST_ENGINE||resolve(root,'tests/runtime',process.platform==='win32'?'docker-agent.exe':'docker-agent');
 const pause=ms=>new Promise(done=>setTimeout(done,ms));
+export function defaultConfig(){const result=spawnSync(executable,['-test.run=^TestFixtureDefaultConfig$'],{cwd:root,env:{...process.env,TUCK_FIXTURE_DEFAULT_CONFIG:'1'},encoding:'utf8',windowsHide:true});if(result.error)throw result.error;if(result.status!==0)throw new Error(result.stderr||result.stdout||'Go default configuration failed');return JSON.parse(result.stdout)}
 export async function until(fn,timeout=20000){const end=Date.now()+timeout;while(Date.now()<end){const result=await fn();if(result)return result;await pause(25)}throw new Error('Condition timed out')}
 export async function freePort(){const server=createServer();await new Promise((done,fail)=>server.once('error',fail).listen(0,'127.0.0.1',done));const port=server.address().port;await new Promise(done=>server.close(done));return port}
 export async function launch(config,options={}){

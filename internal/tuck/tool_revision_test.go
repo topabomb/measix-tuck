@@ -18,19 +18,22 @@ func TestToolTextResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for id := range toolTexts {
-		if !strings.Contains(string(doc), string(id)) || !strings.Contains(string(doc), strings.TrimSpace(toolTexts[id])) {
+	for id := range modelTexts {
+		if strings.HasPrefix(string(id), "tuck.agent.") {
+			continue
+		}
+		if !strings.Contains(string(doc), string(id)) || !strings.Contains(string(doc), strings.TrimSpace(modelTexts[id])) {
 			t.Error("tool text documentation drift", id)
 		}
-		text, e := ResolveToolText(id, map[string]string{"provider": "Example {provider}", "model": "image-1"})
+		text, e := modelContent.ResolveText(id, map[string]string{"provider": "Example {provider}", "model": "image-1"})
 		if e != nil || strings.TrimSpace(text) == "" {
 			t.Fatal(id, e)
 		}
 	}
-	if _, e := ResolveToolText("missing", nil); e == nil {
+	if _, e := modelContent.ResolveText("missing", nil); e == nil {
 		t.Fatal("missing resource accepted")
 	}
-	if _, e := ResolveToolText(textGenerateModel, nil); e == nil {
+	if _, e := modelContent.ResolveText(textGenerateModel, nil); e == nil {
 		t.Fatal("missing template value accepted")
 	}
 	var check func(M)
@@ -44,15 +47,12 @@ func TestToolTextResources(t *testing.T) {
 			check(O(property["items"]))
 		}
 	}
-	definitions := append(workspaceDefinitions(nil), deliveryDefinition(), inspectionDefinition(), imageDefinition(M{"upstreamModelKey": "image-1", "providerName": "Test Provider"}))
+	definitions := modelContent.Tools(modelContent.ToolNames(), M{"upstreamModelKey": "image-1", "providerName": "Test Provider"})
 	for _, definition := range definitions {
 		check(O(definition["inputSchema"]))
-	}
-	for _, tool := range sessionToolsets("http://localhost") {
-		check(M{"properties": O(tool["api_config"])["args"]})
-	}
-	if !strings.Contains(S(definitions[len(definitions)-1]["description"]), "Provider: Test Provider. Model: image-1.") {
-		t.Fatal(definitions)
+		if definition["name"] == "generate_images" && !strings.Contains(S(definition["description"]), "Provider: Test Provider. Model: image-1.") {
+			t.Fatal(definition)
+		}
 	}
 }
 
@@ -88,16 +88,18 @@ func TestInspectionLocalRootReplacedAndRemoteDecode(t *testing.T) {
 func TestListSessionsLimit(t *testing.T) {
 	f := newPlatformFixture(t, 5)
 	app := f.startApp()
-	for i := 0; i < 12; i++ {
+	sender := newParityTask(t, app, nil)
+	session := connectTuckTools(t, app, sender, "root")
+	for i := 0; i < 11; i++ {
 		newParityTask(t, app, nil)
 	}
 	for _, tt := range []struct {
 		args          M
 		count, status int
 	}{{M{}, 10, 200}, {M{"limit": 1}, 1, 200}, {M{"limit": 100}, 12, 200}, {M{"limit": 0}, 0, 400}, {M{"limit": 101}, 0, 400}, {M{"limit": 1.5}, 0, 400}} {
-		status, result, _ := requestApp(t, app, "POST", "/api/tools/list-sessions", tt.args, http.Header{"Authorization": []string{"Bearer " + app.Security.InternalToken}})
-		if status != tt.status || status == 200 && len(A(result["sessions"])) != tt.count {
-			t.Fatal(tt, status, result)
+		result := callTuckTool(t, session, "list_sessions", tt.args, tt.status != 200)
+		if tt.status == 200 && len(A(result["sessions"])) != tt.count {
+			t.Fatal(tt, result)
 		}
 	}
 }

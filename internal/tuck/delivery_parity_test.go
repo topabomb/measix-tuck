@@ -17,7 +17,7 @@ func TestParityDeliveryArgumentsAndRetention(t *testing.T) {
 	if len(protectable) != 6 {
 		t.Fatal(protectable)
 	}
-	schema := O(deliveryDefinition()["inputSchema"])
+	schema := O(modelContent.Tools([]string{"deliver_result"}, nil)[0]["inputSchema"])
 	properties := O(schema["properties"])
 	fileSchema := O(properties["files"])
 	if string(JSON(schema["required"])) != `["summary"]` || I(O(properties["summary"])["maxLength"]) != 1000 || I(fileSchema["maxItems"]) != 10 || string(JSON(O(fileSchema["items"])["required"])) != `["path"]` {

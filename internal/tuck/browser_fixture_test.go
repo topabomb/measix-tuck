@@ -14,6 +14,14 @@ import (
 	"time"
 )
 
+func TestFixtureDefaultConfig(t *testing.T) {
+	if os.Getenv("TUCK_FIXTURE_DEFAULT_CONFIG") != "1" {
+		return
+	}
+	_, _ = os.Stdout.Write(JSON(defaultConfig()))
+	os.Exit(0)
+}
+
 func TestFixtureProcess(t *testing.T) {
 	path := os.Getenv("TUCK_FIXTURE_CONFIG")
 	if path == "" {

@@ -204,7 +204,7 @@ func TestImageGenerationPlatformAdmission(t *testing.T) {
 		t.Fatal("ignored platform count limit", e)
 	}
 	r["source"] = "platform"
-	properties := O(O(imageDefinition(r)["inputSchema"])["properties"])
+	properties := O(O(modelContent.Tools([]string{"generate_images"}, r)[0]["inputSchema"])["properties"])
 	if I(O(properties["count"])["maximum"]) != 1 || I(O(properties["reference_images"])["maxItems"]) != 4 || Has(properties, "size") || Has(properties, "resource") {
 		t.Fatal("schema did not reflect platform limits", properties)
 	}
@@ -237,7 +237,7 @@ func TestImageReferenceValidationAndNoFallback(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer finish()
-	turn := app.Local.turns[headers["X-Tuck-Workspace-Turn"]]
+	turn := app.Local.turns[headers["X-Tuck-Turn"]]
 	workspace := S(task["workspace"])
 	raw := testPNG(t, 20, 12, false)
 	for name, data := range map[string][]byte{"valid.png": raw, "fake.png": []byte("not an image"), "truncated.png": raw[:20]} {
@@ -670,7 +670,7 @@ func TestImageGenerationWorkspaceModes(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		turn := app.Local.turns[headers["X-Tuck-Workspace-Turn"]]
+		turn := app.Local.turns[headers["X-Tuck-Turn"]]
 		before := calls.Load()
 		result := app.Local.generateImage(turn.ctx, turn, M{"prompt": "workspace proof"})
 		finish()

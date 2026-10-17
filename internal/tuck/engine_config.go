@@ -36,10 +36,6 @@ func (m *Models) WriteConfig() (string, error) {
 			models[alias] = M{"provider": model["provider"], "model": key, "max_tokens": model["maxOutputTokens"], "provider_opts": opts, "capabilities": M{"image": Contains(model["inputModalities"], "IMAGE"), "pdf": false}}
 		}
 	}
-	exposed := map[string]M{}
-	for _, v := range A(O(c["workbench"])["assistants"]) {
-		exposed[S(O(v)["agent"])] = O(v)
-	}
 	for name, av := range agents {
 		a := O(av)
 		defaultID := S(a["modelId"])
@@ -57,32 +53,12 @@ func (m *Models) WriteConfig() (string, error) {
 		delete(a, "modelId")
 		delete(a, "attachmentInspectionModelId")
 		delete(a, "imageGenerator")
-		disabled := a["disabledTuckTools"]
 		delete(a, "disabledTuckTools")
 		delete(a, "disabledEnterpriseMcp")
 		toolsets := A(a["toolsets"])
-		if exposed[name] != nil {
-			for _, tool := range sessionToolsets(m.WorkbenchURL) {
-				if !Contains(disabled, S(O(tool["api_config"])["name"])) {
-					toolsets = append(toolsets, tool)
-				}
-			}
-			if exposed[name]["deliveryTool"] != false && !B(a["readonly"]) {
-				toolsets = append(toolsets, localToolset(m.URL+"/api/tools/delivery", "X-Tuck-Delivery-Turn", false, nil))
-			}
-		}
 		toolsets = append(toolsets, m.MCP.Toolsets(name, B(a["readonly"]))...)
-		if !Contains(disabled, inspectionTool) {
-			toolsets = append(toolsets, localToolset(m.URL+"/attachment-tools?agent="+url.QueryEscape(name), "X-Tuck-Workspace-Turn", true, []any{inspectionTool}))
-		}
-		selected := []any{}
-		for _, tool := range []string{"upload_runcove_file", "download_runcove_files", "generate_images"} {
-			if !Contains(disabled, tool) && (tool != "generate_images" || exposed[name] != nil) {
-				selected = append(selected, tool)
-			}
-		}
-		if len(selected) > 0 {
-			toolsets = append(toolsets, localToolset(m.URL+"/workspace-tools", "X-Tuck-Workspace-Turn", B(a["readonly"]), selected))
+		if names := configuredTuckTools(c, name, true); len(names) > 0 {
+			toolsets = append(toolsets, tuckToolset(m.URL, name, B(a["readonly"])))
 		}
 		a["toolsets"] = toolsets
 	}
@@ -100,21 +76,13 @@ func (m *Models) WriteConfig() (string, error) {
 	}
 	return path, nil
 }
-func localToolset(endpoint, header string, readonly bool, tools []any) M {
+func tuckToolset(baseURL, agent string, readonly bool) M {
+	endpoint := baseURL + tuckToolsPath + "?agent=" + url.QueryEscape(agent)
 	// Omitting the public MCP name keeps our tool names unprefixed. Endpoints
 	// and headers still provide the existing ownership and lifecycle boundaries.
-	v := M{"type": "mcp", "allow_private_ips": true, "remote": M{"url": endpoint, "transport_type": "streamable-http", "headers": M{"Authorization": "Bearer ${env.TUCK_GATEWAY_TOKEN}", header: "${headers." + header + "}"}}}
+	v := M{"type": "mcp", "allow_private_ips": true, "remote": M{"url": endpoint, "transport_type": "streamable-http", "headers": M{"Authorization": "Bearer ${env.TUCK_GATEWAY_TOKEN}", tuckTurnHeader: "${headers." + tuckTurnHeader + "}"}}}
 	if readonly {
 		v["readonly"] = true
 	}
-	if tools != nil {
-		v["tools"] = tools
-	}
 	return v
-}
-func sessionToolsets(base string) []M {
-	return []M{
-		{"type": "api", "allow_private_ips": true, "api_config": M{"name": "list_sessions", "instruction": toolText(textList), "method": "POST", "endpoint": base + "/api/tools/list-sessions", "headers": M{"Authorization": "Bearer ${env.TUCK_WORKBENCH_TOKEN}"}, "args": M{"limit": M{"type": "integer", "description": toolText(textLimit), "default": 10, "minimum": 1, "maximum": 100}}}},
-		{"type": "api", "allow_private_ips": true, "api_config": M{"name": "send_session_message", "instruction": toolText(textSend), "method": "POST", "endpoint": base + "/api/tools/send-message", "headers": M{"Authorization": "Bearer ${env.TUCK_WORKBENCH_TOKEN}"}, "required": []any{"target_task_id", "message"}, "args": M{"target_task_id": M{"type": "string", "description": toolText(textTarget)}, "message": M{"type": "string", "description": toolText(textMessage)}}}},
-	}
 }

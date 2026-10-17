@@ -5,7 +5,7 @@ import {resolve} from 'node:path';
 import {tmpdir} from 'node:os';
 import {createRequire} from 'node:module';
 import {createHash} from 'node:crypto';
-import {launch} from './bridge.mjs';
+import {launch,defaultConfig} from './bridge.mjs';
 const require=createRequire(new URL('../../frontend/package.json',import.meta.url));
 const canonicalize=require('canonicalize').default;
 const toolHash=tool=>'sha256:'+createHash('sha256').update(canonicalize(tool)).digest('hex');
@@ -117,7 +117,7 @@ export async function platformFixture({native=false,version=5}={}) {
   const origin = `http://127.0.0.1:${platform.address().port}`;
   const material = JSON.stringify({ formatVersion: 1, kind: 'PLATFORM_ENROLLMENT', platformUrl: origin, code: 'synthetic-one-use-code', expiresAt: new Date(Date.now() + 3600000).toISOString() });
 
- const config=JSON.parse(await readFile(new URL('../../internal/tuck/contract/default-config.json',import.meta.url),'utf8'));
+ const config=defaultConfig();
  config.providers=[];config.defaultModelId='';config.localMcp=[];
  config.workbench.defaultAgent='root';
  for(const assistant of config.workbench.assistants){assistant.workspace={mode:'auto'};assistant.deliveryTool=true;}

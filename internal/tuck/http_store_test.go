@@ -63,7 +63,7 @@ func TestHTTPAuthenticationFilesSSEAndReverseProxy(t *testing.T) {
 			t.Fatal(path, status)
 		}
 	}
-	status, _, _ := requestApp(t, app, "GET", "/api/tasks", nil, http.Header{"Authorization": {"Bearer " + app.Security.InternalToken}})
+	status, _, _ := requestApp(t, app, "GET", "/api/tasks", nil, http.Header{"Authorization": {"Bearer " + app.Models.Secret}})
 	if status != 401 {
 		t.Fatal("internal token escaped scope", status)
 	}
@@ -123,9 +123,11 @@ func TestHTTPAuthenticationFilesSSEAndReverseProxy(t *testing.T) {
 	if status != 401 {
 		t.Fatal(status)
 	}
-	status, _, _ = requestApp(t, app, "POST", "/api/tools/list-sessions", M{}, http.Header{"Authorization": {"Bearer " + app.Security.InternalToken}})
-	if status != 200 {
-		t.Fatal("engine tools died with browser session", status)
+	session := connectTuckTools(t, app, task, "root")
+	callTuckTool(t, session, "list_sessions", M{}, false)
+	status, _, _ = requestApp(t, app, "POST", "/api/tools/list-sessions", M{}, http.Header{"Authorization": {"Bearer " + app.Models.Secret}})
+	if status != 401 {
+		t.Fatal("removed API tool bypassed browser authentication", status)
 	}
 }
 func TestHTTPSettingsProtectionVisibilityAndReplay(t *testing.T) {

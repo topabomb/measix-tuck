@@ -316,10 +316,10 @@ func VerifyModel(ctx context.Context, config *Config, data M) (M, error) {
 		return nil, Problem(422, "invalid_config", "API Key 格式无效")
 	}
 	responses := S(provider["protocol"]) == "OPENAI_RESPONSES"
-	body := M{"model": model["upstreamModelKey"], "messages": []any{M{"role": "user", "content": "Reply only OK."}}, "max_tokens": 64, "stream": false}
+	body := M{"model": model["upstreamModelKey"], "messages": []any{M{"role": "user", "content": modelContent.ConnectionProbe()}}, "max_tokens": 64, "stream": false}
 	suffix := "/chat/completions"
 	if responses {
-		body = M{"model": model["upstreamModelKey"], "input": "Reply only OK.", "max_output_tokens": 64, "stream": false, "store": false}
+		body = M{"model": model["upstreamModelKey"], "input": modelContent.ConnectionProbe(), "max_output_tokens": 64, "stream": false, "store": false}
 		suffix = "/responses"
 	}
 	started := time.Now()

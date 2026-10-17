@@ -98,11 +98,32 @@ UI 变更按影响核对：
 
 每次验证随变更记录提交/构建、命令、环境、失败和未执行项。日志、截图和 trace 保存在 `.local/`、测试临时目录或 `release/`，不加入 Git；不要把它们或当前部署地址、真实凭据写回长期指南。
 
+## 模型可见内容与统一 MCP 的验收
+
+对应回归入口：`TestTuckToolNamesOfficial` 覆盖 Chat/Responses 工具组合和续聊；`TestUnifiedMCPInstructionsAfterApply` 覆盖已有会话应用配置后的工具与说明；`TestUnifiedMCPActorPermissions`、`TestLocalMCPTaskTurnOwnership` 和 `TestLocalMCPCatalogCookieTurnAndPeerLifecycle` 覆盖调用者、轮次、目录变化及共享连接；`TestLocalMCPReconnectInventory` 验证保留旧订阅后，新初始化仍说明当前目录；`TestSessionToolResultMCP` 和 `TestSessionToolUnavailableTargetModelMCP` 覆盖 accepted 及目标模型失效；`TestCollaborationSubmissionUnconfirmed` 验证实际提交后结果未确认、前置拒绝与单次发送；`TestModelContentMCPResult` 验证文字和模型图片统一披露；`TestOfficialNativeFullLoop` 检查审批拒绝原因实际进入模型工具结果。自动交付继续由 tasks 与 native parity 的交付续轮、开关、暂停、子代理和审批测试验证。
+
+`TestLocalMCPSecondCatalogClientAcrossTurns` 另验证两个独立 Cookie Jar 跨三轮重连，以及过期、缺失和其他任务执行凭据的拒绝；目录 Cookie 只定位共享目录，不授予工具执行权。
+
+`TestSessionMessageUnicodeLength` 验证中文和 emoji 按 Unicode 字符计数，并核对协作标记加入后的完整消息上限；超限输入不能进入目标队列。
+
+架构边界以 [唯一内容入口](architecture.md#模型可见内容的唯一入口) 和 [Tuck MCP 工具集](architecture.md#tuck-原生工具集与-mcp) 为准。实现验收必须覆盖以下行为，不能仅以已有描述资源测试代替：
+
+- 每个 Agent 的原生配置最多一个 Tuck MCP toolset，没有同名 Tuck API 工具装配；统一服务不扩大主/子代理、只读和工具开关的许可范围，外部 MCP 保持原合同。
+- 空集、单工具、部分工具和七工具组合：instructions 是字符串，名称与对应装配集合完全一致且顺序稳定；空集省略，单工具语法正确，不带 `etc.`、其他来源工具、工具描述全文或额外执行规则。
+- 使用官方引擎抓取 Chat/Responses 实际模型请求，核对初始化说明和工具定义；应用启停配置后的重新装配取得新说明，普通续轮不重复追加说明。单独收到 tools/list_changed 不能作为 instructions 已更新的证据。
+- 默认指令、附件说明和图片标签、协作标记、独立识图提示词、自动交付消息及结果投影均从 model_content 入口取得；调用者不绕过入口调用子模块，用户正文和外部合同不被当作自有模板改写。
+- 自动补交付策略根据正常根终止、本轮未交付及开关事实提出请求，Manager 发送前复核关联轮次、开关及许可，最多一次且不触发自身；运行中关闭清理未执行自动项，保留自动来源和真实用户消息的区别，不把 requireDelivery 固化到初始化说明。策略不直接修改任务或队列，Manager 不内嵌提示词和业务策略。
+- 跨会话消息在 working 时走原生 steer，空闲时经 Submit 排队并遵守暂停，等待审批/回答时拒绝；同一请求只进入一个执行队列。accepted、已进入原生上下文及已完成分别依据对应事实验证，不能互相替代。
+- 模型结果只披露合同字段，错误和警告不包含界面身份、凭据或内部诊断；生图和识图建议不引用已禁用工具，实际图片及顺序、后续轮次和分支历史继续验证。
+- 任务和调用者并发隔离，过期轮次、权限或绑定变化时拒绝；取消沿原操作传播，不关闭仍有效的共享连接，也不新增轮询、应用重试或轮次重连机制。
+
+后续接入首次准备、模型审查或原生 followup 时，另验收 [编排合同](architecture.md#上下文披露与编排)：初始工具指导与实际工具集合一致，普通续聊、恢复和分支不重复生成已有背景；明确原生 session_start、turn_start 与产品会话/轮次的差异；审查材料来自对应轮次，失败不变成业务结论，迟到结果不误用于新轮次；新策略替换旧策略且不双重触发。原生队列接管须验证现有编辑、暂停、排序、恢复及逐轮授权，接管后删除对应执行适配。上述后续能力不属于本期完成声明，静态配置和模型模拟响应不能替代实际链路验收。
+
 ## 工具描述及 Runcove 扩展
 
 `tool_revision_test.go` 验证描述资源、所有参数说明、列表数量、远程快照和识别上下文；`tool_names_test.go` 使用官方引擎验证七个无前缀名称。`runcove-tools.spec.ts` 覆盖无本地目录下远程图片输入的 1365/390/320px 展示、点击预览、刷新和交付后远端修改仍可下载旧副本。平台生图测试断言 size=auto；参考图明确拒绝且不触发模型请求。以上隔离验证与真实平台部署验收分别记录。
 
-`tool_results_test.go` 验证七工具的精简模型投影、英文错误、无值字段省略、上游分类和秘密过滤、响应体超时、实际 HTTP 会话工具、部分下载及分支预览身份歧义。`TestParityNativeDeliveryContinuation` 使用官方引擎验证自动补交付不能再次触发自动补交付，真实用户输入仍有独立的一次机会；浏览器 `delivery-versions.spec.ts` 核对实际请求次数、提示条数和刷新后的展示，不通过隐藏历史消息掩盖重复执行。
+`tool_results_test.go` 验证七工具的精简模型投影、英文错误、无值字段省略、上游分类和秘密过滤、响应体超时、会话工具结果、部分下载及分支预览身份歧义。`TestParityNativeDeliveryContinuation` 使用官方引擎验证自动补交付不能再次触发自动补交付，真实用户输入仍有独立的一次机会；浏览器 `delivery-versions.spec.ts` 核对实际请求次数、提示条数和刷新后的展示，不通过隐藏历史消息掩盖重复执行。
 
 生图资源覆盖由 TestAgentImageSelection、TestImageResourceConfiguration 和 TestNativeTextOnlyToolImageBehavior 验证继承、失效不回退、配置保护及官方引擎实际调用；image-generation.spec.ts 通过设置页面选择 Agent 覆盖、刷新、生成图片、恢复全局默认，核对请求模型和工具描述，并检查 1365/390/320px 呈现。
 

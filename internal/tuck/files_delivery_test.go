@@ -540,8 +540,9 @@ func TestDeliveryTwoGiBStreaming(t *testing.T) {
 		t.Fatal("RSS growth exceeded 256 MiB", growth)
 	}
 	runtime.ReadMemStats(&after)
-	if int64(N(result["total_bytes"])) != MaxDeliveryBytes || after.HeapInuse-before.HeapInuse > 256<<20 {
-		t.Fatal(result, "heap growth", after.HeapInuse-before.HeapInuse)
+	heapGrowth := int64(after.HeapInuse) - int64(before.HeapInuse)
+	if int64(N(result["total_bytes"])) != MaxDeliveryBytes || heapGrowth > 256<<20 {
+		t.Fatal(result, "heap growth", heapGrowth)
 	}
 	stored, _ := d.Store.Delivery(turn.TaskID, "1")
 	var total int64

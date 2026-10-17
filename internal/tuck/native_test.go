@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"gopkg.in/yaml.v3"
 )
 
@@ -82,42 +83,32 @@ func officialFixture(t *testing.T, iterations int) *nativeFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tools := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := ReadJSON(r.Body, 1024*1024)
-		if err != nil {
-			WriteError(w, err)
-			return
-		}
-		switch r.URL.Path {
-		case "/list":
-			items := []any{}
-			for _, task := range f.manager.List() {
-				if S(task["parentTaskId"]) == "" && !B(task["archived"]) {
-					items = append(items, M{"task_id": task["id"], "title": task["title"], "status": task["status"]})
-				}
+	definitions := modelContent.Tools([]string{"list_sessions", "send_session_message"}, nil)
+	server := mcp.NewServer(&mcp.Implementation{Name: "native-fixture", Version: "1"}, &mcp.ServerOptions{Instructions: modelContent.Instructions(definitions)})
+	for _, definition := range definitions {
+		name := S(definition["name"])
+		server.AddTool(&mcp.Tool{Name: name, Description: S(definition["description"]), InputSchema: definition["inputSchema"]}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			var args M
+			if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+				return modelContent.MCPResult(modelContent.Failure("invalid_arguments")), nil
 			}
-			WriteJSON(w, 200, M{"sessions": items})
-		case "/send":
-			id := strings.TrimSpace(S(body["target_task_id"]))
-			task, err := f.manager.Get(id)
+			var result M
+			var err error
+			if name == "list_sessions" {
+				result, err = f.manager.ListSessions(args)
+			} else {
+				result, err = f.manager.SendSessionMessage(ctx, args)
+			}
 			if err != nil {
-				WriteError(w, err)
-				return
+				return modelContent.MCPResult(modelContent.Error(err)), nil
 			}
-			delivery := "next_turn"
-			if S(task["status"]) == "working" {
-				delivery = "steer"
-			}
-			text := "[TUCK_COLLABORATION_MESSAGE]\n" + S(body["message"]) + "\n[/TUCK_COLLABORATION_MESSAGE]"
-			if _, err = f.manager.Steer(r.Context(), id, text, nil, M{"kind": "collaboration"}); err != nil {
-				WriteError(w, err)
-				return
-			}
-			WriteJSON(w, 200, M{"accepted": true, "delivery": delivery})
-		}
-	}))
+			return modelContent.MCPResult(modelContent.ToolResult(name, result)), nil
+		})
+	}
+	tools := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: true}))
 	t.Cleanup(tools.Close)
-	toolsList := []any{M{"type": "filesystem", "allow_list": []any{"."}}, M{"type": "todo"}, M{"type": "shell"}, M{"type": "user_prompt"}, M{"type": "background_agents"}, M{"type": "api", "allow_private_ips": true, "api_config": M{"name": "list_sessions", "instruction": "List user conversations", "method": "POST", "endpoint": tools.URL + "/list", "args": M{}}}, M{"type": "api", "allow_private_ips": true, "api_config": M{"name": "send_session_message", "instruction": "Send only to explicitly requested conversation", "method": "POST", "endpoint": tools.URL + "/send", "required": []any{"target_task_id", "message"}, "args": M{"target_task_id": M{"type": "string"}, "message": M{"type": "string"}}}}}
+	toolsList := []any{M{"type": "filesystem", "allow_list": []any{"."}}, M{"type": "todo"}, M{"type": "shell"}, M{"type": "user_prompt"}, M{"type": "background_agents"}, M{"type": "mcp", "allow_private_ips": true, "remote": M{"url": tools.URL, "transport_type": "streamable-http"}}}
+
 	config := M{"version": 15, "providers": M{"fixture": M{"api_type": "openai_chatcompletions", "base_url": provider.URL + "/v1", "token_key": "TUCK_NATIVE_TEST_TOKEN"}}, "models": M{"test": M{"provider": "fixture", "model": "gpt-4o-mini", "capabilities": M{"image": true}}}, "agents": M{"root": M{"model": "test", "instruction": "Follow the requested fixture task.", "max_iterations": iterations, "sub_agents": []any{"worker"}, "toolsets": toolsList}, "worker": M{"model": "test", "instruction": "CHILD_ONLY independent reviewer.", "toolsets": []any{M{"type": "user_prompt"}}}}, "permissions": M{"allow": []any{"create_todos", "update_todos", "user_prompt", "transfer_task", "*_background_agent*", "list_sessions", "send_session_message"}, "ask": []any{"write_file", "shell"}}}
 	raw, err := yaml.Marshal(config)
 	if err != nil {
@@ -460,6 +451,18 @@ func TestOfficialNativeFullLoop(t *testing.T) {
 		t.Fatal(e)
 	}
 	waitIdle(t, f.manager, rejected)
+	rejectionDisclosed := false
+	for _, request := range f.requestList() {
+		for _, value := range A(request["messages"]) {
+			message := O(value)
+			if S(message["role"]) == "tool" && strings.Contains(S(message["content"]), modelContent.ApprovalRejectionReason()) {
+				rejectionDisclosed = true
+			}
+		}
+	}
+	if !rejectionDisclosed {
+		t.Fatal("approval rejection reason did not reach the model through the native tool result")
+	}
 	if _, e = os.Stat(filepath.Join(S(waiting["workspace"]), "rejected.txt")); !os.IsNotExist(e) {
 		t.Fatal("rejected file exists", e)
 	}

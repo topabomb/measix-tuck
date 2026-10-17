@@ -817,7 +817,7 @@ func (c *MCPConnections) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			panic(http.ErrAbortHandler)
 		}
 		if body != nil && S(body["method"]) == "tools/call" {
-			WriteJSON(w, 200, M{"jsonrpc": "2.0", "id": body["id"], "result": M{"isError": true, "content": []any{M{"type": "text", "text": e.Error()}}}})
+			WriteJSON(w, 200, M{"jsonrpc": "2.0", "id": body["id"], "result": modelContent.MCPFailure(e)})
 		} else {
 			WriteJSON(w, Status(e), M{"code": Code(e), "message": e.Error()})
 		}

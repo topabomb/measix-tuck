@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -101,7 +100,6 @@ func NewApp(config *Config) (app *App, err error) {
 	}
 	port := app.listener.Addr().(*net.TCPAddr).Port
 	app.URL = "http://127.0.0.1:" + strconv.Itoa(port)
-	app.Models.WorkbenchURL = app.URL
 	engine := O(config.Applied()["engine"])
 	binary := S(engine["binary"])
 	if binary != "" {
@@ -163,7 +161,6 @@ func (a *App) configureEngine() error {
 	options.DesktopProxy = B(O(a.Models.Config()["engine"])["desktopProxy"])
 	options.Env = a.Models.MCP.Environment()
 	options.Env["TUCK_GATEWAY_TOKEN"] = a.Models.Secret
-	options.Env["TUCK_WORKBENCH_TOKEN"] = a.Security.InternalToken
 	return a.Engine.Configure(options)
 }
 func (a *App) Start(ctx context.Context) error {
@@ -279,11 +276,7 @@ func (a *App) serve(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(e, os.ErrNotExist) {
 			e = Problem(404, "not_found", "Resource not found")
 		}
-		if r.URL.Path == "/api/tools/list-sessions" || r.URL.Path == "/api/tools/send-message" {
-			WriteJSON(w, Status(e), toolError(e))
-		} else {
-			WriteError(w, e)
-		}
+		WriteError(w, e)
 	}
 }
 func (a *App) route(w http.ResponseWriter, r *http.Request) error {
@@ -297,10 +290,8 @@ func (a *App) route(w http.ResponseWriter, r *http.Request) error {
 		WriteJSON(w, status, M{"status": map[bool]string{true: "ok", false: "unavailable"}[status == 200], "engine": state["state"]})
 		return nil
 	}
-	if !a.Security.Internal(r) {
-		if _, e := a.Security.Origin(r); e != nil {
-			return e
-		}
+	if _, e := a.Security.Origin(r); e != nil {
+		return e
 	}
 	if p == "/api/auth/session" && r.Method == "GET" {
 		v, e := a.Security.Info(r)
@@ -395,9 +386,6 @@ func (a *App) route(w http.ResponseWriter, r *http.Request) error {
 	}
 	if p == "/api/events" && r.Method == "GET" {
 		return a.events(w, r, session)
-	}
-	if strings.HasPrefix(p, "/api/tools/") {
-		return a.toolsRoute(w, r)
 	}
 	if strings.HasPrefix(p, "/api/tasks/") {
 		return a.taskRoute(w, r)
@@ -698,93 +686,6 @@ func (a *App) events(w http.ResponseWriter, r *http.Request, session M) error {
 			flusher.Flush()
 		}
 	}
-}
-func (a *App) toolsRoute(w http.ResponseWriter, r *http.Request) error {
-	if r.URL.Path == "/api/tools/delivery" {
-		if !a.Security.Internal(r) {
-			return Problem(403, "tool_not_permitted", "Internal delivery authentication required")
-		}
-		copy := r.Clone(r.Context())
-		copy.Header.Set("Authorization", "Bearer "+a.Models.Secret)
-		a.Local.ServeHTTP(w, copy)
-		return nil
-	}
-	if r.URL.Path == "/api/tools/list-sessions" && (r.Method == "POST" || r.Method == "GET") {
-		limit := 10
-		if r.Method == "POST" {
-			body, e := ReadJSON(r.Body, 24<<20)
-			if e != nil {
-				return e
-			}
-			if !noUnknown(body, "limit") {
-				return Problem(400, "invalid_arguments", "Only limit is accepted.")
-			}
-			if body["limit"] != nil {
-				if !Integer(body["limit"], 1, 100) {
-					return Problem(400, "invalid_arguments", "limit must be an integer from 1 to 100.")
-				}
-				limit = I(body["limit"])
-			}
-		}
-
-		sessions := []any{}
-		tasks := a.Manager.List()
-		activity := func(task M) int64 {
-			created, _ := time.Parse(time.RFC3339Nano, S(task["createdAt"]))
-			timing := O(task["turnTiming"])
-			return max(created.UnixMilli(), int64(N(timing["startedAt"])), int64(N(timing["endedAt"])))
-		}
-		sort.SliceStable(tasks, func(i, j int) bool { return activity(tasks[i]) > activity(tasks[j]) })
-		for _, task := range tasks {
-			if B(task["archived"]) || S(task["parentTaskId"]) != "" {
-				continue
-			}
-			name := S(task["assistantName"])
-			for _, v := range A(a.Manager.AssistantCatalog()["items"]) {
-				if O(v)["agent"] == task["agent"] {
-					name = S(O(v)["displayName"])
-				}
-			}
-			sessions = append(sessions, M{"task_id": task["id"], "title": task["title"], "agent": task["agent"], "assistant_name": name, "status": task["status"], "queued_prompts": task["queuedPrompts"], "pending_interaction": O(task["pendingInteraction"])["kind"]})
-		}
-		if len(sessions) > limit {
-			sessions = sessions[:limit]
-		}
-		WriteJSON(w, 200, toolOutput("list_sessions", M{"status": "completed", "sessions": sessions}))
-		return nil
-	}
-	if r.URL.Path == "/api/tools/send-message" && r.Method == "POST" {
-		if a.changing.Load() {
-			return Problem(409, "configuration_changing", "The model connection is being updated.")
-		}
-		data, e := ReadJSON(r.Body, 24<<20)
-		if e != nil {
-			return e
-		}
-		if S(data["target_task_id"]) == "" || strings.TrimSpace(S(data["message"])) == "" || len(S(data["message"])) > 100000 {
-			return Problem(400, "invalid_message", "Provide a target task ID and a nonempty message of at most 100000 characters.")
-		}
-		task, e := a.Manager.Get(strings.TrimSpace(S(data["target_task_id"])))
-		if e != nil {
-			return e
-		}
-		if B(task["archived"]) || S(task["parentTaskId"]) != "" {
-			return Problem(409, "invalid_target", "Choose an unarchived main conversation.")
-		}
-		if task["pendingInteraction"] != nil {
-			return Problem(409, "interaction_pending", "The target conversation is waiting for user input or approval.")
-		}
-		message := "[TUCK_COLLABORATION_MESSAGE]\n" + strings.TrimSpace(S(data["message"])) + "\n[/TUCK_COLLABORATION_MESSAGE]"
-		if len(message) > 100000 {
-			return Problem(400, "invalid_message", "The message is too long.")
-		}
-		if _, e = a.Manager.Steer(r.Context(), S(task["id"]), message, nil, M{"kind": "collaboration"}); e != nil {
-			return Problem(Status(e), Code(e), "Message delivery was not confirmed. Check the target conversation before sending again.")
-		}
-		WriteJSON(w, 202, toolOutput("send_session_message", M{"status": "accepted"}))
-		return nil
-	}
-	return Problem(404, "not_found", "Route not found")
 }
 func (a *App) static(w http.ResponseWriter, r *http.Request) error {
 	directory := a.Config.Resolve(S(O(a.Config.Applied()["server"])["frontendDir"]))

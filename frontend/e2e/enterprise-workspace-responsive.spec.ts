@@ -15,9 +15,10 @@ async function density(panel:Locator,compact:boolean){
   await expect(panel.getByRole('button',{name:'输入路径',exact:true})).toBeVisible()
   const files=panel.getByRole('tab',{name:'返回文件列表',exact:true})
   if(await files.count()){
-    await expect(files).toHaveAttribute('title','返回文件列表')
+    await expect(files).toHaveAttribute('title','返回目录')
     await expect(files.locator('svg')).toBeVisible()
-    if(compact)await expect(files.locator('span')).toBeHidden();else await expect(files.locator('span')).toBeVisible()
+    await expect(files.locator('span')).toBeVisible()
+    await expect(files.locator('span')).toHaveText('目录')
   }
 }
 

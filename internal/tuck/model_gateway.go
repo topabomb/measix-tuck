@@ -24,7 +24,7 @@ func (m *Models) forward(w http.ResponseWriter, r *http.Request) {
 		m.MCP.ServeHTTP(w, r)
 		return
 	}
-	if m.Local != nil && (r.URL.Path == "/workspace-tools" || r.URL.Path == "/api/tools/delivery" || r.URL.Path == "/attachment-tools") {
+	if m.Local != nil && r.URL.Path == tuckToolsPath {
 		m.Local.ServeHTTP(w, r)
 		return
 	}

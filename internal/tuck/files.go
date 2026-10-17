@@ -519,19 +519,9 @@ func (f *Files) Prepare(task M, prompt string, ids []string) (M, []any, error) {
 	if prompt != "" {
 		blocks = append(blocks, M{"id": "prompt:" + ID(), "type": "markdown", "data": M{"markdown": prompt}})
 	}
-	images := []any{}
+	prepared := []modelAttachment{}
 	items := []any{}
-	content := prompt
 	directImages := Contains(f.Models.find(S(task["modelId"]))["inputModalities"], "IMAGE")
-	if len(attachments) > 0 {
-		if content != "" {
-			content += "\n"
-		}
-		content += "User attachments are already saved in this task's local working directory. The paths below are relative to that directory.\nTo read their contents, use the local tools: read_file for one file or read_multiple_files for multiple files. No remote download is needed."
-		if !directImages && f.canInspect(task) {
-			content += "\nThis conversation model does not accept images. Only file paths, not image pixels, are included here. Use inspect_attachments with attachments and request to inspect images using the configured vision model; do not claim to have seen them before receiving its result."
-		}
-	}
 	for _, item := range attachments {
 		path, e := relativeFile(S(item["path"]), false)
 		if e != nil {
@@ -551,6 +541,7 @@ func (f *Files) Prepare(task M, prompt string, ids []string) (M, []any, error) {
 			handle.Close()
 			return nil, nil, Problem(400, "attachment_unavailable", "附件不可用")
 		}
+		media := modelAttachment{Name: S(item["name"]), Path: S(item["path"]), MIME: S(item["mime"])}
 		if S(item["kind"]) == "image" {
 			raw, e := io.ReadAll(io.LimitReader(handle, MaxUploadBytes+1))
 			handle.Close()
@@ -565,21 +556,18 @@ func (f *Files) Prepare(task M, prompt string, ids []string) (M, []any, error) {
 				return nil, nil, e
 			}
 			if directImages {
-				images = append(images, M{"type": "document", "document": M{"name": item["name"], "mime_type": mime, "size": len(encoded), "source": M{"inline_data": base64.StdEncoding.EncodeToString(encoded)}}})
+				media.Bytes, media.MIME = encoded, mime
 			}
 		} else {
 			handle.Close()
 		}
-		content += "\nFile: " + string(JSON(S(item["path"])))
+		prepared = append(prepared, media)
 		items = append(items, M{"id": item["id"], "name": item["name"], "kind": item["kind"], "mimeType": item["mime"], "sizeBytes": item["size"], "src": "/api/tasks/" + url.PathEscape(S(task["id"])) + "/files?path=" + url.QueryEscape(S(item["path"]))})
 	}
 	if len(items) > 0 {
 		blocks = append(blocks, M{"id": "attachments:" + ID(), "type": "attachments", "data": M{"title": "附件", "provenance": M{"origin": "user-upload"}, "items": items}})
 	}
-	native := M{"role": "user", "content": content}
-	if len(images) > 0 {
-		native["multi_content"] = append([]any{M{"type": "text", "text": content}}, images...)
-	}
+	native := modelContent.UserMessage(prompt, prepared, directImages, f.canInspect(task))
 	if len(JSON(native)) > AgentRequestBytes {
 		return nil, nil, Problem(413, "request_too_large", "图片消息超过 100 MB，请减少图片或缩小尺寸")
 	}

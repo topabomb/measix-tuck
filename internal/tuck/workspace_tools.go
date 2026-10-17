@@ -239,28 +239,28 @@ func (l *LocalTools) Transfer(ctx context.Context, turn *toolTurn, name string, 
 		return l.downloadFiles(ctx, turn, args)
 	}
 	if name != "upload_runcove_file" {
-		return toolFailure("invalid_arguments", "Choose an available enterprise WebDAV tool.")
+		return modelContent.Failure("invalid_arguments")
 	}
 	overwrite, e := overwriteFlag(args["overwrite"])
 	if e != nil {
-		return toolFailure("invalid_arguments", e.Error())
+		return modelContent.Failure("invalid_arguments")
 	}
 	remote, e := WorkspacePath(S(args["remote_path"]), false)
 	if e != nil {
-		return toolFailure("invalid_arguments", e.Error())
+		return modelContent.Failure("invalid_arguments")
 	}
 	if reservedRemote(remote) {
-		return toolFailure("webdav_path_not_permitted", "Enterprise WebDAV cannot access reserved .agent-space* directories. Copy the selected artifact into an ordinary project directory first.")
+		return modelContent.Failure("webdav_path_not_permitted")
 	}
 	if e = l.workspaceGate(ctx, turn); e != nil {
 		return transferFailure(e, false)
 	}
 	if S(turn.Target["mode"]) != "FULL" {
-		return toolFailure("webdav_read_only", "The current enterprise WebDAV permits reading only.")
+		return modelContent.Failure("webdav_read_only")
 	}
 	local, e := relativeFile(S(args["file_path"]), false)
 	if e != nil {
-		return toolFailure("invalid_arguments", e.Error())
+		return modelContent.Failure("invalid_arguments")
 	}
 	root, e := os.OpenRoot(turn.Workspace)
 	if e != nil {
@@ -274,7 +274,7 @@ func (l *LocalTools) Transfer(ctx context.Context, turn *toolTurn, name string, 
 	defer file.Close()
 	info, e := file.Stat()
 	if e != nil || !info.Mode().IsRegular() {
-		return toolFailure("local_file_not_found", "The upload source must be a readable regular file.")
+		return modelContent.Failure("local_file_not_found")
 	}
 	parent := ""
 	for _, part := range strings.Split(remote, "/")[:len(strings.Split(remote, "/"))-1] {
@@ -287,7 +287,7 @@ func (l *LocalTools) Transfer(ctx context.Context, turn *toolTurn, name string, 
 			return transferFailure(e, false)
 		}
 		if existing != nil && existing.Kind != "directory" {
-			return toolFailure("webdav_parent_not_directory", "The remote parent path is not a directory.")
+			return modelContent.Failure("webdav_parent_not_directory")
 		}
 		if existing == nil {
 			created, e := l.remote(ctx, turn, parent, "MKCOL", nil, nil)
@@ -298,7 +298,7 @@ func (l *LocalTools) Transfer(ctx context.Context, turn *toolTurn, name string, 
 			if created.StatusCode != 201 {
 				checked, e := l.metadata(ctx, turn, parent, true)
 				if e != nil || checked == nil || checked.Kind != "directory" {
-					return toolFailure("webdav_parent_not_directory", "The remote parent directory could not be created.")
+					return modelContent.Failure("webdav_parent_not_directory")
 				}
 			}
 		}
@@ -308,10 +308,10 @@ func (l *LocalTools) Transfer(ctx context.Context, turn *toolTurn, name string, 
 		return transferFailure(e, false)
 	}
 	if target != nil && target.Kind == "directory" {
-		return toolFailure("webdav_not_file", "The remote destination is a directory.")
+		return modelContent.Failure("webdav_not_file")
 	}
 	if target != nil && !overwrite {
-		return toolFailure("webdav_file_exists", "The remote file already exists. Set overwrite=true only if replacement is intended.")
+		return modelContent.Failure("webdav_file_exists")
 	}
 	headers := http.Header{"Content-Length": []string{fmt.Sprint(info.Size())}, "Content-Type": []string{MIMEType(local)}}
 	if target == nil {
@@ -319,7 +319,7 @@ func (l *LocalTools) Transfer(ctx context.Context, turn *toolTurn, name string, 
 	} else if strongETag(target.ETag) {
 		headers.Set("If-Match", target.ETag)
 	} else {
-		return toolFailure("webdav_version_unavailable", "The remote file has no strong ETag required for safe replacement.")
+		return modelContent.Failure("webdav_version_unavailable")
 	}
 	if e = l.workspaceGate(ctx, turn); e != nil {
 		return transferFailure(e, false)
@@ -330,17 +330,17 @@ func (l *LocalTools) Transfer(ctx context.Context, turn *toolTurn, name string, 
 	}
 	r.Body.Close()
 	if r.StatusCode == 412 {
-		return toolFailure("webdav_file_exists", "The remote destination changed. Inspect it before deciding whether to replace it.")
+		return modelContent.Failure("webdav_file_exists")
 	}
 	if r.StatusCode != 200 && r.StatusCode != 201 && r.StatusCode != 204 {
 		if r.StatusCode == 401 || r.StatusCode == 403 {
-			return toolFailure("tool_not_permitted", "The enterprise session or file authorization is no longer valid.")
+			return modelContent.Failure("tool_not_permitted")
 		}
 		unknown := r.StatusCode >= 500 || r.StatusCode < 300
 		if unknown {
 			return transferFailure(fmt.Errorf("upload success was not confirmed"), true)
 		}
-		return toolFailure("webdav_upload_failed", "Upload success was not confirmed. Check the remote file before retrying.")
+		return modelContent.Failure("webdav_upload_failed")
 	}
 	return M{"status": "completed", "remote_path": remote, "bytes": info.Size(), "overwritten": target != nil}
 }
@@ -354,7 +354,7 @@ func reservedRemote(remote string) bool {
 }
 func transferFailure(e error, writing bool) M {
 	if writing {
-		return M{"status": "unknown", "code": "outcome_unknown", "message": "The upload was interrupted and its remote outcome is unknown. Check the remote file before retrying."}
+		return Merge(modelContent.Failure("outcome_unknown"), M{"status": "unknown"})
 	}
 	code := Code(e)
 	if errors.Is(e, context.Canceled) || errors.Is(e, context.DeadlineExceeded) {
@@ -372,11 +372,7 @@ func transferFailure(e error, writing bool) M {
 	if code == "invalid_workspace_path" {
 		code = "invalid_arguments"
 	}
-	message := e.Error()
-	if Status(e) == 500 {
-		message = "The enterprise file operation failed. Check the current workspace before retrying."
-	}
-	return toolFailure(code, message)
+	return modelContent.Failure(code)
 }
 func checkDestination(root *os.Root, name string, overwrite bool) error {
 	info, e := root.Lstat(name)
@@ -404,11 +400,11 @@ func (l *LocalTools) downloadFiles(ctx context.Context, turn *toolTurn, args M) 
 	}
 	paths := Strings(args["remote_paths"])
 	if !isArray(args["remote_paths"]) || len(paths) < 1 || len(paths) > 20 {
-		return toolFailure("invalid_arguments", "Provide remote_paths with 1–20 files and a relative local_directory.")
+		return modelContent.Failure("invalid_arguments")
 	}
 	directoryText, ok := args["local_directory"].(string)
 	if !ok || directoryText == "" {
-		return toolFailure("invalid_arguments", "Provide a relative local_directory.")
+		return modelContent.Failure("invalid_arguments")
 	}
 	directory, e := relativeFile(strings.ReplaceAll(directoryText, "\\", "/"), false)
 	if e != nil {
@@ -428,7 +424,7 @@ func (l *LocalTools) downloadFiles(ctx context.Context, turn *toolTurn, args M) 
 			return transferFailure(e, false)
 		}
 		if reservedRemote(remote) {
-			return toolFailure("webdav_path_not_permitted", "Reserved .agent-space* directories are unavailable. Copy the artifact into an ordinary project directory first.")
+			return modelContent.Failure("webdav_path_not_permitted")
 		}
 		name := path.Base(remote)
 		if _, e = relativeFile(name, true); e != nil {
@@ -439,7 +435,7 @@ func (l *LocalTools) downloadFiles(ctx context.Context, turn *toolTurn, args M) 
 			key = strings.ToLower(key)
 		}
 		if seen[key] {
-			return toolFailure("local_name_conflict", "Duplicate destination names are not allowed.")
+			return modelContent.Failure("local_name_conflict")
 		}
 		seen[key] = true
 		if e = checkDestination(root, filepath.Join(directory, name), overwrite); e != nil {
@@ -464,7 +460,7 @@ func (l *LocalTools) downloadFiles(ctx context.Context, turn *toolTurn, args M) 
 	for _, remote := range paths {
 		item := M{"remote_path": remote}
 		if stop {
-			item = Merge(item, toolFailure("not_attempted", "The batch stopped after cancellation or authorization changed."))
+			item = Merge(item, modelContent.Failure("not_attempted"))
 			results = append(results, item)
 			continue
 		}
@@ -484,13 +480,13 @@ func (l *LocalTools) downloadFiles(ctx context.Context, turn *toolTurn, args M) 
 				return transferFailure(err, false)
 			}
 			if meta == nil {
-				return toolFailure("webdav_file_not_found", "The remote file does not exist.")
+				return modelContent.Failure("webdav_file_not_found")
 			}
 			if meta.Kind != "file" {
-				return toolFailure("webdav_not_file", "The download source is a directory. Specify individual files.")
+				return modelContent.Failure("webdav_not_file")
 			}
 			if meta.Bytes < 0 {
-				return toolFailure("webdav_unavailable", "The remote file metadata has an invalid size.")
+				return modelContent.Failure("webdav_unavailable")
 			}
 			tmp := ".download_" + ID() + ".part"
 			defer parent.Remove(tmp)
@@ -517,12 +513,12 @@ func (l *LocalTools) downloadFiles(ctx context.Context, turn *toolTurn, args M) 
 				if r.StatusCode == 401 || r.StatusCode == 403 {
 					code = "tool_not_permitted"
 				}
-				return toolFailure(code, "The remote download failed or the file version changed.")
+				return modelContent.Failure(code)
 			}
 			if strongETag(meta.ETag) && r.Header.Get("ETag") != "" && r.Header.Get("ETag") != meta.ETag {
 				file.Close()
 				r.Body.Close()
-				return toolFailure("webdav_version_changed", "The remote file version changed before download.")
+				return modelContent.Failure("webdav_version_changed")
 			}
 			n, e := io.CopyBuffer(file, contextReader{ctx, r.Body}, make([]byte, 128<<10))
 			r.Body.Close()
@@ -537,7 +533,7 @@ func (l *LocalTools) downloadFiles(ctx context.Context, turn *toolTurn, args M) 
 				return transferFailure(ctx.Err(), false)
 			}
 			if n != meta.Bytes {
-				return toolFailure("webdav_version_changed", "The downloaded file size does not match its metadata. The destination was not replaced.")
+				return modelContent.Failure("webdav_version_changed")
 			}
 			if e = l.workspaceGate(ctx, turn); e != nil {
 				return transferFailure(e, false)
@@ -547,7 +543,7 @@ func (l *LocalTools) downloadFiles(ctx context.Context, turn *toolTurn, args M) 
 			}
 			current, e := root.Stat(directory)
 			if e != nil || !os.SameFile(current, parentInfo) {
-				return toolFailure("invalid_arguments", "The destination directory changed during download.")
+				return modelContent.Failure("invalid_arguments")
 			}
 			if e = checkDestination(parent, name, overwrite); e != nil {
 				return transferFailure(e, false)

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 type fakeNative struct {
@@ -421,6 +422,90 @@ func TestSteeringReceipts(t *testing.T) {
 	msgs, _ := s.Messages(id, 0, 100)
 	if len(msgs) != 3 {
 		t.Fatal(msgs)
+	}
+}
+func TestSessionMessageUnicodeLength(t *testing.T) {
+	budget := 100000 - utf8.RuneCountInString(modelContent.Collaboration(""))
+	for _, tc := range []struct {
+		name, message string
+		accepted      bool
+	}{
+		{"Chinese", strings.Repeat("中", 40000), true},
+		{"emoji_at_limit", strings.Repeat("😀", budget), true},
+		{"wrapped_over_limit", strings.Repeat("中", budget+1), false},
+		{"input_over_limit", strings.Repeat("中", 100001), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, _, _, id := taskFixture(t)
+			mustUpdate(t, m, id, M{"queuePaused": true})
+			value, err := m.SendSessionMessage(context.Background(), M{"target_task_id": id, "message": tc.message})
+			queue := A(mustTask(t, m, id)["queue"])
+			if tc.accepted {
+				if err != nil || value["status"] != "accepted" || len(queue) != 1 {
+					t.Fatalf("Unicode message was not queued: result=%v err=%v queued=%d", value, err, len(queue))
+				}
+				if O(queue[0])["prompt"] != modelContent.Collaboration(tc.message) || S(O(O(queue[0])["source"])["kind"]) != "collaboration" {
+					t.Fatal("queued message or source changed")
+				}
+			} else if Code(err) != "invalid_message" || len(queue) != 0 {
+				t.Fatalf("oversized message was accepted: err=%v queued=%d", err, len(queue))
+			}
+		})
+	}
+}
+
+func TestCollaborationSubmissionUnconfirmed(t *testing.T) {
+	for _, failure := range []string{"timeout", "recording"} {
+		t.Run(failure, func(t *testing.T) {
+			m, store, engine, id := taskFixture(t)
+			mustUpdate(t, m, id, M{"status": "working", "turnId": "turn"})
+			calls := 0
+			engine.request = func(_ context.Context, method, path string, body any) (M, error) {
+				calls++
+				if method != "POST" || !strings.HasSuffix(path, "/steer") || !strings.Contains(string(JSON(body)), "TUCK_COLLABORATION_MESSAGE") {
+					t.Fatal("unexpected submission", method, path, body)
+				}
+				if failure == "timeout" {
+					return nil, context.DeadlineExceeded
+				}
+				if err := store.Close(); err != nil {
+					t.Fatal(err)
+				}
+				return M{}, nil
+			}
+			_, err := m.SendSessionMessage(context.Background(), M{"target_task_id": id, "message": "Check the result"})
+			if err == nil || Code(err) != "session_message_unconfirmed" || calls != 1 {
+				t.Fatal("submission outcome or retry", err, calls)
+			}
+			value := modelContent.Error(err)
+			if value["status"] != "unknown" || !strings.Contains(S(value["message"]), "Check the target conversation") || strings.Contains(S(value["message"]), "model service") || !modelContent.MCPResult(value).IsError {
+				t.Fatal("uncertain submission misrepresented", value)
+			}
+		})
+	}
+	t.Run("confirmed_before_response_loss", func(t *testing.T) {
+		m, _, engine, id := taskFixture(t)
+		task := mustUpdate(t, m, id, M{"status": "working", "turnId": "turn"})
+		calls := 0
+		engine.request = func(context.Context, string, string, any) (M, error) {
+			calls++
+			mustEvent(t, m, id, M{"type": "user_message", "session_id": task["nativeSessionId"], "message_id": "receipt", "message": modelContent.Collaboration("Confirmed message")})
+			return nil, context.DeadlineExceeded
+		}
+		value, err := m.SendSessionMessage(context.Background(), M{"target_task_id": id, "message": "Confirmed message"})
+		if err != nil || value["status"] != "accepted" || calls != 1 {
+			t.Fatal("confirmed submission lost", value, err, calls)
+		}
+	})
+	m, _, engine, id := taskFixture(t)
+	mustUpdate(t, m, id, M{"status": "working", "pendingInteraction": M{"kind": "approval"}})
+	engine.request = func(context.Context, string, string, any) (M, error) {
+		t.Fatal("precondition failure submitted a message")
+		return nil, nil
+	}
+	_, err := m.SendSessionMessage(context.Background(), M{"target_task_id": id, "message": "Wait for approval"})
+	if Code(err) != "interaction_pending" || modelContent.Error(err)["status"] != "failed" {
+		t.Fatal("precondition failure became uncertain", err)
 	}
 }
 func TestSteeringRestart(t *testing.T) {
@@ -954,12 +1039,12 @@ func TestDeliveryContinuationOwnership(t *testing.T) {
 			O(config["workbench"])["requireDelivery"] = false
 			configMu.Unlock()
 		}
-		if S(msg[0]["content"]) != DeliveryReminder() {
+		if S(msg[0]["content"]) != modelContent.DeliveryReminder() {
 			t.Error("reminder mismatch")
 		}
 		return fn(M{"type": "stream_stopped", "session_id": session, "reason": "normal"})
 	}
-	submitTask(t, m, id, DeliveryReminder())
+	submitTask(t, m, id, modelContent.DeliveryReminder())
 	waitIdle(t, m, id)
 	messages, _ := s.Messages(id, 0, 100)
 	users := []M{}

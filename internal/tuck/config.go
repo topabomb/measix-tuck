@@ -22,7 +22,15 @@ var agentID = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 var passwordPattern = regexp.MustCompile(`^scrypt\$32768\$8\$3\$[a-f0-9]{32}\$[a-f0-9]{64}$`)
 var protectable = []string{"platform", "providers", "agents", "mcp", "orchestration", "engine"}
 var reasoningEfforts = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
-var tuckTools = []string{"list_sessions", "send_session_message", "upload_runcove_file", "download_runcove_files", "generate_images", inspectionTool}
+var tuckTools = func() []string {
+	names := []string{}
+	for _, name := range modelContent.ToolNames() {
+		if name != "deliver_result" {
+			names = append(names, name)
+		}
+	}
+	return names
+}()
 var runtimeFields = map[string][]string{"providers": {"providers", "defaultModelId", "modelDefaults", "platformModelSettings", "imageGenerators", "defaultImageGenerator", "defaultAttachmentInspectionModelId"}, "agents": {"agents", "workbench"}, "mcp": {"localMcp", "platformMcpTools"}}
 
 const configVersion = 2
@@ -523,6 +531,10 @@ func defaultConfig() M {
 	var result M
 	if err := json.Unmarshal(defaultConfigJSON, &result); err != nil {
 		panic(err)
+	}
+	for name, value := range O(result["agents"]) {
+		O(value)["instruction"] = modelContent.DefaultInstruction(name)
+		O(value)["description"] = modelContent.DefaultDescription(name)
 	}
 	return result
 }

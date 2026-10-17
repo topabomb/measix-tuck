@@ -22,50 +22,120 @@ type toolTurn struct {
 	deliveryMu                               sync.Mutex
 }
 type toolPeer struct {
-	server          *mcp.Server
-	task, kind, key string
-	agent           string
-	requests        int
-	listed          chan struct{}
-	catalogMu       sync.Mutex
-	catalog         string
+	server       *mcp.Server
+	task, key    string
+	agent        string
+	requests     int
+	listed       chan struct{}
+	catalogMu    sync.Mutex
+	catalog      string
+	instructions string
 }
 type toolPeerContext struct{}
+type toolPeerBinding struct {
+	peer             *toolPeer
+	setCatalogCookie func(*toolPeer)
+}
 
 // LocalTools uses the official MCP SDK; the turn binding fills a public header gap.
 type LocalTools struct {
-	Models                          *Models
-	Manager                         *Manager
-	Files                           *Files
-	Delivery                        *Deliveries
-	mu                              sync.RWMutex
-	turns                           map[string]*toolTurn
-	peers                           []*toolPeer
-	delivery, workspace, inspection *mcp.StreamableHTTPHandler
+	Models   *Models
+	Manager  *Manager
+	Files    *Files
+	Delivery *Deliveries
+	mu       sync.RWMutex
+	turns    map[string]*toolTurn
+	peers    []*toolPeer
+	handler  *mcp.StreamableHTTPHandler
 }
+
+const tuckToolsPath = "/tuck-tools"
+const tuckTurnHeader = "X-Tuck-Turn"
 
 func NewLocalTools(models *Models, manager *Manager, files *Files, delivery *Deliveries) *LocalTools {
 	l := &LocalTools{Models: models, Manager: manager, Files: files, Delivery: delivery, turns: map[string]*toolTurn{}}
-	l.delivery = mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server { return l.newPeer(r, "delivery") }, &mcp.StreamableHTTPOptions{Stateless: true, PropagateRequestCancellation: true})
-	l.workspace = mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server { return l.newPeer(r, "workspace") }, &mcp.StreamableHTTPOptions{Stateless: true, PropagateRequestCancellation: true})
-	l.inspection = mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server { return l.newPeer(r, "inspection") }, &mcp.StreamableHTTPOptions{Stateless: true, PropagateRequestCancellation: true})
+	l.handler = mcp.NewStreamableHTTPHandler(l.newPeer, &mcp.StreamableHTTPOptions{Stateless: true, PropagateRequestCancellation: true})
 	return l
 }
-func (l *LocalTools) newPeer(r *http.Request, kind string) *mcp.Server {
-	agent := ""
-	if kind == "inspection" {
-		agent = r.URL.Query().Get("agent")
-		if !agentID.MatchString(agent) {
-			return nil
+
+// configuredTuckTools is the single configuration permission filter, shared by
+// native assembly and the MCP catalog. Runtime resources further narrow it.
+func configuredTuckTools(config M, agent string, main bool) []string {
+	a := O(O(config["agents"])[agent])
+	if !Has(O(config["agents"]), agent) {
+		return nil
+	}
+	var assistant M
+	if main {
+		for _, v := range A(O(config["workbench"])["assistants"]) {
+			if S(O(v)["agent"]) == agent {
+				assistant = O(v)
+				break
+			}
 		}
 	}
-	header := "X-Tuck-Workspace-Turn"
-	if kind == "delivery" {
-		header = "X-Tuck-Delivery-Turn"
+	names := []string{}
+	for _, name := range modelContent.ToolNames() {
+		if Contains(a["disabledTuckTools"], name) {
+			continue
+		}
+		switch name {
+		case "list_sessions", "send_session_message", "generate_images":
+			if assistant == nil {
+				continue
+			}
+		case "deliver_result":
+			if assistant == nil || assistant["deliveryTool"] == false {
+				continue
+			}
+		}
+		if B(a["readonly"]) && name != "list_sessions" && name != inspectionTool {
+			continue
+		}
+		names = append(names, name)
 	}
-	key := r.Header.Get(header)
+	return names
+}
+func (l *LocalTools) definitions(turn *toolTurn, agent string) []M {
+	if l.actorAllowed(turn.Task, agent) != nil {
+		return nil
+	}
+	config := l.Models.Config()
+	selected := configuredTuckTools(config, agent, agent == S(turn.Task["agent"]) && S(turn.Task["parentTaskId"]) == "")
+	names := []string{}
+	var resource M
+	for _, name := range selected {
+		switch name {
+		case "deliver_result":
+			if !l.Delivery.Available(turn.Task) {
+				continue
+			}
+		case "upload_runcove_file":
+			if turn.Target == nil || turn.Workspace == "" {
+				continue
+			}
+		case "download_runcove_files":
+			if turn.Target == nil || writableTaskWorkspace(turn.Task) != nil {
+				continue
+			}
+		case "generate_images":
+			if l.imageAllowed(turn) != nil {
+				continue
+			}
+			resource, _ = resolveImage(config, l.Models.Platform.Binding(), agentImageSelector(config, agent))
+		}
+		names = append(names, name)
+	}
+	return modelContent.Tools(names, resource)
+}
+func (l *LocalTools) newPeer(r *http.Request) *mcp.Server {
+	agent := r.URL.Query().Get("agent")
+	if !agentID.MatchString(agent) {
+		return nil
+	}
+	key := r.Header.Get(tuckTurnHeader)
 	if r.Header.Get("Mcp-Method") != "server/discover" {
-		if cookie, e := r.Cookie(toolCatalogCookie(kind, agent)); e == nil {
+		if cookie, e := r.Cookie(toolCatalogCookie(agent)); e == nil {
 			key = cookie.Value
 		}
 	}
@@ -76,13 +146,12 @@ func (l *LocalTools) newPeer(r *http.Request, kind string) *mcp.Server {
 	if turn != nil {
 		task = turn.TaskID
 	}
-	// Catalog refreshes use the connection's original headers. Only SDK peers
-	// that still own a subscription/session may resolve that original identity;
-	// tool calls below still require the exact live turn header.
+	// Only catalog requests may resolve an expired connection identity. Calls
+	// always require the exact live turn header and current actor permission.
 	if task == "" {
-		for _, peer := range l.peers {
-			if peer.key == key && peer.kind == kind && peer.agent == agent {
-				task = peer.task
+		for _, p := range l.peers {
+			if p.key == key && p.agent == agent {
+				task = p.task
 				break
 			}
 		}
@@ -91,20 +160,35 @@ func (l *LocalTools) newPeer(r *http.Request, kind string) *mcp.Server {
 		return nil
 	}
 	var peer *toolPeer
-	for _, existing := range l.peers {
-		if existing.task == task && existing.kind == kind && existing.agent == agent {
-			peer = existing
+	for _, p := range l.peers {
+		if p.task == task && p.agent == agent {
+			peer = p
 			break
 		}
 	}
 	if peer == nil {
-		if turn == nil {
+		if turn == nil || l.actorAllowed(turn.Task, agent) != nil {
 			return nil
 		}
-		peer = &toolPeer{server: mcp.NewServer(&mcp.Implementation{Name: "Measix Tuck " + kind, Version: "1.0.0"}, &mcp.ServerOptions{Capabilities: &mcp.ServerCapabilities{Tools: &mcp.ToolCapabilities{ListChanged: true}}}), task: task, kind: kind, key: key, agent: agent}
+		defs := l.definitions(turn, agent)
+		peer = &toolPeer{server: mcp.NewServer(&mcp.Implementation{Name: "Measix Tuck", Version: "1.0.0"}, &mcp.ServerOptions{Capabilities: &mcp.ServerCapabilities{Tools: &mcp.ToolCapabilities{ListChanged: true}}}), task: task, key: key, agent: agent}
 		peer.server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 			return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 				result, err := next(ctx, method, req)
+				if err == nil && (method == "initialize" || method == "server/discover") {
+					// A retained catalog subscription may span turns. Each new
+					// initialization describes the current installed definitions;
+					// existing clients keep their own initialization snapshot.
+					peer.catalogMu.Lock()
+					instructions := peer.instructions
+					peer.catalogMu.Unlock()
+					switch initialized := result.(type) {
+					case *mcp.InitializeResult:
+						initialized.Instructions = instructions
+					case *mcp.DiscoverResult:
+						initialized.Instructions = instructions
+					}
+				}
 				if method == "tools/list" && err == nil {
 					l.mu.Lock()
 					if peer.listed != nil {
@@ -116,136 +200,115 @@ func (l *LocalTools) newPeer(r *http.Request, kind string) *mcp.Server {
 				return result, err
 			}
 		})
-		l.installTools(peer, turn)
+		l.installDefinitions(peer, defs)
 		l.peers = append(l.peers, peer)
 	}
 	peer.requests++
-	if owner, ok := r.Context().Value(toolPeerContext{}).(**toolPeer); ok {
-		*owner = peer
+	if owner, ok := r.Context().Value(toolPeerContext{}).(*toolPeerBinding); ok {
+		owner.peer = peer
+		if r.Header.Get("Mcp-Method") == "server/discover" && turn != nil && turn.ctx.Err() == nil && l.actorAllowed(turn.Task, agent) == nil {
+			owner.setCatalogCookie(peer)
+		}
 	}
 	return peer.server
 }
 func (l *LocalTools) installTools(peer *toolPeer, turn *toolTurn) bool {
+	return l.installDefinitions(peer, l.definitions(turn, peer.agent))
+}
+func (l *LocalTools) installDefinitions(peer *toolPeer, defs []M) bool {
 	peer.catalogMu.Lock()
 	defer peer.catalogMu.Unlock()
-	definitions := []M{}
-	if peer.kind == "inspection" {
-		if l.inspectionAllowed(turn.Task, peer.agent) == nil {
-			definitions = append(definitions, inspectionDefinition())
-		}
-	} else if peer.kind == "delivery" {
-		if l.Delivery.Available(turn.Task) {
-			definitions = append(definitions, deliveryDefinition())
-		}
-	} else if turn.Target != nil && !B(O(O(l.Models.Config()["agents"])[S(turn.Task["agent"])])["readonly"]) {
-		definitions = workspaceDefinitions(turn.Target)
-		if writableTaskWorkspace(turn.Task) != nil {
-			kept := []M{}
-			for _, definition := range definitions {
-				if S(definition["name"]) != "download_runcove_files" {
-					kept = append(kept, definition)
-				}
-			}
-			definitions = kept
-		}
-	}
-	if peer.kind == "workspace" && l.imageAllowed(turn) == nil {
-		config := l.Models.Config()
-		resource, _ := resolveImage(config, l.Models.Platform.Binding(), agentImageSelector(config, S(turn.Task["agent"])))
-		definitions = append(definitions, imageDefinition(resource))
-	}
-	encoded := string(JSON(definitions))
+	encoded := string(JSON(defs))
 	if encoded == peer.catalog {
 		return false
 	}
 	peer.catalog = encoded
+	peer.instructions = modelContent.Instructions(defs)
 	wanted := map[string]bool{}
-	for _, definition := range definitions {
-		wanted[S(definition["name"])] = true
+	for _, d := range defs {
+		wanted[S(d["name"])] = true
 	}
-	for _, name := range []string{"deliver_result", "upload_runcove_file", "download_runcove_files", "generate_images", "inspect_attachments"} {
+	for _, name := range modelContent.ToolNames() {
 		if !wanted[name] {
 			peer.server.RemoveTools(name)
 		}
 	}
-	for _, definition := range definitions {
-		definition := definition
-		name := S(definition["name"])
-		tool := &mcp.Tool{Name: name, Description: S(definition["description"]), InputSchema: definition["inputSchema"]}
-		if name == "inspect_attachments" {
-			tool.Annotations = &mcp.ToolAnnotations{ReadOnlyHint: true}
+	for _, d := range defs {
+		name := S(d["name"])
+		tool := &mcp.Tool{Name: name, Description: S(d["description"]), InputSchema: d["inputSchema"]}
+		if annotations := O(d["annotations"]); len(annotations) > 0 {
+			tool.Annotations = &mcp.ToolAnnotations{ReadOnlyHint: B(annotations["readOnlyHint"])}
 		}
 		peer.server.AddTool(tool, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			header := "X-Tuck-Workspace-Turn"
-			if peer.kind == "delivery" {
-				header = "X-Tuck-Delivery-Turn"
-			}
 			key := ""
 			if req.Extra != nil {
-				key = req.Extra.Header.Get(header)
+				key = req.Extra.Header.Get(tuckTurnHeader)
 			}
 			l.mu.RLock()
-			current := l.turns[key]
+			turn := l.turns[key]
 			l.mu.RUnlock()
-			if current == nil || current.TaskID != peer.task || current.ctx.Err() != nil {
-				return localResult(toolFailure("tool_not_permitted", "The task context for this turn has expired.")), nil
+			if turn == nil || turn.TaskID != peer.task || turn.ctx.Err() != nil {
+				return modelContent.MCPResult(modelContent.Failure("tool_not_permitted")), nil
+			}
+			if e := l.current(turn); e != nil {
+				return modelContent.MCPResult(modelContent.Error(e)), nil
+			}
+			permitted := false
+			for _, def := range l.definitions(turn, peer.agent) {
+				if S(def["name"]) == name {
+					permitted = true
+					break
+				}
+			}
+			if !permitted {
+				return modelContent.MCPResult(modelContent.Failure("tool_not_permitted")), nil
 			}
 			value, e := DecodeJSON(req.Params.Arguments, 512<<10)
 			if e != nil {
-				return localResult(toolFailure("invalid_arguments", "Provide a valid JSON object matching the tool parameters.")), nil
+				return modelContent.MCPResult(modelContent.Failure("invalid_arguments")), nil
+			}
+			args, ok := value.(map[string]any)
+			if !ok {
+				return modelContent.MCPResult(modelContent.Failure("invalid_arguments")), nil
 			}
 			combined, cancel := context.WithCancel(ctx)
-			stop := context.AfterFunc(current.ctx, cancel)
+			stop := context.AfterFunc(turn.ctx, cancel)
 			defer stop()
 			defer cancel()
-			if peer.kind == "inspection" {
-				return localResult(toolOutput(name, l.inspectAttachments(combined, current, peer.agent, O(value)))), nil
+			var result M
+			switch name {
+			case "list_sessions":
+				result, e = l.Manager.ListSessions(O(args))
+			case "send_session_message":
+				result, e = l.Manager.SendSessionMessage(combined, O(args))
+			case "deliver_result":
+				result = l.Delivery.Submit(combined, turn, O(args))
+			case "inspect_attachments":
+				result = l.inspectAttachments(combined, turn, peer.agent, O(args))
+			case "generate_images":
+				return l.generateImage(combined, turn, O(args)), nil
+			default:
+				result = l.Transfer(combined, turn, name, O(args))
 			}
-			if peer.kind == "delivery" {
-				return localResult(toolOutput(name, l.Delivery.Submit(combined, current, O(value)))), nil
+			if e != nil {
+				return modelContent.MCPResult(modelContent.Error(e)), nil
 			}
-			if name == "generate_images" {
-				return l.generateImage(combined, current, O(value)), nil
-			}
-			return localResult(toolOutput(name, l.Transfer(combined, current, name, O(value)))), nil
+			return modelContent.MCPResult(modelContent.ToolResult(name, result)), nil
 		})
 	}
 	return true
 }
-func localResult(value M) *mcp.CallToolResult {
-	return &mcp.CallToolResult{IsError: S(value["status"]) != "completed", StructuredContent: value, Content: []mcp.Content{&mcp.TextContent{Text: string(JSON(value))}}}
-}
-
 func (l *LocalTools) imageAllowed(turn *toolTurn) error {
-	agent := O(O(l.Models.Config()["agents"])[S(turn.Task["agent"])])
-	if len(agent) == 0 || B(agent["readonly"]) || Contains(agent["disabledTuckTools"], "generate_images") || turn.Workspace == "" || writableTaskWorkspace(turn.Task) != nil || S(turn.Task["parentTaskId"]) != "" {
+	config := l.Models.Config()
+	if !Contains(configuredTuckTools(config, S(turn.Task["agent"]), S(turn.Task["parentTaskId"]) == ""), "generate_images") || turn.Workspace == "" || writableTaskWorkspace(turn.Task) != nil {
 		return Problem(403, "tool_not_permitted", "生图需要可写的主任务目录及助手工具许可")
 	}
-	config := l.Models.Config()
 	_, e := resolveImage(config, l.Models.Platform.Binding(), agentImageSelector(config, S(turn.Task["agent"])))
 	return e
 }
 
-func imageDefinition(resource M) M {
-	maxCount := 4
-	description := toolText(textGenerate)
-	if provider := S(resource["providerName"]); provider != "" {
-		description += toolText(textGenerateProvider, map[string]string{"provider": provider})
-	}
-	description += toolText(textGenerateModel, map[string]string{"model": firstString(resource["upstreamModelKey"], resource["displayName"], "Unspecified")})
-	if S(resource["source"]) == "platform" {
-		maxCount = min(4, I(resource["maxImagesPerRequest"]))
-		description += toolText(textGeneratePlatform)
-	}
-	return M{"name": "generate_images", "description": description, "inputSchema": M{"type": "object", "additionalProperties": false, "required": []string{"prompt"}, "properties": M{
-		"prompt":           M{"type": "string", "minLength": 1, "maxLength": 32000, "description": toolText(textPrompt)},
-		"count":            M{"type": []string{"integer", "null"}, "minimum": 1, "maximum": maxCount, "default": 1, "description": toolText(textCount)},
-		"reference_images": M{"type": []string{"array", "null"}, "maxItems": 4, "uniqueItems": true, "items": M{"type": "string", "minLength": 1, "maxLength": 1024}, "description": toolText(textReferences)},
-	}}}
-}
-
 func (l *LocalTools) generateImage(ctx context.Context, turn *toolTurn, args M) *mcp.CallToolResult {
-	fail := func(e error) *mcp.CallToolResult { return localResult(toolError(e)) }
+	fail := func(e error) *mcp.CallToolResult { return modelContent.MCPResult(modelContent.Error(e)) }
 	// Native strict schemas may require nullable optional fields.
 	for _, field := range []string{"reference_images", "count"} {
 		if args[field] == nil {
@@ -315,16 +378,13 @@ func (l *LocalTools) generateImage(ctx context.Context, turn *toolTurn, args M) 
 	}
 	value := M{"status": "completed", "resource": result.Resource["selector"], "files": files}
 	if !Contains(l.Models.find(S(turn.Task["modelId"]))["inputModalities"], "IMAGE") {
-		value["notice"] = "当前聊天模型未声明图片输入：文件已生成，但不要声称已看见图片。需要检查时，请用 inspect_attachments 读取返回的 path；该工具需要已配置的识图模型及许可。"
+		value["textOnlyModel"] = true
+		value["canInspect"] = l.Files.canInspect(turn.Task)
 	}
 	if len(result.Usage) > 0 {
 		value["providerUsage"] = result.Usage
 	}
-	response := localResult(toolOutput("generate_images", value))
-	for _, img := range result.Images {
-		response.Content = append(response.Content, &mcp.ImageContent{Data: img.ModelBytes, MIMEType: img.ModelMIME})
-	}
-	return response
+	return modelContent.MCPResult(modelContent.ToolResult("generate_images", value), result.Images...)
 }
 func platformIdentity(b M) string {
 	if b == nil {
@@ -401,7 +461,7 @@ func (l *LocalTools) Begin(ctx context.Context, task M) (map[string]string, func
 		l.mu.Unlock()
 	}
 
-	headers := map[string]string{"X-Tuck-Workspace-Turn": turn.Key, "X-Tuck-Delivery-Turn": turn.Key}
+	headers := map[string]string{tuckTurnHeader: turn.Key}
 	finish := func() { cancel(); l.mu.Lock(); delete(l.turns, turn.Key); l.mu.Unlock() }
 	return headers, finish, nil
 }
@@ -410,31 +470,21 @@ func (l *LocalTools) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, Problem(403, "tool_not_permitted", "Internal tool authentication required"))
 		return
 	}
-	// The SDK starts subscription requests from a background context, where
-	// Docker Agent v1.150.0 cannot expand turn headers. Its official HTTP client
-	// retains cookies. Bind catalog-only requests to that client's original
-	// task; execution continues to require the live turn header in installTools.
-	if r.Header.Get("Mcp-Method") == "server/discover" {
-		kind, header := "workspace", "X-Tuck-Workspace-Turn"
-		agent := ""
-		if r.URL.Path == "/api/tools/delivery" {
-			kind, header = "delivery", "X-Tuck-Delivery-Turn"
-		} else if r.URL.Path == "/attachment-tools" {
-			kind, agent = "inspection", r.URL.Query().Get("agent")
-		}
-		key := r.Header.Get(header)
-		l.mu.RLock()
-		valid := l.turns[key] != nil
-		l.mu.RUnlock()
-		if valid {
-			http.SetCookie(w, &http.Cookie{Name: toolCatalogCookie(kind, agent), Value: key, Path: r.URL.Path, HttpOnly: true, SameSite: http.SameSiteStrictMode})
-		}
+	if r.URL.Path != tuckToolsPath {
+		WriteError(w, Problem(404, "not_found", "Tool endpoint not found"))
+		return
 	}
 	// The current MCP protocol uses ephemeral requests. Retain peers only
 	// while the SDK owns a live session (including legacy notification streams).
-	var peer *toolPeer
-	r = r.WithContext(context.WithValue(r.Context(), toolPeerContext{}, &peer))
+	owner := &toolPeerBinding{setCatalogCookie: func(peer *toolPeer) {
+		// Reconnecting clients must retain the selected peer's stable catalog
+		// identity, even when discovery carries a later turn's execution key.
+		// This cookie locates a catalog and never authorizes execution.
+		http.SetCookie(w, &http.Cookie{Name: toolCatalogCookie(peer.agent), Value: peer.key, Path: tuckToolsPath, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	}}
+	r = r.WithContext(context.WithValue(r.Context(), toolPeerContext{}, owner))
 	defer func() {
+		peer := owner.peer
 		if peer == nil {
 			return
 		}
@@ -454,41 +504,17 @@ func (l *LocalTools) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
-	if r.URL.Path == "/api/tools/delivery" {
-		l.delivery.ServeHTTP(w, r)
-	} else if r.URL.Path == "/attachment-tools" {
-		l.inspection.ServeHTTP(w, r)
-	} else if r.URL.Path == "/workspace-tools" {
-		l.workspace.ServeHTTP(w, r)
-	} else {
-		WriteError(w, Problem(404, "not_found", "Tool not found"))
-	}
+	l.handler.ServeHTTP(w, r)
 }
+func toolCatalogCookie(agent string) string { return "tuck-catalog-" + Hash([]byte(agent))[:16] }
 
-func toolCatalogCookie(kind, agent string) string {
-	if kind == "inspection" {
-		kind += "-" + Hash([]byte(agent))[:16]
-	}
-	return "tuck-" + kind + "-catalog"
-}
-
-func inspectionDefinition() M {
-	return M{"name": inspectionTool, "description": toolText(textInspect), "inputSchema": M{"type": "object", "additionalProperties": false, "required": []string{"attachments", "request"}, "properties": M{
-		"attachments": M{"type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": true, "description": toolText(textAttachments), "items": M{"type": "object", "additionalProperties": false, "required": []string{"path"}, "properties": M{
-			"source": M{"type": []string{"string", "null"}, "enum": []any{"local", "runcove", nil}, "default": "local", "description": toolText(textAttachmentSource)},
-			"path":   M{"type": "string", "minLength": 1, "maxLength": 4096, "description": toolText(textAttachmentPath)},
-		}}},
-		"request": M{"type": "string", "minLength": 1, "maxLength": 32000, "description": toolText(textRequest)},
-	}}}
-}
-
-func (l *LocalTools) inspectionAllowed(task M, agent string) error {
+func (l *LocalTools) actorAllowed(task M, agent string) error {
 	config := l.Models.Config()
 	agents := O(config["agents"])
 	seen := map[string]bool{}
 	var visit func(string) bool
 	visit = func(name string) bool {
-		if seen[name] || len(O(agents[name])) == 0 {
+		if seen[name] || !Has(agents, name) {
 			return false
 		}
 		seen[name] = true
@@ -502,15 +528,25 @@ func (l *LocalTools) inspectionAllowed(task M, agent string) error {
 		}
 		return false
 	}
-	if !visit(S(task["agent"])) || Contains(O(agents[agent])["disabledTuckTools"], inspectionTool) {
-		return Problem(403, "tool_not_permitted", "此 Agent 未获附件识别工具许可")
+	if !visit(S(task["agent"])) {
+		return Problem(403, "tool_not_permitted", "此 Agent 不属于当前任务的代理集合")
 	}
 
 	return nil
 }
 
+func (l *LocalTools) inspectionAllowed(task M, agent string) error {
+	if e := l.actorAllowed(task, agent); e != nil {
+		return e
+	}
+	if Contains(O(O(l.Models.Config()["agents"])[agent])["disabledTuckTools"], inspectionTool) {
+		return Problem(403, "tool_not_permitted", "附件识别已停用")
+	}
+	return nil
+}
+
 func (l *LocalTools) inspectAttachments(ctx context.Context, turn *toolTurn, agent string, args M) (result M) {
-	fail := toolError
+	fail := modelContent.Error
 	check := func() error {
 		if e := ctxError(ctx); e != nil {
 			return e
@@ -609,26 +645,6 @@ func (l *LocalTools) Close() {
 			session.Close()
 		}
 	}
-}
-func workspaceDefinitions(target M) []M {
-	return []M{
-		{"name": "upload_runcove_file", "description": toolText(textUpload), "inputSchema": M{"type": "object", "additionalProperties": false, "required": []string{"file_path", "remote_path"}, "properties": M{
-			"file_path": M{"type": "string", "description": toolText(textUploadPath)}, "remote_path": M{"type": "string", "description": toolText(textUploadRemote)}, "overwrite": M{"type": "boolean", "default": false, "description": toolText(textUploadOverwrite)},
-		}}},
-		{"name": "download_runcove_files", "description": toolText(textDownload), "inputSchema": M{"type": "object", "additionalProperties": false, "required": []string{"remote_paths", "local_directory"}, "properties": M{
-			"remote_paths": M{"type": "array", "minItems": 1, "maxItems": 20, "description": toolText(textDownloadRemote), "items": M{"type": "string", "minLength": 1, "maxLength": 4096}}, "local_directory": M{"type": "string", "minLength": 1, "maxLength": 4096, "description": toolText(textDownloadDirectory)}, "overwrite": M{"type": "boolean", "default": false, "description": toolText(textDownloadOverwrite)},
-		}}},
-	}
-}
-func deliveryDefinition() M {
-	return M{"name": "deliver_result", "description": toolText(textDelivery), "inputSchema": M{"type": "object", "additionalProperties": false, "required": []string{"summary"}, "properties": M{
-		"summary": M{"type": "string", "minLength": 1, "maxLength": 1000, "description": toolText(textSummary)},
-		"files": M{"type": []string{"array", "null"}, "maxItems": 10, "description": toolText(textDeliveryFiles), "items": M{"type": "object", "additionalProperties": false, "required": []string{"path"}, "properties": M{
-			"source":      M{"type": []string{"string", "null"}, "enum": []any{"local", "runcove", nil}, "default": "local", "description": toolText(textDeliverySource)},
-			"path":        M{"type": "string", "minLength": 1, "maxLength": 4096, "description": toolText(textDeliveryPath)},
-			"description": M{"type": []string{"string", "null"}, "minLength": 1, "maxLength": 1000, "description": toolText(textFileDescription)},
-		}}},
-	}}}
 }
 
 func ctxError(ctx context.Context) error {

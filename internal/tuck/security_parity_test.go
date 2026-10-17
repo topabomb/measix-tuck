@@ -36,7 +36,7 @@ func TestParitySettingsDefaultSecureCookieAndHashRotation(t *testing.T) {
 			t.Fatal(w.Header())
 		}
 		cookie := w.Result().Cookies()[1]
-		if cookie.Name != "tuck_settings_access" || !cookie.Secure || !cookie.HttpOnly || cookie.Value == p.Security.InternalToken || p.grants[cookie.Value].binding != "" {
+		if cookie.Name != "tuck_settings_access" || !cookie.Secure || !cookie.HttpOnly || p.grants[cookie.Value].binding != "" {
 			t.Fatal(cookie)
 		}
 		rr.AddCookie(cookie)

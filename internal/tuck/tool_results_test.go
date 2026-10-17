@@ -35,12 +35,12 @@ func TestModelToolResponseBodyTimeout(t *testing.T) {
 		t.Fatal(e)
 	}
 	_, e = f.models.InspectAttachments(context.Background(), c, nil, model, "Inspect", []InspectedAttachment{{Path: "image.png", MIME: "image/png", Bytes: testPNG(t, 20, 12, false)}})
-	assertToolError(t, toolError(e), "upstream_timeout")
+	assertToolError(t, modelContent.Error(e), "upstream_timeout")
 	_, e = f.models.GenerateImage(context.Background(), c, nil, ImageGenerationRequest{Prompt: "Generate", Count: 1})
-	assertToolError(t, toolError(e), "upstream_timeout")
+	assertToolError(t, modelContent.Error(e), "upstream_timeout")
 	// The same classification is used after a generated-image download.
 	_, e = io.ReadAll(toolTimeoutBody{})
-	assertToolError(t, toolError(modelTransportError(e, "invalid_image_response")), "upstream_timeout")
+	assertToolError(t, modelContent.Error(modelContent.TransportError(e, "invalid_image_response")), "upstream_timeout")
 }
 
 func assertToolError(t *testing.T, value M, code string) {
@@ -78,7 +78,7 @@ func TestToolResultErrorsAndOptionalFields(t *testing.T) {
 		{Problem(422, "attachment_invalid_image", "图片损坏"), "attachment_invalid_image"},
 		{Problem(409, "workspace_changed", "目录改变"), "workspace_changed"},
 	} {
-		value := toolError(tt.err)
+		value := modelContent.Error(tt.err)
 		assertToolError(t, value, tt.code)
 		if len(value) != 3 || strings.Contains(string(JSON(value)), "private") {
 			t.Fatal(value)
@@ -86,8 +86,8 @@ func TestToolResultErrorsAndOptionalFields(t *testing.T) {
 	}
 	for status, code := range map[int]string{401: "upstream_authentication_failed", 403: "upstream_forbidden", 429: "upstream_rate_limited", 504: "upstream_timeout", 400: "upstream_rejected", 503: "upstream_unavailable"} {
 		for _, providerCode := range []string{"", "unsupported_image", "secret-key", "非法错误", "Bearer token", strings.Repeat("a", 65)} {
-			err := modelToolError(status, M{"error": M{"code": providerCode, "message": "secret-key 图片 data:image/png;base64,PRIVATE"}}, "secret-key")
-			value := toolError(err)
+			err := modelContent.UpstreamError(status, M{"error": M{"code": providerCode, "message": "secret-key 图片 data:image/png;base64,PRIVATE"}}, "secret-key")
+			value := modelContent.Error(err)
 			assertToolError(t, value, code)
 			if I(value["upstream_status"]) != status || Has(value, "upstream_code") != (providerCode == "unsupported_image") || strings.Contains(string(JSON(value)), "PRIVATE") || strings.Contains(string(JSON(value)), "secret-key") {
 				t.Fatal(value)
@@ -109,43 +109,60 @@ func TestToolResultBusinessProjection(t *testing.T) {
 		{"generate_images", M{"status": "completed", "resource": "internal", "providerUsage": M{"tokens": 30}, "files": []any{M{"path": "artifacts/images/img_x.png", "promptPath": "artifacts/images/img_x.prompt.txt", "mime": "image/png", "sha256": "internal", "size": 100}}}, `{"files":[{"path":"artifacts/images/img_x.png","prompt_path":"artifacts/images/img_x.prompt.txt"}],"status":"completed"}`},
 		{"list_sessions", M{"status": "completed", "sessions": []any{M{"task_id": "task", "title": "title", "assistant_name": "assistant", "status": "idle", "queued_prompts": 0, "agent": "root", "pending_interaction": nil}}}, `{"sessions":[{"assistant_name":"assistant","status":"idle","task_id":"task","title":"title"}],"status":"completed"}`},
 	} {
-		if got := string(JSON(toolOutput(tt.name, tt.value))); got != tt.want {
+		if got := string(JSON(modelContent.ToolResult(tt.name, tt.value))); got != tt.want {
 			t.Fatal(tt.name, got)
 		}
 	}
 	f := newWorkspaceFixture(t)
 	l, turn := f.turn(t)
-	value := toolOutput("download_runcove_files", l.Transfer(context.Background(), turn, "download_runcove_files", M{"remote_paths": []any{"hello.txt", "missing.txt"}, "local_directory": "results"}))
+	value := modelContent.ToolResult("download_runcove_files", l.Transfer(context.Background(), turn, "download_runcove_files", M{"remote_paths": []any{"hello.txt", "missing.txt"}, "local_directory": "results"}))
 	if value["status"] != "partial" || value["code"] != "partial_download" || len(A(value["files"])) != 1 || O(A(value["files"])[0])["path"] != "results/hello.txt" || O(A(value["errors"])[0])["field"] != "remote_paths[1]" {
 		t.Fatal(value)
 	}
-	value = toolOutput("download_runcove_files", l.Transfer(context.Background(), turn, "download_runcove_files", M{"remote_paths": []any{"missing.txt"}, "local_directory": "results"}))
+	value = modelContent.ToolResult("download_runcove_files", l.Transfer(context.Background(), turn, "download_runcove_files", M{"remote_paths": []any{"missing.txt"}, "local_directory": "results"}))
 	if Has(value, "files") || value["code"] != "download_failed" {
 		t.Fatal(value)
 	}
-	value = toolOutput("upload_runcove_file", transferFailure(context.Canceled, true))
+	value = modelContent.ToolResult("upload_runcove_file", transferFailure(context.Canceled, true))
 	if len(value) != 3 || value["status"] != "unknown" || value["code"] != "outcome_unknown" {
 		t.Fatal(value)
 	}
 }
 
-func TestSessionToolResultHTTP(t *testing.T) {
+func TestSessionToolResultMCP(t *testing.T) {
 	f := newPlatformFixture(t, 5)
 	f.save(inspectionConfig(f, "OPENAI_CHAT_COMPLETIONS", "OPENAI_CHAT_COMPLETIONS"))
 	app := f.startApp()
-	task := newParityTask(t, app, nil)
-	headers := http.Header{"Authorization": []string{"Bearer " + app.Security.InternalToken}}
-	status, value, _ := requestApp(t, app, "POST", "/api/tools/list-sessions", M{"limit": 1}, headers)
-	if status != 200 || value["status"] != "completed" || len(A(value["sessions"])) != 1 || Has(O(A(value["sessions"])[0]), "pending_interaction") {
-		t.Fatal(status, value)
+	sender := newParityTask(t, app, nil)
+	target := newParityTask(t, app, nil)
+	session := connectTuckTools(t, app, sender, "root")
+	value := callTuckTool(t, session, "list_sessions", M{"limit": 1}, false)
+	if len(A(value["sessions"])) != 1 || Has(O(A(value["sessions"])[0]), "pending_interaction") {
+		t.Fatal(value)
 	}
-	status, value, _ = requestApp(t, app, "POST", "/api/tools/list-sessions", M{"limit": 101}, headers)
-	assertToolError(t, value, "invalid_arguments")
-	status, value, _ = requestApp(t, app, "POST", "/api/tools/send-message", M{"target_task_id": task["id"], "message": "Message result contract"}, headers)
-	if status != 202 || string(JSON(value)) != `{"status":"accepted"}` {
-		t.Fatal(status, value)
+	callTuckTool(t, session, "list_sessions", M{"limit": 101}, true)
+	value = callTuckTool(t, session, "send_session_message", M{"target_task_id": target["id"], "message": "Message result contract"}, false)
+	if string(JSON(value)) != `{"status":"accepted"}` {
+		t.Fatal(value)
 	}
-	waitIdle(t, app.Manager, S(task["id"]))
+	waitIdle(t, app.Manager, S(target["id"]))
+}
+
+func TestSessionToolUnavailableTargetModelMCP(t *testing.T) {
+	f := newPlatformFixture(t, 5)
+	f.save(inspectionConfig(f, "OPENAI_CHAT_COMPLETIONS", "OPENAI_CHAT_COMPLETIONS"))
+	app := f.startApp()
+	sender := newParityTask(t, app, nil)
+	target := newParityTask(t, app, nil)
+	session := connectTuckTools(t, app, sender, "root")
+	// Historical conversations can retain a model removed from the catalog.
+	target = mustUpdate(t, app.Manager, S(target["id"]), M{"modelId": "removed-model", "modelSource": "local"})
+	value := callTuckTool(t, session, "send_session_message", M{"target_task_id": target["id"], "message": "Do not queue an unavailable target"}, true)
+	assertToolError(t, value, "model_unavailable")
+	current, e := app.Manager.Get(S(target["id"]))
+	if e != nil || len(A(current["queue"])) != 0 || I(current["turnCount"]) != 0 {
+		t.Fatal("unavailable target accepted work", current, e)
+	}
 }
 
 func TestInspectionPresentationForkAmbiguity(t *testing.T) {

@@ -108,11 +108,11 @@ Measix 将个人与组织的 Agent 工作，连接到持久环境、专业模型
 
 ![Measix 产品职责图：Tuck 与 Pilot 为工作入口，Orchelm 管理组织能力，Runcove 与 Noetral 提供环境和模型，Metrivon 与 Tracelle 承接测量与数据](docs/assets/readme/measix-products.svg)
 
-- **工作入口：** 松子 **Tuck** 是浏览器 Agent 工作台；领航 **Pilot** 是原生 Android Agent 应用，面向移动与现场工作。
+- **工作入口：** 松子 **Tuck** 是浏览器 Agent 工作台；领航 [**Pilot**](https://github.com/topabomb/measix-pilot) 是原生 Android Agent 应用，面向移动与现场工作。
 - **能力与治理：** 枢策 **Orchelm** 管理组织的能力供给、授权与用量；工舱 **Runcove** 提供持久执行环境；知衡 **Noetral** 面向工业领域模型与任务适配。
 - **专业业务：** 衡准 **Metrivon** 负责精密测量与设备协同；溯原 **Tracelle** 保存原始数据、配置、结果和报告，支持追溯与分析。
 
-个人使用可以从 Tuck 开始，按需连接远端环境。已公开仓库：[**measix-tuck**](https://github.com/topabomb/measix-tuck) · [**measix-runcove**](https://github.com/topabomb/measix-runcove)。
+个人使用可以从 Tuck 开始，按需连接远端环境。已公开仓库：[**measix-tuck**](https://github.com/topabomb/measix-tuck) · [**measix-pilot**](https://github.com/topabomb/measix-pilot) · [**measix-runcove**](https://github.com/topabomb/measix-runcove)。
 
 ## 配置与数据
 

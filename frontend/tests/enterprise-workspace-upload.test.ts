@@ -48,7 +48,7 @@ describe('enterprise upload progress and outcome',()=>{
     expect(owner.state.transfers[0]).toMatchObject({progress:100,loaded:file.size,status:'已发送，等待服务端确认'})
     expect(owner.state.transfers[0]!.cancel).toBeTypeOf('function')
     xhr.respond(200,{outcome:'SUCCEEDED'});await upload
-    expect(owner.state.transfers[0]).toMatchObject({progress:100,status:'已完成'})
+    expect(owner.state.transfers[0]).toMatchObject({progress:100,status:'服务端已确认保存'})
     expect(owner.state.transfers[0]!.cancel).toBeUndefined()
   })
   it('uses the actual duplicate destination in the visible transfer',async()=>{
@@ -121,7 +121,7 @@ describe('enterprise upload progress and outcome',()=>{
     await upload
     expect(owner.state.transfers[0]!.status).toContain('远端结果未知')
     expect(owner.state.error).toContain('远端结果未知')
-    expect(owner.state.transfers[0]!.status).not.toBe('已完成')
+    expect(owner.state.transfers[0]!.status).not.toBe('服务端已确认保存')
   })
   it('keeps enterprise authentication rejection visible without expiring the local login',async()=>{
     const {owner,upload,xhr}=await start()

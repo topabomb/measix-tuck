@@ -135,7 +135,7 @@ test('disk upload verifies intermediate progress, refresh rejection, confirmatio
     await expect(f.transfers.getByRole('status')).toHaveText('已发送，等待服务端确认',{timeout:transferTimeout})
     await expect.poll(()=>f.metrics.committed,{timeout:transferTimeout}).toBe(true)
     await f.verifyComplete()
-    f.release();await expect(f.transfers.getByRole('status')).toHaveText('已完成')
+    f.release();await expect(f.transfers.getByRole('status')).toHaveText('服务端已确认保存')
     await expect(f.panel.getByRole('button',{name:'刷新',exact:true})).toBeEnabled()
     await expect.poll(()=>f.metrics.active).toBe(0);expect(f.metrics.errors).toEqual([])
     await page.reload();await expect(f.panel.getByRole('option',{name:new RegExp(name.replace('.','\\.'))})).toBeVisible()

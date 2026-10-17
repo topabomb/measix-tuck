@@ -198,7 +198,7 @@ test('narrow creation menus and joined document tabs keep their actions keyboard
   }
   await panel.getByRole('option',{name:/hello\.txt/}).dblclick()
   const list=panel.getByRole('tab',{name:'返回文件列表',exact:true})
-  await expect(list).toHaveText('文件列表')
+  await expect(list).toHaveText('目录')
   await expect(list.locator('svg')).toBeVisible()
   expect((await panel.getByRole('button',{name:'专注内容',exact:true}).boundingBox())!.height).toBe(29)
   const active=panel.locator('.ew-document-tab.is-active')

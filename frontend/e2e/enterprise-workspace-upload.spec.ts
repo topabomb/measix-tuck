@@ -54,7 +54,7 @@ test('a real large upload shows bytes and progress, then waits for server confir
   expect(createHash('sha256').update(core.files.get('large-upload.bin')!).digest('hex')).toBe(createHash('sha256').update(payload).digest('hex'))
   await page.screenshot({path:info.outputPath('workspace-upload-confirming.png')})
   releaseUpload()
-  await expect(transfers.getByRole('status')).toHaveText('已完成')
+  await expect(transfers.getByRole('status')).toHaveText('服务端已确认保存')
   await expect(transfers.getByRole('button',{name:'取消上传 large-upload.bin'})).toHaveCount(0)
 })
 

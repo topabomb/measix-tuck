@@ -25,6 +25,15 @@ watch([()=>props.active,mode],()=>{void restoreScroll()},{flush:'post'})
 onMounted(()=>{void restoreScroll()})
 const source = computed(()=>['text','markdown','csv','html'].includes(props.doc.type))
 const saveDisabled=computed(()=>props.doc.readonly||pending.value||owner.state.busy||!owner.state.projection?.filesAvailable||!props.doc.loaded)
+const saving=computed(()=>props.doc.saveStatus==='saving'||props.doc.saveStatus==='verifying')
+const saveFeedback=computed(()=>{
+  const doc=props.doc
+  if(doc.saveStatus==='saving')return '正在保存，等待服务端确认'
+  if(doc.saveStatus==='verifying')return '服务端已确认，正在核对文件内容'
+  if(doc.saveStatus==='failed')return '保存未确认，请核对远端内容；当前草稿已保留'
+  if(doc.text!==doc.original)return '有未保存修改'
+  return doc.saveStatus==='saved'?'服务端已确认保存':''
+})
 const more=ref<HTMLDetailsElement>(), previewInfo=ref<HTMLDetailsElement>()
 watch(()=>props.active,active=>{if(!active){if(more.value)more.value.open=false;if(previewInfo.value)previewInfo.value.open=false}})
 watch(()=>props.doc.path,()=>{compare.value='';error.value=''})
@@ -95,7 +104,7 @@ onBeforeUnmount(()=>{adjacentController?.abort();window.removeEventListener('poi
       <span v-if="dimensions" class="ew-picture-size">{{dimensions}}</span>
     </div>
     <span v-else class="ew-document-name" :title="doc.path">{{basename(doc.path)}}</span>
-    <span v-if="pending || adjacentLoading" role="status" class="ew-document-pending" :title="pending?'处理中':'正在读取同目录图片'"><span class="ew-spinner" aria-hidden="true" /></span>
+    <span v-if="pending && !saving || adjacentLoading" role="status" class="ew-document-pending" :title="pending?'处理中':'正在读取同目录图片'"><span class="ew-spinner" aria-hidden="true" /></span>
     <div v-if="['markdown','html'].includes(doc.type) && mode==='preview'" class="ew-preview-info">
       <details ref="previewInfo" class="ew-links" @keydown.esc.stop.prevent="dismissPreviewInfo">
         <summary role="button" :class="{'has-warning':!!previewNotice}" :title="previewNotice||'预览说明与链接'" aria-label="预览说明与链接" @click="closeOtherMenu('preview')">
@@ -134,6 +143,7 @@ onBeforeUnmount(()=>{adjacentController?.abort();window.removeEventListener('poi
       </details>
     </div>
   </div>
+  <p v-if="source && doc.loaded && saveFeedback" class="ew-save-status" role="status" aria-label="文件保存状态"><span v-if="saving" class="ew-spinner" aria-hidden="true" />{{saveFeedback}}</p>
   <p v-if="doc.reason" class="ew-notice">{{doc.reason}} <button v-if="!doc.reason.includes('截断') && !doc.reason.includes('版本')" @click="doc.readonly=false;doc.newline='\n';doc.reason='已转换为 UTF-8/LF，请另存';doc.etag=''">转换为 UTF-8/LF</button></p>
   <div v-if="error || previewError || doc.error" class="ew-error" role="alert">{{error || previewError || doc.error}}<template v-if="source"><button @click="act(compareRemote)">查看远端版本</button><button :disabled="doc.readonly || pending || owner.state.busy || !owner.state.projection?.filesAvailable || !doc.loaded" @click="save(true)">另存草稿</button><button @click="downloadDraft">下载草稿</button></template></div>
   <details v-if="compare"><summary>远端版本（当前草稿仍保留）</summary><pre>{{compare}}</pre></details>
@@ -152,6 +162,7 @@ onBeforeUnmount(()=>{adjacentController?.abort();window.removeEventListener('poi
 .ew-document-tools{min-height:40px;padding:5px 7px;gap:4px}
 .ew-document-tools>button,.ew-document-tools .ew-doc-action{height:28px;min-height:28px;box-sizing:border-box;line-height:18px;padding:4px 7px}
 .ew-document-tools svg{width:16px;height:16px;flex:none}
+.ew-save-status{display:flex;align-items:center;gap:7px;flex-shrink:0;margin:0;padding:6px 9px;border-bottom:1px solid var(--tuck-border);font-size:12px;color:var(--tuck-muted);overflow-wrap:anywhere}
 .ew-document-tools .ew-doc-icon{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:4px;box-sizing:border-box}
 .ew-picture-controls,.ew-document-actions{display:flex;align-items:center;gap:4px;flex:none}
 .ew-picture-controls{min-width:0}

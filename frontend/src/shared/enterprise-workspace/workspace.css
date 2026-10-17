@@ -5,7 +5,7 @@
 .ew-file-icon.ew-pdf-icon{font-size:10px;letter-spacing:-.5px;font-weight:700}.ew-grid .ew-file-icon.ew-pdf-icon{font-size:18px}
 
 /* Navigation stays mounted when the reader needs more room. */
-.is-focused>.ew-location,.is-focused>.ew-tabs,.is-focused>footer{display:none}
+.is-focused>.ew-location,.is-focused>.ew-tab-bar,.is-focused>footer{display:none}
 .ew-heading button[aria-pressed=true]{background:var(--tuck-hover);color:var(--tuck-accent)}
 .ew-tree>.ew-tree-node{display:block;border-radius:5px;margin-bottom:2px}
 .ew-tree-node.is-current{background:var(--tuck-hover);color:var(--tuck-accent)}
@@ -72,6 +72,12 @@
 .enterprise-workspace{container-type:inline-size;container-name:enterprise-files}.ew-create-more{display:none}.ew-create-more>summary{display:flex;align-items:center;justify-content:center;width:28px;height:29px;padding:4px;box-sizing:border-box}.ew-create-more>div{z-index:15}.ew-create-more>div .ew-label-button{justify-content:flex-start}.ew-create-tools{overflow:visible}@container enterprise-files (max-width:440px){.ew-create-tools>.ew-folder-action{display:none}.ew-create-more{display:block}}.ew-tabs{gap:5px;align-items:stretch}.ew-tabs svg{width:16px;height:16px;flex-shrink:0}.ew-tabs>.ew-document-tab{align-items:stretch;overflow:hidden;border:1px solid var(--tuck-border);border-radius:6px;background:var(--tuck-surface)}.ew-tabs>.ew-document-tab.is-active{border-color:var(--tuck-accent);background:var(--tuck-hover);box-shadow:inset 0 -2px var(--tuck-accent)}.ew-document-tab button{border-radius:0;background:transparent}.ew-document-tab button[aria-selected=true]{border:0;background:transparent;color:var(--tuck-accent)}.ew-tabs .ew-tab-close{display:inline-flex;align-items:center;justify-content:center;width:25px;max-width:25px;padding:3px;color:var(--tuck-muted)}.ew-tab-close:focus-visible,.ew-document-tab button:focus-visible{outline:2px solid var(--tuck-accent);outline-offset:-2px}.ew-tabs>.ew-file-list-tab{border:1px solid transparent;max-width:none}.ew-tabs>.ew-file-list-tab[aria-selected=true]{border-color:var(--tuck-accent);background:var(--tuck-hover)}
 
 /* Navigation density follows the file panel, including a narrow desktop side panel. */
-@container enterprise-files (max-width:440px){.enterprise-workspace .ew-location>.ew-history-button{display:none}.ew-file-list-label,.ew-browser-tools .ew-download-label{display:none}.ew-tabs>.ew-file-list-tab{width:29px;min-width:29px;padding-inline:5px}.ew-browser-tools>.ew-label-button[aria-label="下载"]{width:28px;padding-inline:4px}}
+@container enterprise-files (max-width:440px){.enterprise-workspace .ew-location>.ew-history-button{display:none}.ew-browser-tools .ew-download-label{display:none}.ew-browser-tools>.ew-label-button[aria-label="下载"]{width:28px;padding-inline:4px}}
 @container enterprise-files (max-width:360px){.ew-heading .ew-focus-label{display:none}}
 .ew-location nav .ew-root{position:sticky;left:0;z-index:1;flex-shrink:0;background:var(--tuck-background)}.ew-location nav .ew-root:hover:not(:disabled){background:var(--tuck-hover)}
+.ew-tab-bar{display:flex;align-items:center;flex-shrink:0;min-width:0;border-bottom:1px solid var(--tuck-border)}
+.ew-tab-bar>.ew-tabs{flex:1;min-width:0;border-bottom:0}
+.ew-tab-bar .ew-file-list-tab[aria-selected=true]{border-width:1px}
+.ew-tabs-more{margin:0 5px 0 0}
+.ew-tabs-more>summary{display:flex;align-items:center;justify-content:center;width:28px;height:29px;padding:4px;box-sizing:border-box}
+.ew-tabs-more svg{width:16px;height:16px;flex:none}

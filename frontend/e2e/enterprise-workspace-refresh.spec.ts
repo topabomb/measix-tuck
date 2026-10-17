@@ -98,7 +98,7 @@ for(const operation of ['save','upload'] as const)test(`foreground ${operation} 
       const chooser=await chooserReady
       await chooser.setFiles({name:'refresh-priority.txt',mimeType:'text/plain',buffer:Buffer.from('upload takes priority')})
       await expect.poll(()=>core.files.get('refresh-priority.txt')?.toString()).toBe('upload takes priority')
-      await expect(panel.getByRole('region',{name:'上传进度'}).getByRole('status')).toHaveText('已完成')
+      await expect(panel.getByRole('region',{name:'上传进度'}).getByRole('status')).toHaveText('服务端已确认保存')
     }
     await expect.poll(held.cancelled).toBe(true)
     held.release()

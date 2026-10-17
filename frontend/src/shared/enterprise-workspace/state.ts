@@ -12,7 +12,7 @@ export interface DocumentView {
   pdf:ScrollPosition&{page:number;scale:number;query:string;showThumbs:boolean}
   media:{position:number;rate:number;volume:number;muted:boolean}
 }
-export interface Document { id:number; path:string; type:string; text:string; original:string; etag:string; bom:boolean; newline:string; readonly:boolean; reason:string; loaded:boolean; error:string;view?:DocumentView }
+export interface Document { id:number; path:string; type:string; text:string; original:string; etag:string; bom:boolean; newline:string; readonly:boolean; reason:string; loaded:boolean; error:string;saveStatus?:'saving'|'verifying'|'saved'|'failed';view?:DocumentView }
 interface Transfer { path:string; progress:number; loaded:number; total:number; status:string; cancel?:()=>void }
 export const workspaceKey:InjectionKey<ReturnType<typeof createEnterpriseWorkspace>> = Symbol('enterprise-workspace')
 const maxTabs=12,maxCachedTextBytes=24*1024*1024
@@ -136,7 +136,7 @@ export function createEnterpriseWorkspace() {
     state.active = path
     if (doc.loaded) {trimTabs();return}
     if(loads.has(doc.id))return loads.get(doc.id)
-    const target=doc;target.error=''
+    const target=doc;target.error='';target.saveStatus=undefined
     const loading=(async()=>{const doc=target;try {
       const head = await response('/content',path,{method:'HEAD'}); doc.etag = head.headers.get('etag') || ''
       if(['audio','video','pdf'].includes(doc.type) && !/^"[^"\r\n]+"$/.test(doc.etag))throw new Error('文件服务未提供强版本号，请下载查看或重新读取')
@@ -163,16 +163,19 @@ export function createEnterpriseWorkspace() {
     if(encoded.length>2*1024*1024)throw new Error('编辑内容超过 2 MiB，请下载草稿后在本机编辑并上传')
     lastUsed.set(doc.id,++accessSequence)
     saving.add(doc.id)
+    doc.saveStatus='saving'
     try {
     await put(destination,encoded as BodyInit,destination === doc.path ? doc.etag : undefined)
     assertGeneration(current)
+    doc.saveStatus='verifying'
     // Do not associate a later HEAD's version with the old draft: reread bytes.
     const read = await bounded(destination,2*1024*1024)
     const actual = decodeText(read.data)
     if (actual.text !== saved || actual.bom !== doc.bom || actual.newline !== doc.newline && saved.includes('\n')) throw new Error('保存后文件再次变化，草稿已保留，请核对远端内容')
     assertGeneration(current)
     if(destination!==previousPath && state.tabs.some(d=>d.id!==doc.id && d.path===destination))throw new Error('文件已保存到目标，但该路径已有打开的标签；当前草稿已保留，请核对目标文件')
-    doc.etag = read.etag; doc.original = saved; doc.path = destination; if(destination!==previousPath)doc.type = kind(destination);if(state.active===previousPath)state.active=destination; await list()
+    doc.etag = read.etag; doc.original = saved; doc.path = destination; doc.saveStatus='saved'; if(destination!==previousPath)doc.type = kind(destination);if(state.active===previousPath)state.active=destination; await list()
+    } catch(error) {if(doc.saveStatus!=='saved')doc.saveStatus='failed';throw error
     } finally {saving.delete(doc.id);trimTabs()}
   }
   async function upload(files:File[],directories:string[] = []) {
@@ -222,7 +225,7 @@ export function createEnterpriseWorkspace() {
             const message=xhr.status===412?(etag?'同名文件已变化，未覆盖；请刷新核对后重新上传':'目标已存在，未覆盖；请刷新核对后重新上传'):value.error || (value.outcome==='PARTIAL'?'部分写入未完成':'上传未确认成功')
             reject(new Error(xhr.status>=500||value.outcome==='UNKNOWN'||xhr.status>=200&&xhr.status<300?`${message}；远端结果未知，请刷新核对`:message))
           }; xhr.send(file)
-        }); transfer.status = '已完成'; transfer.progress = 100;transfer.loaded=file.size
+        }); transfer.status = '服务端已确认保存'; transfer.progress = 100;transfer.loaded=file.size
         if(state.tabs.some(doc=>doc.path===path))state.notice='文件已上传；已打开的同名文件请重新读取，草稿已保留'
       } catch (error) { transfer.status = (error as Error).message; if(current===epoch)state.error=failure=`${file.name}：${transfer.status}` }
       finally { delete transfer.cancel }

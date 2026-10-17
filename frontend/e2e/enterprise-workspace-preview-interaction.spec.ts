@@ -87,7 +87,7 @@ test('narrow preview toolbar and document menu fit, close on Escape and keep cha
   const menu=panel.getByRole('button',{name:'文档操作',exact:true})
   await menu.click()
   await expect(panel.getByRole('button',{name:'另存为',exact:true})).toBeVisible()
-  const bounds=(await panel.boundingBox())!,popup=(await panel.locator('.ew-more>div').boundingBox())!
+  const bounds=(await panel.boundingBox())!,popup=(await panel.locator('.ew-document:visible .ew-more[open]>div').boundingBox())!
   expect(popup.x).toBeGreaterThanOrEqual(bounds.x)
   expect(popup.x+popup.width).toBeLessThanOrEqual(bounds.x+bounds.width)
   await menu.press('Escape')

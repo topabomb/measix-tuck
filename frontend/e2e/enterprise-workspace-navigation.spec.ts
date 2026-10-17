@@ -38,6 +38,76 @@ test('path editing supports confirmation, cancellation and repeated toggles with
   await expect(panel.getByRole('option',{name:/hello\.txt/})).toBeVisible()
 })
 
+test('typed file paths open files even when listing a file returns an empty directory response',async({page})=>{
+  const path='folder/报告 #%.txt'
+  core.put(path,'opened by complete file path')
+  let fileListings=0
+  await page.route('**/api/enterprise-workspace/files?*',async route=>{
+    if(new URL(route.request().url()).searchParams.get('path')===path){fileListings++;await route.fulfill({json:{entries:[]}})}
+    else await route.continue()
+  })
+  const panel=await open(page)
+  await panel.getByRole('option',{name:/hello\.txt/}).dblclick()
+  await panel.locator('.ew-document:visible .cm-content').fill('keep this draft')
+  await panel.getByRole('button',{name:'输入路径',exact:true}).click()
+  const input=panel.getByRole('textbox',{name:'工作区路径',exact:true})
+  await input.fill(path);await input.press('Enter')
+  await expect(panel.locator('.ew-document:visible .cm-content')).toHaveText('opened by complete file path')
+  await expect(panel.getByRole('tab',{name:'hello.txt •',exact:true})).toBeVisible()
+  await expect(input).toHaveCount(0)
+  await expect(panel.getByText('此目录为空，可拖入文件上传')).toHaveCount(0)
+  expect(new URLSearchParams(new URL(page.url()).hash.split('?')[1]).get('file')).toBe(path)
+  expect(new URLSearchParams(new URL(page.url()).hash.split('?')[1]).get('dir')).toBe('folder')
+  await page.reload()
+  await expect(panel.locator('.ew-document:visible .cm-content')).toHaveText('opened by complete file path')
+  expect(fileListings).toBe(0)
+})
+
+test('typed paths use entry types for dotted directories and extensionless or empty files',async({page})=>{
+  core.directories.add('empty.folder')
+  core.put('LICENSE','extensionless file')
+  core.put('empty.txt','')
+  const panel=await open(page)
+  async function inputPath(path:string){
+    await panel.getByRole('button',{name:'输入路径',exact:true}).click()
+    const input=panel.getByRole('textbox',{name:'工作区路径',exact:true})
+    await expect(input).toHaveAttribute('placeholder','目录或文件路径')
+    await input.fill(path);await input.press('Enter')
+    await expect(input).toHaveCount(0)
+  }
+  await inputPath('empty.folder')
+  await expect(panel.getByText('此目录为空，可拖入文件上传')).toBeVisible()
+  await inputPath('LICENSE')
+  await expect(panel.locator('.ew-document:visible .cm-content')).toHaveText('extensionless file')
+  await expect(panel.getByText('此目录为空，可拖入文件上传')).toHaveCount(0)
+  await inputPath('empty.txt')
+  await expect(panel.locator('.ew-document:visible .cm-content')).toHaveText('')
+  await expect(panel.getByRole('button',{name:'保存',exact:true})).toBeDisabled()
+  await expect(panel.getByText('此目录为空，可拖入文件上传')).toHaveCount(0)
+})
+
+test('missing or inaccessible typed paths keep the current file and draft visible',async({page})=>{
+  const panel=await open(page)
+  await panel.getByRole('option',{name:/hello\.txt/}).dblclick()
+  const editor=panel.locator('.ew-document:visible .cm-content')
+  await editor.fill('preserve on bad path')
+  await panel.getByRole('button',{name:'输入路径',exact:true}).click()
+  const input=panel.getByRole('textbox',{name:'工作区路径',exact:true})
+  await input.fill('missing.txt');await input.press('Enter')
+  await expect(panel.getByRole('alert')).toHaveText('找不到文件或目录“missing.txt”，请核对路径')
+  await expect(editor).toHaveText('preserve on bad path')
+  await expect(input).toBeVisible()
+  await page.route('**/api/enterprise-workspace/files?*',async route=>{
+    if(new URL(route.request().url()).searchParams.get('path')==='folder')await route.fulfill({status:403,json:{error:'无权访问此目录'}})
+    else await route.continue()
+  })
+  await input.fill('folder/private.txt');await input.press('Enter')
+  await expect(panel.getByRole('alert')).toHaveText('无权访问此目录')
+  await expect(editor).toHaveText('preserve on bad path')
+  await expect(page).toHaveURL(/file=hello\.txt(?:&|$)/)
+  await expect(panel.getByText('此目录为空，可拖入文件上传')).toHaveCount(0)
+})
+
 test('root path aliases and failed first reads recover without claiming the directory is empty',async({page})=>{
   let fail=true
   await page.route('**/api/enterprise-workspace/files?*',async route=>{

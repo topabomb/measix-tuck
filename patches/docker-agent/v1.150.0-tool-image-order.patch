@@ -1,0 +1,185 @@
+diff --git a/pkg/model/provider/oaistream/messages.go b/pkg/model/provider/oaistream/messages.go
+index 0f724ce5d..98984f7f0 100644
+--- a/pkg/model/provider/oaistream/messages.go
++++ b/pkg/model/provider/oaistream/messages.go
+@@ -81,6 +81,12 @@ func convertMultiContentWithCaps(ctx context.Context, multiContent []chat.Messag
+ 
+ func convertMessagesWithCaps(ctx context.Context, messages []chat.Message, mc modelinfo.ModelCapabilities) []openai.ChatCompletionMessageParamUnion {
+ 	openaiMessages := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages))
++	// Attachments must not interrupt a parallel tool-result batch.
++	var deferred []openai.ChatCompletionMessageParamUnion
++	flushDeferred := func() {
++		openaiMessages = append(openaiMessages, deferred...)
++		deferred = nil
++	}
+ 	for i := range messages {
+ 		msg := &messages[i]
+ 
+@@ -88,6 +94,9 @@ func convertMessagesWithCaps(ctx context.Context, messages []chat.Message, mc mo
+ 		if msg.Role == chat.MessageRoleAssistant && len(msg.ToolCalls) == 0 && len(msg.MultiContent) == 0 && strings.TrimSpace(msg.Content) == "" {
+ 			continue
+ 		}
++		if msg.Role != chat.MessageRoleTool {
++			flushDeferred()
++		}
+ 
+ 		var openaiMessage openai.ChatCompletionMessageParamUnion
+ 
+@@ -212,12 +221,13 @@ func convertMessagesWithCaps(ctx context.Context, messages []chat.Message, mc mo
+ 				}
+ 			}
+ 			if len(attachmentParts) > 0 {
+-				label := openai.TextContentPart("Attached content from tool result:")
++				label := openai.TextContentPart("Attached content from tool result (tool_call_id=" + msg.ToolCallID + "):")
+ 				allParts := append([]openai.ChatCompletionContentPartUnionParam{label}, attachmentParts...)
+-				openaiMessages = append(openaiMessages, openai.UserMessage(allParts))
++				deferred = append(deferred, openai.UserMessage(allParts))
+ 			}
+ 		}
+ 	}
++	flushDeferred()
+ 	return openaiMessages
+ }
+ 
+diff --git a/pkg/model/provider/oaistream/messages_test.go b/pkg/model/provider/oaistream/messages_test.go
+index 91e40368a..6ea8b3753 100644
+--- a/pkg/model/provider/oaistream/messages_test.go
++++ b/pkg/model/provider/oaistream/messages_test.go
+@@ -1,6 +1,8 @@
+ package oaistream
+ 
+ import (
++	"encoding/json"
++	"strings"
+ 	"testing"
+ 
+ 	"github.com/openai/openai-go/v3"
+@@ -8,6 +10,7 @@ import (
+ 	"github.com/stretchr/testify/require"
+ 
+ 	"github.com/docker/docker-agent/pkg/chat"
++	"github.com/docker/docker-agent/pkg/modelinfo"
+ 	"github.com/docker/docker-agent/pkg/modelsdev"
+ 	"github.com/docker/docker-agent/pkg/tools"
+ )
+@@ -69,6 +72,120 @@ func TestConvertMultiContent(t *testing.T) {
+ 	}
+ }
+ 
++func TestToolAttachmentsFollowCompleteResults(t *testing.T) {
++	t.Parallel()
++	const imageURL = "data:image/png;base64,aW1hZ2U="
++	assistant := func(ids ...string) chat.Message {
++		msg := chat.Message{Role: chat.MessageRoleAssistant}
++		for _, id := range ids {
++			msg.ToolCalls = append(msg.ToolCalls, tools.ToolCall{ID: id, Function: tools.FunctionCall{Name: "read_file"}})
++		}
++		return msg
++	}
++	image := func(id string) chat.Message {
++		return chat.Message{Role: chat.MessageRoleTool, ToolCallID: id, MultiContent: []chat.MessagePart{
++			{Type: chat.MessagePartTypeText, Text: "Read " + id},
++			{Type: chat.MessagePartTypeImageURL, ImageURL: &chat.MessageImageURL{URL: imageURL, Detail: chat.ImageURLDetailHigh}},
++		}}
++	}
++	plain := chat.Message{Role: chat.MessageRoleTool, ToolCallID: "A", Content: "read failed", IsError: true}
++	user := chat.Message{Role: chat.MessageRoleUser, Content: "Continue reviewing"}
++	pdf := chat.Message{Role: chat.MessageRoleTool, ToolCallID: "B", MultiContent: []chat.MessagePart{{
++		Type:     chat.MessagePartTypeDocument,
++		Document: &chat.Document{Name: "report.pdf", MimeType: "application/pdf", Source: chat.DocumentSource{InlineData: []byte("%PDF-1.4")}},
++	}}}
++	tests := []struct {
++		name        string
++		messages    []chat.Message
++		roles       []string
++		attachments []string
++	}{
++		{"parallel images in completion order", []chat.Message{assistant("A", "B"), image("B"), image("A")}, []string{"assistant", "tool", "tool", "user", "user"}, []string{"B", "A"}},
++		{"image before failed text result", []chat.Message{assistant("A", "B"), image("B"), plain}, []string{"assistant", "tool", "tool", "user"}, []string{"B"}},
++		{"image after failed text result", []chat.Message{assistant("A", "B"), plain, image("B")}, []string{"assistant", "tool", "tool", "user"}, []string{"B"}},
++		{"single image", []chat.Message{assistant("B"), image("B")}, []string{"assistant", "tool", "user"}, []string{"B"}},
++		{"original user remains after attachments", []chat.Message{assistant("A", "B"), image("B"), plain, user}, []string{"assistant", "tool", "tool", "user", "user"}, []string{"B"}},
++		{"next tool batch", []chat.Message{assistant("A", "B"), image("B"), plain, assistant("C"), image("C")}, []string{"assistant", "tool", "tool", "user", "assistant", "tool", "user"}, []string{"B", "C"}},
++		{"skipped empty assistant does not split results", []chat.Message{assistant("A", "B"), image("B"), {Role: chat.MessageRoleAssistant}, plain}, []string{"assistant", "tool", "tool", "user"}, []string{"B"}},
++		{"document follows the same boundary", []chat.Message{assistant("A", "B"), pdf, plain}, []string{"assistant", "tool", "tool", "user"}, []string{"B"}},
++		{"text-only history unchanged", []chat.Message{assistant("A"), plain, user}, []string{"assistant", "tool", "user"}, nil},
++	}
++	for _, tt := range tests {
++		t.Run(tt.name, func(t *testing.T) {
++			t.Parallel()
++			got := ConvertMessagesWithCaps(t.Context(), tt.messages, modelinfo.CapsWith(true, true, false, false))
++			raw, err := json.Marshal(got)
++			require.NoError(t, err)
++			var wire []struct {
++				Role       string                `json:"role"`
++				ToolCallID string                `json:"tool_call_id"`
++				Content    json.RawMessage       `json:"content"`
++				ToolCalls  []struct{ ID string } `json:"tool_calls"`
++			}
++			require.NoError(t, json.Unmarshal(raw, &wire))
++			var roles, attachments, toolIDs []string
++			pending := map[string]bool{}
++			for _, msg := range wire {
++				roles = append(roles, msg.Role)
++				if msg.Role != "tool" {
++					assert.Empty(t, pending, "non-tool message interrupted outstanding results")
++				}
++				for _, call := range msg.ToolCalls {
++					pending[call.ID] = true
++				}
++				if msg.Role == "tool" {
++					assert.True(t, pending[msg.ToolCallID])
++					delete(pending, msg.ToolCallID)
++					toolIDs = append(toolIDs, msg.ToolCallID)
++					if msg.ToolCallID == "A" && tt.name != "parallel images in completion order" {
++						assert.Contains(t, string(msg.Content), "read failed")
++					}
++				}
++				if msg.Role != "user" || len(msg.Content) == 0 || msg.Content[0] != '[' {
++					continue
++				}
++				var parts []struct {
++					Type     string                       `json:"type"`
++					Text     string                       `json:"text"`
++					ImageURL struct{ URL, Detail string } `json:"image_url"`
++					File     struct {
++						Filename string `json:"filename"`
++						FileData string `json:"file_data"`
++					} `json:"file"`
++				}
++				require.NoError(t, json.Unmarshal(msg.Content, &parts))
++				require.GreaterOrEqual(t, len(parts), 2)
++				label, ok := strings.CutPrefix(parts[0].Text, "Attached content from tool result (tool_call_id=")
++				require.True(t, ok, "missing tool origin")
++				id, ok := strings.CutSuffix(label, "):")
++				require.True(t, ok)
++				attachments = append(attachments, id)
++				for _, part := range parts[1:] {
++					assert.NotEqual(t, "text", part.Type, "attachment lost its modality")
++					if part.Type == "image_url" {
++						assert.Equal(t, imageURL, part.ImageURL.URL)
++						assert.Equal(t, "high", part.ImageURL.Detail)
++					} else {
++						assert.Equal(t, "file", part.Type)
++						assert.Equal(t, "report.pdf", part.File.Filename)
++						assert.Equal(t, "data:application/pdf;base64,JVBERi0xLjQ=", part.File.FileData)
++					}
++				}
++			}
++			var expectedIDs []string
++			for _, msg := range tt.messages {
++				if msg.Role == chat.MessageRoleTool {
++					expectedIDs = append(expectedIDs, msg.ToolCallID)
++				}
++			}
++			assert.Empty(t, pending)
++			assert.Equal(t, tt.roles, roles)
++			assert.Equal(t, expectedIDs, toolIDs)
++			assert.Equal(t, tt.attachments, attachments)
++		})
++	}
++}
++
+ func TestConvertMessages(t *testing.T) {
+ 	t.Parallel()
+ 

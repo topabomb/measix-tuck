@@ -14,16 +14,9 @@ import (
 )
 
 func TestToolTextResources(t *testing.T) {
-	doc, err := os.ReadFile("../../docs/tools-reference.md")
-	if err != nil {
-		t.Fatal(err)
-	}
 	for id := range modelTexts {
 		if strings.HasPrefix(string(id), "tuck.agent.") {
 			continue
-		}
-		if !strings.Contains(string(doc), string(id)) || !strings.Contains(string(doc), strings.TrimSpace(modelTexts[id])) {
-			t.Error("tool text documentation drift", id)
 		}
 		text, e := modelContent.ResolveText(id, map[string]string{"provider": "Example {provider}", "model": "image-1"})
 		if e != nil || strings.TrimSpace(text) == "" {

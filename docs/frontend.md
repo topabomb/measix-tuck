@@ -2,22 +2,6 @@
 
 本文集中维护渲染、界面布局、样式所有权和依赖补丁。产品与原生执行边界见 [架构](architecture.md)，开发命令见 [贡献指南](../CONTRIBUTING.md)，测试入口和验收门槛见 [验证指南](verification.md)。
 
-## 相关界面与项目
-
-Docker Agent 已有官方终端界面，也可承接不同产品的界面。以下比较聚焦用途，依据 2026-10-16 查阅的官方文档和项目 README；第三方仅核对公开资料，未做部署、兼容或性能评测。
-
-| 界面或项目 | 公开定位与能力 | 与 Tuck 的侧重点 |
-| --- | --- | --- |
-| [Docker Agent 官方 TUI](https://docker.github.io/docker-agent/features/tui/) | 原生终端工作流；会话/标签、附件、工具与思考展示、审批、排队和立即补充；另有管理 Git worktree 任务的 [终端看板](https://docker.github.io/docker-agent/features/board/) | Tuck 将原生交互接入浏览器，管理产品队列、任务、文件与交付；原生审批和子代理执行仍由上游负责 |
-| [Gordon](https://docs.docker.com/ai/gordon/) | Docker 官方助手，提供 Docker Desktop 图形入口和 `docker ai`，聚焦容器、镜像、Dockerfile 等工作；[Docker 官方介绍](https://www.docker.com/blog/gordon-dockers-ai-agent-just-got-an-update/)说明其基于 cagent 构建 | Gordon 是 Docker 专用产品，不能等同于任意 Agent YAML 的通用图形前端；Tuck 面向用户配置的助手及 Measix 资源 |
-| [Open WebUI 等兼容客户端](https://docker.github.io/docker-agent/features/cli/#docker-agent-serve-chat) | 官方 `serve chat` 将 Agent 暴露为 OpenAI 兼容的 Chat Completions 服务，可供通用聊天界面接入 | 聊天协议接入是一条可选路线；原生审批、类型化提问和子会话是否完整呈现需逐项核实。Tuck 对接这些原生交互，并由自身管理版本交付 |
-| [Docker Cagent Playground](https://github.com/tubone24/docker-cagent-playground) | 社区 Web 聊天界面；流式回答、工具/推理与用量展示、YAML 编辑、Agent 关系图及工具/远端 MCP 审批 | 侧重 Agent 配置和交互试验；Tuck 侧重持续任务、文件处理和成果回看。其 README 仍使用旧版 cagent API 命令，不能据此承诺与 Tuck 引擎基线直接兼容 |
-| [MobyClaw](https://github.com/mobyclaw/mobyclaw) | 社区常驻个人助理，使用 cagent 运行，组合 Telegram、记忆、调度及 Web dashboard/任务管理 | 侧重消息渠道与主动自动化；Tuck 当前聚焦人工发起的工作台任务，不提供同类心跳、提醒或调度执行器 |
-
-Tuck 的优势集中在几项已实现的工作台组合：稳定页面地址与有界历史、手机和桌面的文件/媒体交互、独立文件快照的版本交付，以及保留认证/准入/许可合同的 Measix 企业接入。它们降低持续工作中的切换和成果核对成本；这是按产品职责作出的定位判断，不是跨项目性能或安全排名。使用示例见 [README](../README.md#tuck-的工作台体验)，具体合同见 [文件与交付工具](tools-reference.md) 和 [存储设计](database-design.md)。
-
-上游在线文档可能领先于 Tuck 的固定兼容版本。Tuck 的实际引擎基线以 [发行清单](../internal/tuck/contract/engine-release.json) 和 [引擎边界](architecture.md#docker-agent-合同) 为准；不要把 Gordon、其他客户端或上游最新功能写成本仓库已接入的能力。
-
 ## 分层与所有权
 
 | 位置（相对 `frontend/src/`） | 职责 |

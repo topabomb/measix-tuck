@@ -7,7 +7,7 @@
 基于 [Docker Agent](https://github.com/docker/docker-agent) 的自托管 Web 工作台。<br>
 从个人助手到组织工作入口，在一处对话、跟进任务、查看文件、确认交付。
 
-[快速开始](#快速开始) · [界面与能力](#tuck-的工作台体验) · [连接 Runcove](#连接-runcove给-agent-一个持久工作环境) · [Measix 产品体系](#measix-七大产品) · [开发与贡献](CONTRIBUTING.md)
+[快速开始](#快速开始) · [界面与能力](#tuck-的工作台体验) · [项目指引](#项目指引) · [Measix 产品体系](#measix-七大产品) · [开发与贡献](CONTRIBUTING.md)
 
 </div>
 
@@ -70,8 +70,6 @@
 
 **Docker Agent 提供执行基础，Tuck 提供浏览器中的完整工作流程。** 原生会话上下文、审批、子代理与 MCP 生命周期交给官方引擎；Tuck 通过公开接口连接，增加任务视图、文件交互、版本交付与 Measix 平台接入。项目独立维护，兼容基线和具体职责见 [架构](docs/architecture.md#docker-agent-合同)。
 
-与终端操作、通用聊天前端或配置实验界面相比，Tuck 更关注任务完成之后如何检查文件、确认成果，以及如何进入个人和组织的日常工作。官方及社区项目的定位与资料见 [相关界面与项目](docs/frontend.md#相关界面与项目)。
-
 **当前范围：** 单用户工作台，支持人工发起并持续跟进任务；目标和编排频道仍为占位入口，尚无目标调度、定时任务或主动提醒执行器。服务重启会收束中断执行，不会自动续跑旧任务。企业能力需要对应平台授权，Tuck 也未覆盖 Docker Agent 的全部配置功能。
 
 ## 快速开始
@@ -102,6 +100,18 @@ npm start
 
 发行运行无需 Go 或 Node.js。容器安装、外部引擎、升级和回退见 [运行与发布](docs/deployment.md)。
 
+## 项目指引
+
+| 想做什么 | 从这里开始 |
+| --- | --- |
+| 配置模型、助手和 MCP | [配置指南](docs/configuration.md) |
+| 了解工具及文件操作 | [工具参考](docs/tools-reference.md) |
+| 部署、备份或升级 | [运行与发布](docs/deployment.md) |
+| 理解项目职责和引擎边界 | [架构说明](docs/architecture.md) |
+| 参与开发、运行测试或查找详细文档 | [贡献指南](CONTRIBUTING.md) |
+
+默认只监听本机回环，开放局域网访问前须设置登录密码；配置、凭据和工作资料由部署者保管。问题和建议可提交到 [GitHub Issues](https://github.com/topabomb/measix-tuck/issues)，请提供版本、复现步骤和脱敏日志。
+
 ## Measix 七大产品
 
 Measix 将个人与组织的 Agent 工作，连接到持久环境、专业模型和工业业务。下图介绍七大产品的职责；实际接入范围以各项目版本和部署组合为准。
@@ -113,30 +123,6 @@ Measix 将个人与组织的 Agent 工作，连接到持久环境、专业模型
 - **专业业务：** 衡准 **Metrivon** 负责精密测量与设备协同；溯原 **Tracelle** 保存原始数据、配置、结果和报告，支持追溯与分析。
 
 个人使用可以从 Tuck 开始，按需连接远端环境。已公开仓库：[**measix-tuck**](https://github.com/topabomb/measix-tuck) · [**measix-pilot**](https://github.com/topabomb/measix-pilot) · [**measix-runcove**](https://github.com/topabomb/measix-runcove)。
-
-## 配置与数据
-
-唯一用户配置是 `tuck.config.json`，通过 `--config <path>` 选择其他位置，所有相对路径从配置目录解析。Tuck 业务库为 `<storage.dataDir>/tuck.db`；工作文件、交付快照和引擎自己的不透明会话资产也须保留。
-
-默认只监听本机回环。开放局域网访问前，停服执行 `go run ./cmd/tuck password login` 设置登录密码，再修改监听地址并启动。密码通过终端隐藏输入或标准输入提供，不进入命令参数。配置、密钥和运行数据不得提交到 Git。
-
-已有安装升级前须完整备份。当前配置和业务库均为 v2，正式 Go v1 使用显式离线迁移，正常启动不会自动升级；步骤见 [持久化版本与迁移](docs/persistence-migrations.md)。
-
-## 文档
-
-| 文档 | 内容 |
-| --- | --- |
-| [贡献指南](CONTRIBUTING.md) | 开发、目录、检查、文档维护及双语组织约定 |
-| [配置合同](docs/configuration.md) | 配置项、模型、助手、MCP、密码及保存应用 |
-| [运行与发布](docs/deployment.md) | 二进制、容器、维护、升级和服务验收 |
-| [工具参考](docs/tools-reference.md) | 原生工具、会话协作、DAV 和版本交付 |
-| [任务文件与产物目录](docs/task-files.md) | artifacts 子目录、Base62 命名、提示词、DAV 落点和无目录边界 |
-| [附件识别与模型上下文](docs/attachment-inspection.md) | 全局与 Agent 识图模型、任意任务内路径、纯文本主模型与失败边界 |
-| [架构与引擎边界](docs/architecture.md) | 职责、公开协议、必要适配、生命周期和安全 |
-| [存储设计与维护](docs/database-design.md) | 实际 DDL、事务、游标、交付保留和数据所有权 |
-| [持久化版本与迁移](docs/persistence-migrations.md) | 版本、离线检查、迁移、完整备份和回退 |
-| [前端架构与界面](docs/frontend.md) | 相关界面定位、渲染语义、状态、响应式布局和依赖补丁 |
-| [验证指南](docs/verification.md) | 测试命令、覆盖、性能门槛及外部验收边界 |
 
 ## 致谢
 

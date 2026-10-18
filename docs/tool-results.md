@@ -1,12 +1,14 @@
 # Tuck 工具返回合同
 
-状态：已实施并通过隔离验证。只约束七个 Tuck 自实现工具，不改写外部 MCP 或 Docker Agent 内置工具。
+本文只约束七个 Tuck 自实现工具，不改写外部 MCP 或 Docker Agent 内置工具。
 
 模型可见字段的选择、结构及 Tuck 提供的错误和警告遵守 [统一内容入口约定](architecture.md#模型可见内容的唯一入口)；业务 owner 提供事实，网页 presentation 和内部诊断不因此进入模型结果。
 
 ## 基本结构
 
 返回 JSON 对象，必填 `status: string`。completed 表示本工具操作完成；accepted 表示消息已接收，不代表目标任务完成；partial 表示部分下载完成；failed 表示操作失败；unknown 表示远端写入或跨会话消息提交结果无法确认，须先核实目标再决定是否重试。不能把未知结果声称为失败并暗示远端已回滚。
+
+JSON 通过 MCP 文本内容返回；failed、partial、unknown 同时标记 `isError`。生图额外返回标准 ImageContent，不能将图片数据 URL 当作普通文本替代图片内容块。
 
 成功只加后续工作需要的业务字段，不另包 data/result，不增加 success/ok 布尔值。输入通常不回显；新产物路径、查询结果和错误定位例外。可选字段无实际信息时省略，不输出 null、空字符串或占位对象。查询无结果返回 sessions: []；无文件交付返回 file_count: 0。
 
@@ -80,16 +82,6 @@ failed、partial、unknown 必填 `code: string` 和 `message: string`。code �
 | 未分类内部异常 | internal_error：无法可靠归类的 IO、数据库或程序错误；固定英文，不透出原始错误 |
 
 上游 message 不保证英文和安全，不直接作为工具 message。根据实际 HTTP 状态生成英文摘要；upstream_code 仅提供机器诊断。取消优先于网络错误；原始文件错误可明确分类时使用对应类型，否则 internal_error。code 不得为空。
-
-## 产品数据与引擎边界
-
-远程识别预览的非秘密 workspace 身份写入现有 tool-call presentation，来自本轮捕获事实，不混入模型结果。预览重新检查账号、空间、绑定和授权；缺失事实时明确不可用，不使用当前身份猜历史归属。
-
-Fork 从父对话的工具名、callId、完整输入匹配并继承预览身份；候选存在不一致或缺失时不继承。不会修改引擎会话、读取引擎 SQLite 或新增缓存表。外部 MCP 与引擎原生协议错误由原 owner 负责。
-
-## 验证
-
-检查七个工具的模型可见结果、无值字段省略、英文错误和必填字段；覆盖未知 IO 错误、HTTP 401/403/429/504、取消、部分下载和结果未知。验证图片及提示词展示、远程预览刷新及分支、交付导航，以及权限和平台准入。合同变化直接用于未发布功能，不增加旧格式兼容分支。
 
 ## 前端呈现
 

@@ -2,176 +2,116 @@
 
 ## 产品范围
 
-工作台后端覆盖登录与配置保护、助手/模型/MCP设置、企业接入、任务队列与原生交互、规范化历史与SSE、附件与工作区文件、DAV传输、版本交付、官方引擎管理及发行维护。Go提供服务和维护命令，Vue提供产品页面；Node.js只用于前端构建和开发测试。
-
-当前不提供目标/编排执行器、分布式调度、多用户服务或外部数据库；目标和编排入口保持已有产品状态。参考演练与真实执行分开，实际验证范围见 [验证指南](verification.md)，持久化版本的支持路径见 [迁移约定](persistence-migrations.md)。
+Tuck 提供单用户 Web 工作台：登录与配置、平台接入、任务队列和原生交互、历史与 SSE、文件及版本交付。Go 提供服务和维护命令，Vue 提供产品页面，Node.js 只用于构建和开发测试。目标和编排频道仍为占位入口，没有目标调度、多用户服务或分布式执行器。
 
 ## 所有权
 
-Tuck 后端为 [cmd/tuck](../cmd/tuck/) 和一个 [internal/tuck](../internal/tuck/) 业务包，按 owner 分文件。前端在 [frontend/src](../frontend/src/)；tests/fixtures 的 JavaScript 仅生成合成平台/供应商和驱动 Go 测试进程，不是产品后端。渲染语义、界面及样式职责集中在 [前端架构与界面](frontend.md)，开发目录入口见 [贡献指南](../CONTRIBUTING.md#代码与职责)。
+调用关系为「Vue → Go HTTP/SSE → Tuck 配置、SQLite 与文件」，以及「Go → Core/Relay/DAV」和「Go → Docker Agent CLI/HTTP/SSE → 原生执行」。代码目录见 [贡献指南](../CONTRIBUTING.md#代码与职责)，前端内部职责见 [前端架构](frontend.md)。
 
-Vue → Go HTTP/SSE → Tuck SQLite、配置、文件和交付；Go → Core/Relay/DAV；Go → 官方 Docker Agent CLI/REST/SSE → 原生执行、上下文、审批、子代理和 MCP。
+| owner | 职责 |
+| --- | --- |
+| app/settings | HTTP 装配、认证和配置切换 |
+| tasks/events/interactions/statistics | 任务、产品队列、规范化运行事实和交互 |
+| engine/engine_updates | 公开引擎进程与官方发行管理 |
+| platform/models/model_resources/mcp | 平台身份、资源访问、准入和企业工具合同 |
+| engine_config/model_gateway | 公开引擎配置投影与聊天转发 |
+| image_generation/attachment_inspection | 独立模型操作 |
+| files/deliveries/workspace_tools/enterprise_workspace | 本地文件、交付快照与远端文件访问 |
+| config/store/security | 配置、业务持久化和 Web 身份 |
 
-app/settings 装配 HTTP、认证和配置切换；tasks/events/interactions/statistics 持有任务与规范化事实；engine/engine_updates 管理公开引擎进程及官方发行包；platform/models/model_resources/mcp 负责平台身份、资源访问和企业工具合同；engine_config/model_gateway 分别持有公开引擎配置投影和聊天转发，image_generation 持有独立生图协议操作；files/deliveries/workspace_tools/enterprise_workspace 负责文件、快照和远端传输；config/store/security 是配置、业务持久化和 Web 身份的唯一 owner。
-
-storage_schema 识别已发布结构并嵌入不可改写的编号 DDL；migrations 只在显式离线命令中协调配置和 Store 迁移，persistence_check 流式核对持久事实与交付文件。正常启动不隐式升级；服务和维护共享进程排他锁，关闭存储后才释放。平台密文格式由 Platform 管理，不把上游 Snapshot 版本当作本机数据版本，详见 [持久化版本与迁移](persistence-migrations.md)。
-
-任务发布在 Store 短事务内写任务、消息和事件，提交后唤醒浏览器。网络和文件复制不持有全局任务锁；每任务队列和交付串行。SSE 的可靠来源是数据库游标，不在每个订阅者内积累事件；每页最多 512 条且约 4 MiB，单个大事件仍可完整发送。
+网络和文件复制不持有全局任务锁，每任务队列和交付串行。任务、消息、事件在 Store 短事务内联合发布，提交后唤醒浏览器。SSE 的可靠来源是持久化游标，不在每个订阅者中积累事件。DDL、事务及清理归 [存储设计](database-design.md)，离线升级归 [迁移约定](persistence-migrations.md)。
 
 ## 模型操作的目标架构与实施范围
 
-Tuck 拥有资源配置，Docker Agent 消费其公开配置投影；不从生成的 YAML 或引擎内部状态反向建立业务资源。供应商连接复用地址和认证；聊天、生图、语音合成和转录分别声明操作协议、参数及用途选择。模态声明不能推导独立 API：聊天图片输出不等于 Images API，音频输入不等于 ASR 服务。
+Tuck 拥有资源配置，Docker Agent 消费其公开投影；不从生成的 YAML 或引擎内部状态反向建立业务资源。聊天与独立模型操作分别声明协议及用途，复用供应商连接和认证；聊天图片输出不等同于 Images API，音频输入也不等同于独立转录服务。
 
-目标链路为「本地配置 / 平台快照 → 资源解析及准入 → Docker Agent 公开聊天配置，或独立模型操作」。Agent 经标准 MCP 调用操作服务；未来朗读、语音输入可由应用入口调用同一操作服务。服务不依赖 MCP 消息类型或引擎内部实现；协议编码与解析按操作实现，不建立万能执行接口、第二套会话、任务队列或重试框架。
+当前实现聊天、独立生图和附件识别。独立操作沿「资源解析与准入 → 一次模型请求 → 文件或文字结果」执行，经统一 MCP 暴露给 Agent，不创建原生会话、第二套任务队列或重试框架。业务 owner 校验权限、轮次、文件和结果事实，`model_content` 决定模型表示，协议层编码发送。原图与模型表示分别准备，浏览器展示与实际模型输入分别验收。平台短期凭据不复制到用户配置，独立操作用量不混入原生聊天 token 统计。
 
-当前已实现文生图：可选 `imageGenerators` 引用现有本地 provider 的地址与凭据，资源自身声明 `OPENAI_IMAGES_GENERATIONS`；平台使用已下发资源及原有 admit/access。保留现有 provider.protocol 对聊天模型的含义，不迁移或重解释旧配置。Agent 可通过 imageGenerator 覆盖全局 defaultImageGenerator，二者显式包含来源和资源 ID；未覆盖时继承全局及平台默认；失效时不可用，不回退到聊天模型或首项。新增字段缺省为未配置，不改变旧聊天配置、数据库或文件布局的解释；已有平台生图资源可用于纯文字生成。工具只接收提示词、默认 1 的 1–4 张输出数量及可选 0–4 张参考图，不向 Agent 暴露尺寸参数；本地请求省略 size，平台请求明确 size=auto。本地参考图走标准 OpenAI Images Edits；平台合同未声明编辑路由时拒绝参考图，不猜测授权路径。协议调研与限制见 [生图协议边界](image-generation.md)。
+资源选择和协议配置见 [配置](configuration.md)，生图调用见 [工具参考](tools-reference.md#文生图1-个)，识别上下文见 [附件识别](attachment-inspection.md)，文件布局见 [任务文件](task-files.md)。当前没有 TTS、ASR 或独立生图页面；新增操作须有明确资源及线协议合同，不按模型名猜协议或静默降级。
 
-`image_generation.go` 持有一次生图操作，`model_resources.go` 负责共享连接访问准备，`local_tools.go` 负责权限、turn 和工具调度，`model_content` 负责 MCP 结果及图片的披露表示，`files.go` 持有产物保存与媒体检查。原图保存在任务目录，模型表示单独准备；浏览器展示与实际模型输入分别验收。平台短期凭据只由 Platform 获取，不复制到用户配置。生图用量不混入 Docker Agent 原生 token 统计。
-
-任务内自动管理的上传和生图文件使用 `artifacts/` 用途目录；下载允许调用者指定任务根目录内的任意位置，Files 提供目录边界与发布检查；附件上传、编辑、生成和下载均拒绝 `none` 的引擎默认目录。文件布局、提示词和只读/交付范围见 [任务文件规范](task-files.md)。
-
-当前也实现[附件识别](attachment-inspection.md)：`attachment_inspection.go` 复用模型目录、全局默认及各 Agent 覆盖，单次请求只发送指定本地或 Runcove 图片和识别要求，通过原生 MCP 返回文字。识图不要求模型 TOOL 能力，不新建原生会话；主/子 Agent 使用统一 Tuck MCP 入口，以明确调用者身份及已有轮次核对工具许可和资源选择。纯文本聊天上传图片时发送路径及明确指引，由 Agent 按需调用识图。
-
-本阶段不实现 TTS、ASR 或独立生图页面。未来 TTS / 文件转录沿用资源与操作边界；实时识别另有流生命周期，待实际需求再定义。其他生图线协议仅在有明确资源合同后增加独立编码与解析，不按模型名猜协议、不静默降级。
-
-若官方公开能力覆盖相同的资源选择、平台认证、结果、取消和文件语义，应明确切换并删除对应适配；原生支持某种媒体输出本身不足以满足退出条件。
+官方公开能力覆盖相同的资源选择、平台认证、结果、取消和文件语义后，应切换并删除对应适配；原生支持某种媒体输出本身不足以满足退出条件。
 
 ## 模型可见内容的唯一入口
 
-Tuck 自己组织、向模型披露的内容只有一个管理与构造入口，统一命名为 `model_content`，以 `model_content.go` 作为业务及协议代码唯一调用界面。该入口同时管理命名文字资源、模板、组合规则和模型可见结构；业务及协议代码不得自行新增提示词、描述、消息包装或结果披露规则，也不能直接调用内部子模块。范围覆盖主对话、子代理及独立模型操作，不受 system、user、tool 或 MCP 等具体承载位置限制。
+Tuck 自组织的模型内容统一经 `model_content.go`，业务和协议代码不能直接调用其内部子模块或自行拼装提示词、描述、消息包装和结果投影。此规则覆盖主对话、子代理及独立模型操作，不受 system、user、tool 或 MCP 承载位置限制。
 
-纳入统一入口的内容包括：Tuck 提供的默认 Agent 指令；工具名称、描述、输入 schema 及参数说明；MCP 服务级 `instructions`；工具使用规范与经验、任务背景；附件的路径说明、多模态标签和用户消息包装；跨会话消息标记；自动补交付提示词；编排审查及附件识别等模型操作的指令和输入包装；Tuck 工具结果的模型可见字段选择、结构、错误和警告。工具输出中的路径、版本、识别正文和图片等动态数据由原业务 owner 提供，统一入口决定其模型可见表示。
+入口管理默认 Agent 指令、工具定义与参数说明、MCP 服务级 instructions、工具指导与任务背景、附件标签及消息包装、协作标记、自动交付提示、独立模型操作指令，以及工具结果披露的字段、结构、错误和警告。路径、版本、识别正文和图片等动态事实仍由业务 owner 提供。
 
-业务 owner 负责配置读取、权限与准入、执行、文件访问和结果事实；编排策略根据触发事件及这些事实决定是否准备或追加内容；统一入口组织最终披露内容，协议层负责标准编码和发送。调用方向为「业务事实与许可结果 → 编排决定（需要时）→ model_content → 原生配置、MCP 或模型操作协议适配」。直接工具调用及结果返回无需经过编排策略。统一入口不执行网络或文件操作，不维护第二套任务、权限或连接状态，也不在模型网关中改写 Docker Agent 已组装的完整会话。
+调用方向为「业务事实与许可 → 编排决定（需要时）→ model_content → 原生配置、MCP 或模型协议」。直接工具调用和结果无需经过编排。入口不执行网络或文件操作，不维护任务、权限或连接状态，也不在模型网关中改写引擎已组装的完整会话。
 
-用户原文与自定义 Agent 指令、模型返回、附件原始数据、外部 MCP 合同及 Docker Agent 原生内容仍归原来源所有；统一入口只负责 Tuck 添加的包装、选择与投影，不将外部原文复制为自有提示资源或改写其合同。网页界面专用文字不属于模型内容，不能借此加入模型上下文。Tuck 默认文案由统一入口提供给配置初始化，持久化配置格式与用户自定义正文保持原有语义。
-
-原 `tool_descriptions.go` 和 `tool_results.go` 已由统一入口及其内部文件替代；文字资源、结构构造与结果投影一并迁入。默认模板取消无条件要求先调用特定会话工具的流程，生成的指导和警告依据实际工具许可，不建议调用已禁用的识图或其他工具。业务错误事实、文件及媒体处理仍归原 owner。
-
-命名资源保持稳定标识，调用者通过入口提供明确参数；缺失资源或必要参数应明确失败。工具定义与服务级说明从同一份最终装配集合生成，不另存一份工具名清单或建立第二套许可规则。自动补交付等事件内容在实际触发时构造，策略决定是否需要，Manager 校验并提交，正文和来源包装归统一入口；不能为了统一管理而把不同生命周期的内容全部塞入服务级 instructions。
-
-统一入口不要求所有实现挤在同一文件。内部按实际体量采用以下边界，只创建已有职责需要的文件，不逐工具拆分，也不保留旧的平行入口：
+用户原文、自定义 Agent 指令、模型输出、原始附件、外部 MCP 和 Docker Agent 内容保持来源与语义；入口只管理 Tuck 添加的包装、选择和投影。网页专用文案不进入模型上下文，模型生成的数据也不自动提升为平台规则。
 
 | 文件 | 职责 |
 | --- | --- |
-| `model_content.go` | 唯一调用界面、输入/输出类型及内容组合；组织附件、协作、自动交付和独立模型操作的消息内容 |
-| `model_content_text.go` | 命名文字资源、默认 Agent 指令、模板与参数解析 |
-| `model_content_tools.go` | Tuck 工具描述、输入 schema 及定义构造；入口维护名称顺序并从最终集合派生服务级说明 |
-| `model_content_results.go` | 工具结果的模型可见字段与结构、错误和警告投影 |
+| `model_content.go` | 唯一调用界面、类型及内容组合 |
+| `model_content_text.go` | 命名文字资源、默认指令、模板与参数解析 |
+| `model_content_tools.go` | 工具描述、输入 schema 和定义构造 |
+| `model_content_results.go` | 结果字段、错误及警告投影 |
 
-编排可以引用这些资源和组合入口，不能在新的执行路径中再维护一套文案或披露结构。编排代理输出保留模型来源，选取哪些输出及如何包装仍经统一入口；不能把其生成的任务数据自动提升为平台规则。验收同时覆盖唯一入口的调用边界、工具组合、字段披露及真实模型请求，避免只集中字符串而继续在各调用处独立组装。
+资源标识保持稳定，缺失资源或必要参数明确失败。工具说明从最终装配集合派生，不另存工具名清单或许可规则。指导及警告依据实际可用工具生成，不建议调用已禁用工具。不同生命周期的内容在实际触发时构造，不全部塞入服务级 instructions。
 
 ## 上下文披露与编排
 
-编排策略、运行协调、内容构造和原生执行分别承担以下职责；这些是职责边界，不要求各建一个服务：
+`orchestration.go` 根据已取得的运行事实决定是否补充内容；Manager 提供事实、管理队列并在提交前核对目标、轮次、配置及许可；`model_content` 构造正文及来源包装；Docker Agent 执行和消费消息。策略不能直接修改任务、操作队列或拼接消息，Manager 不持有不断增长的业务策略。以上为职责划分，不各建服务或执行循环。
 
-| 职责 | 所有者及约束 |
-| --- | --- |
-| 业务判断 | `orchestration.go` 集中 Tuck 的触发规则和决定；输入为已取得的事实，输出为无需动作或明确的准备/补充请求。本期抽离自动交付规则，沿用现有事件及执行循环，不另建调度循环 |
-| 运行协调 | Manager 管理任务与原生会话关联、产品队列、交互和事件记录，提供事实并提交决定；发送前核对目标、轮次、配置和许可，不负责不断增长的内容策略或文案 |
-| 内容构造 | `model_content` 是全部 Tuck 自组织模型内容的唯一入口，包括给编排代理的指令、评审材料和最终披露结构 |
-| 原生执行 | Docker Agent 承担模型及工具执行、原生 hooks、代理路由、消息消费和协议生命周期；Engine 仅对接其公开接口 |
+当前自动补交付只在执行流正常返回且取得明确匹配根会话 ID 的 `stream_stopped` 后判断。基线正常事件为 `reason=normal, finish_reason=stop`，只有 normal 映射为 completed。EOF、工具结果、子代理结束、缺失/未知身份、空原因、错误、取消和执行上限均不能代替正常根终止事实。未知身份只保留原始事件，子会话只更新自身。
 
-内容类别、触发时机和承载方式独立表达，不把每一种组合建成独立子系统：
+正常结束后读取当前编排开关、工具许可及本轮交付事实；需要补交付时进入既有队列，发送前再次核对。每个真实用户根轮次最多补充一次，自动轮次不能触发自身；运行中关闭开关须移除未执行自动项，保留用户队列。跨会话消息的目标与接收规则见 [工具参考](tools-reference.md#send_session_message)，accepted、进入原生上下文和完成分别记录。
 
-| 内容类别 | 触发时机 | 承载约定 |
-| --- | --- | --- |
-| `tool_guidance`：工具使用规范和经验 | 首次执行前，相关工具集合确认后 | 会话级 system 补充；按实际可用工具生成，不扩充 MCP 工具名清单的职责 |
-| `task_background`：任务背景 | 首次执行前，或运行中收到新的背景事实 | 初始 system 补充，或标明来源的运行中消息；原始任务材料保持数据身份 |
-| `delivery_required`：自动补交付 | 普通根轮次明确正常完成且满足交付策略 | 后续 user 消息，保留自动来源及所关联轮次 |
-| `collaboration`：跨会话消息 | 会话工具请求发送时 | user 消息及协作来源包装；发送方式按下述规则选择 |
+未来首次准备、背景生成、模型审查和工具描述优化尚未实现。接入时优先验证原生 hooks、Agent 路由和消息接口，不增加第二套执行器。首次准备指新会话首次执行目标 Agent 前，不能以模型级 `turn_start` 代替；指导按实际工具集合生成，续聊、恢复和分支不重复已有背景。新事实以明确来源和更新意图提交，异步决定提交前重新核对轮次与许可，失败不能解释成业务结论。
 
-首次准备指新会话首次执行目标 Agent 前的准备阶段，不等同于每次用户输入、每次模型调用或每次协议初始化。工具发现和许可结果是准备输入；配置中的候选工具不能当作实际全量工具集合。生成的会话级补充只登记一次，续聊继续使用，恢复不重复生成；分支沿用实际继承的上下文，不因首次在新进程执行就再追加。工具配置后来应用时按工具合同重新装配，初始背景不因此自动重算。需要新的指导时，以明确更新事件提交内容。具体接入必须验证相应原生生命周期，不依据 hook 名称推断上述语义。
-
-运行中区分立即补充（`steer`）和执行结束后处理（`followup`）两种意图，意图不与内容类别绑定。当前跨会话工具在目标 working 时走原生 `/steer`，目标空闲时进入既有 Submit 队列，未暂停才启动处理；等待审批/回答时拒绝发送，不代替用户作答。立即提交不代表模型立即消费，accepted 不代表完成。自动补交付沿现有队列在正常结束后处理，不中断当前模型执行。
-
-每条补充请求至少明确目标、内容类别/来源、发送意图及必要的关联轮次；复用已有任务、队列和 source 字段，不为统一表达新建通用持久化表。策略结果不能绕过配置、轮次及许可检查，也不能直接修改任务状态或拼接消息。异步审查期间如目标轮次、许可或配置已改变，提交前重新核对，过期决定不用于新的轮次；审查失败不能解释为任何业务结论。
-
-接入顺序优先采用公开配置及 hooks、原生 Agent 执行/路由、原生 `/steer` 与 `/followup`。原生 `turn_start` 是模型调用级事件，不能代替 Tuck 根用户轮次完成；会话准备的范围和去重必须单独验证。采用原生 followup 前需承接现有队列的编辑、暂停、排序、恢复、来源记录及逐轮授权合同；同一请求只由一个队列执行，不双重登记等待执行。原生时间调度适用于定时需求，不能替代产品事件触发，也不能推断具有跨重启持久化。
-
-后续“编排代理”是一种产品用途，复用 Docker Agent 的 Agent、模型 hook 或路由能力。交付审查优先验证原生完成后路由，取得 Tuck 本轮交付事实后决定是否交付；需要隔离审查上下文时使用独立原生会话，不把同会话路由当作隔离。接入审查时替换对应固定规则，不同时运行两套自动交付策略。初始工具优化先生成 `tool_guidance`；真正调整 Tuck 工具 description 必须在目标 Agent 获得工具定义前完成，经统一入口校验生成，工具身份、schema 与许可继续由确定性代码管理，外部工具原始合同不被覆盖。
-
-本期实现范围为统一内容入口、统一 MCP、自动交付策略与 Manager 的职责拆分，以及已有补充消息路径的统一构造；不启用新的背景生成、模型审查或工具描述优化功能，不增加空实现接口、模板 DSL、独立编排执行器或调度状态。后续启用原生 hook/路由时，应先验证公开输入能否携带所需业务事实、实际内容位置、取消、恢复与平台准入；缺口只做最小适配，满足后删除适配。原生能力及配置版本须按实际基线核对，不能将文档中存在的能力视为 Tuck 已接入。
+立即补充和结束后跟进分别表达 steer/followup 意图，不按内容类别建立子系统。原生 followup 接管前须覆盖现有队列编辑、暂停、排序、恢复、来源和逐轮授权；同一请求只能有一个队列 owner。审查策略接入后替换固定策略，不双重触发；同会话路由不等同隔离上下文。原生定时能力不能推断为产品事件调度或跨重启持久化。不为未实现能力增加空接口、模板 DSL 或状态表。
 
 ## Tuck 原生工具集与 MCP
 
-Tuck 原生工具集指 Tuck 自实现的产品工具，当前七个工具及合同见 [工具参考](tools-reference.md)；Docker Agent 内置工具和外部 MCP 保持各自所有权。
+七个 Tuck 自实现工具由一套进程内 MCP 服务提供，复用 `LocalTools` 和官方 SDK。每个 Agent 最多装配一个 Tuck toolset；集合为空时不装配。会话、文件、交付和模型操作仍由各业务 owner 执行，不按功能另建 MCP 服务、子进程或同名 API 工具装配路径。原生工具及外部 MCP 保持各自所有权。
 
-所有 Tuck 自实现工具只能由 Tuck 服务进程内的一套 MCP 服务提供，复用现有 `LocalTools` 和官方 MCP SDK。对 Docker Agent 提供一个统一 MCP 入口，每个 Agent 最多装配一个 Tuck 工具集；没有工具可装配时不生成该工具集及其说明。不按会话协作、交付、文件传输或模型操作另建独立服务，不启动额外的 MCP 子进程，不保留同一批工具的 `type: api` 装配路径。
+协议入口为模型网关 `/tuck-tools?agent=<agent>`，通过网关认证和 `X-Tuck-Turn` 绑定调用者及轮次。目录按 Agent、子代理树、只读限制、工具开关及资源条件过滤；执行时再核对任务、轮次和授权。业务 HTTP API 不提供内部令牌旁路，连接和请求上下文按 SDK 语义隔离。
 
-统一协议路径为模型网关上的 `/tuck-tools?agent=<agent>`，配置只传递网关认证和 `X-Tuck-Turn` 轮次绑定。调用者身份由各 Agent 的原生 MCP 配置显式提供。旧会话 HTTP API 路由、独立工具路径及 `TUCK_WORKBENCH_TOKEN` 专用令牌均已删除；业务 HTTP API 不再提供内部令牌旁路。
+服务级说明使用标准 [InitializeResult.instructions](https://modelcontextprotocol.io/specification/2025-11-25/schema#initializeresult)，是可选字符串，不是数组或 capabilities。客户端如何加入模型上下文由其实现决定。Tuck 当前只从最终工具集合生成稳定顺序的英文工具名清单：多工具以 `The Tuck toolset provides the following tools:` 开头，单工具用 `tool:`，空集省略。不能混入其他来源工具、描述全文、使用规则或交付要求。
 
-统一入口仍按 Agent 配置、主/子代理、只读限制及当前资源许可过滤工具目录，执行时核对调用者、任务、轮次和授权。单一服务不要求所有客户端共用一个协议会话；连接、会话和调用上下文按官方 SDK 语义隔离，不能串用任务身份。会话、文件、交付和模型操作继续由现有业务 owner 实现，不把业务逻辑集中到协议处理器中。Docker Agent 仍负责客户端连接、恢复、审批、重试及执行生命周期。
-
-服务级说明采用 MCP 初始化响应的标准字段 [`InitializeResult.instructions`](https://modelcontextprotocol.io/specification/2025-11-25/schema#initializeresult)，与 `serverInfo`、`capabilities` 同属 `result`。它是可选字符串，不支持数组；内部可以用数组收集工具名或文字片段，但发送前必须组合成一个字符串，不增加新的持久化配置字段。标准允许客户端将其用于模型上下文，包括系统提示词，但不要求固定注入位置。它不是 `capabilities` 中的能力声明，也不是 `prompts/list` 中的提示模板。
-
-服务级 `instructions`、工具定义和模型可见结果均通过 [统一内容入口](#模型可见内容的唯一入口) 构造。本期 `instructions` 只说明本次装配的 Tuck 工具名，不加入工具使用规则、协作流程、交付要求或工具描述全文。固定英文形式为：
-
-```text
-The Tuck toolset provides the following tools: list_sessions, send_session_message, deliver_result, upload_runcove_file, download_runcove_files, generate_images, and inspect_attachments.
-```
-
-上例仅展示七个工具均装配时的结果，正文由最终工具定义提取名称生成，不硬编码上述全量清单。筛选涵盖 Agent 工具开关、主/子代理、只读和装配时资源条件，保留工具目录的稳定顺序，不列禁用、未装配或其他来源的工具，也不使用 `etc.` 省略名称。只有一个工具时使用 `The Tuck toolset provides the following tool: inspect_attachments.`；工具集合为空时省略说明。单个工具的用途仍放在 `Tool.description`，参数及字段说明放在 `inputSchema`，实际结果遵守 [工具返回合同](tool-results.md)。
-
-这条规则用于验证说明能随实际装配调整，不提前建设可配置的指令规则系统。每次 MCP 初始化及工具配置应用后的重新装配，都从对应集合生成说明，并通过实际模型请求验证。`tools/list_changed` 只确认目录变化，不能当作 `instructions` 已刷新；初始化清单不是实时在线或授权状态。轮中资源和授权变化仍由最新目录及调用校验约束，不为说明刷新增加轮询、逐轮强制重连或第二条系统提示注入通道。
-
-自动交付开关独立于初始化清单：`deliveryTool` 决定交付工具许可，`requireDelivery` 决定是否启用自动补交付策略，后者继续支持运行中修改。固定策略根据正常根终止、本轮交付记录及当前开关提出一次补充请求，Manager 发送前再次检查，最多补充一次且不触发自身；`model_content` 构造带自动来源标记的提示词及消息。该消息沿既有 user 消息和队列通路进入上下文，不把交付要求固化进 MCP instructions；策略、运行协调及后续审查的职责见 [上下文披露与编排](#上下文披露与编排)。
-
-工具装配只保留统一 MCP 入口，不长期双轨；验收核对单一 MCP 工具入口、按 Agent 过滤后的目录、实际模型请求中的说明，以及既有权限、取消、结果和图片语义。
+说明与工具定义均经 `model_content` 构造，在初始化及配置应用后的重新装配时更新；单独的 `tools/list_changed` 不能证明初始化说明已刷新。工具用途与输入归 [工具参考](tools-reference.md)，输出归 [工具返回合同](tool-results.md)。
 
 ## Docker Agent 合同
 
-引擎来自 Docker 官方 [docker/docker-agent](https://github.com/docker/docker-agent)，项目介绍及致谢见 [README](../README.md#docker-agent-与-tuck)。兼容基线为官方 [v1.150.0](https://github.com/docker/docker-agent/releases/tag/v1.150.0)，源码标签 `5277e7842058fc3fbb9943a6e88bc05a1c8e6fe2`；安装程序匹配 [嵌入发行清单](../internal/tuck/contract/engine-release.json) 的 SHA256。[上游文档](https://docker.github.io/docker-agent/)及较新的官方源码仅作公开能力参考，不扩大已验收范围。
+兼容基线为官方 [v1.150.0](https://github.com/docker/docker-agent/releases/tag/v1.150.0)，提交 `5277e7842058fc3fbb9943a6e88bc05a1c8e6fe2`；安装校验以 [嵌入发行清单](../internal/tuck/contract/engine-release.json) 为准。[上游文档](https://docker.github.io/docker-agent/)及较新源码不扩大已验收范围。
 
-Tuck 不修改、补丁或编译引擎，不导入内部 runtime/store/session 包，不读取引擎 SQLite 表。只使用官方配置、serve api --session-db、Agent 加载/目录/计数、session 创建/读取/恢复、执行流、title、permissions、safety-policy、fork、resume、elicitation 和 steer。后台任务 ID 不能推断为 session ID；缺少原生身份时不显示为已取得。
+默认使用官方发行，只通过公开配置、CLI、HTTP/SSE 使用引擎，不导入内部 runtime/store/session 包，不读取或修改原生 SQLite。对接 `serve api --session-db`、Agent 加载与目录、会话创建/读取/恢复、执行流、title、permissions、safety-policy、fork、resume、elicitation 和 steer。已复现且尚无可用官方修复的缺陷，须先取得用户明确同意，再按 [临时补丁约定](../patches/docker-agent/README.md) 处理；当前补丁及验收证据只在该文档维护。
 
-补交付只在本轮执行流正常返回、且收到与根会话 ID 明确匹配的 stream_stopped 终止事实后判断。官方 v1.150.0 实测正常事件为 reason=normal、finish_reason=stop；normal 才映射为 completed，length、错误、取消、未知或空原因均不触发。未知/缺失会话 ID 的终止事件只保留原始记录，不能结束根任务或其他主任务；子会话只更新其自身。SSE EOF、工具响应或子代理完成不能替代根终止事实。结束后读取当时的编排开关与工具许可，检查本轮交付记录；自动补充最多一次且不能再触发自身，发送前再次检查开关与许可。
+原生 MCP 发现、连接、恢复、调用重试、审批、子代理及执行生命周期由引擎负责。Tuck 不另加原生调用重试，也不为禁止原生重试而接管生命周期；长模型/执行/SSE 流没有固定总寿命，单次操作结束不关闭有效共享连接。
 
-原生 MCP 发现、连接、恢复、调用重试、审批、子代理和执行生命周期仍由引擎负责。长模型/原生执行/SSE 流没有固定总寿命；连接/响应头和单次操作超时各自生效。Tuck 不另加原生调用重试，不因一次操作结束关闭有效共享连接。
-
-| 公开能力缺口 | 当前最小适配 | 删除条件 |
+| 公开能力缺口 | 当前适配 | 删除条件 |
 | --- | --- | --- |
-| 企业模型需平台代理身份、准入及凭据隔离 | 回环模型网关、明确来源、admit、Chat/Responses 转发和脱敏 | 官方公开接口可完整承接相同合同 |
-| 企业 MCP 需每工具许可、JCS 哈希和平台 admit | 透明 HTTP/SSE 代理、校验目录/授权/schema，保留原始事件 ID 和通知 | 引擎公开扩展完整承接这些合同 |
-| MCP 没有 Tuck 当前任务/轮次/空间身份 | 官方 MCP Go SDK 本机交付/DAV/生图工具，短期 turn header 和调用前后检查 | 原生公开上下文可携带并验证相同事实 |
-| 基线没有供 Tuck 直接配置的通用 OpenAI Images 工具；原生对话图片输出不等同独立 Images API | 独立生图操作，经已有本机 MCP 返回图片和任务文件，无引擎会话改写 | 公开能力覆盖相同资源选择、平台准入、文件和取消合同 |
-| 工作台需要稳定 URL、分页、重放及版本交付 | 规范化消息/事件、只读公开历史导入、独立快照 | 原生公开产品接口满足现有合同 |
-| 全局/每 Agent 专用识图选择，以及纯文本主模型可用的附件识别 | 单次无状态 Chat/Responses 请求，复用 Files、模型目录及平台准入，MCP 返回文字 | 原生公开能力覆盖相同选择、文件权限、平台认证和失败语义 |
+| 企业模型身份、准入及凭据隔离 | 回环模型网关、明确来源、admit、Chat/Responses 转发与脱敏 | 官方公开能力完整承接同一合同 |
+| 企业 MCP 每工具许可、JCS 哈希和 admit | 透明 HTTP/SSE 代理，校验授权与 schema，保留事件 ID 和通知 | 公开扩展完整承接平台合同 |
+| MCP 缺少 Tuck 任务/轮次/空间身份 | 统一 MCP、短期 turn header 与调用前后校验 | 原生上下文可携带并验证相同事实 |
+| 独立生图与专用识图的资源和文件语义 | 单次模型操作，统一 MCP 返回结果 | 覆盖资源选择、平台认证、文件权限、取消和失败合同 |
+| 工作台稳定 URL、分页、重放和版本交付 | 公开历史只读导入、规范化消息/事件与独立快照 | 原生产品接口满足现有合同 |
 
-本机 MCP 使用官方 SDK Streamable HTTP，企业代理兼容公开 HTTP/SSE；SDK 依赖与引擎对齐，不手写会话握手。登记、最近验证、当前连接和实际执行是不同事实，缺少状态时不推断在线或成功。
+本机使用 SDK Streamable HTTP，企业代理兼容 HTTP/SSE，不手写握手。企业代理保留空数据 SSE priming 帧及 ID；POST 通知的 202、DELETE 的 204 可为真正零字节确认，即使带 JSON Content-Type。非空正文仍校验和脱敏，初始化响应不适用空体例外。
 
-企业代理保留空数据 SSE priming 帧及其原始 ID，不把没有消息正文的帧当作坏 JSON。POST 通知的202和 DELETE 的204允许真正零字节确认，即使上游仍带 JSON Content-Type；非空正文继续严格校验和错误脱敏，初始化响应不适用空体例外。
+基线 SDK 为 `v1.7.1-0.20260825122737-c68ad9a4e6e1`，本机服务使用 Stateless 和 PropagateRequestCancellation。基线后台 subscriptions/listen 无法展开每轮动态 header，但客户端保留 Cookie：server/discover 仅在有效 turn header 下签发目录归属 Cookie，绑定复用 peer 的稳定目录身份，供后续客户端定位任务及 Agent 目录。Cookie 不授予执行权，调用仍要求精确活跃 turn header 和 task 匹配。
 
-基线 SDK 为 v1.7.1-0.20260825122737-c68ad9a4e6e1。本机服务使用 Stateless 及 PropagateRequestCancellation；引擎当前的后台 subscriptions/listen 无法展开每轮动态 header，但官方客户端保留 Cookie。因此 server/discover 只有在有效 turn header 下才签发目录归属 Cookie，按客户端复用仍有 SDK 请求/会话的 Server。Cookie 绑定实际复用 peer 的稳定目录身份，后续轮次的新客户端也取得该身份，不能改用该轮即将过期的执行凭据。Cookie 只定位任务和调用 Agent 的目录，工具执行仍要求精确活跃 turn header 与 task 匹配。
-
-目录变化由 SDK AddTool/RemoveTools 通知，开轮最多等待一次 tools/list 确认、取消或 1 秒；超时不代表已同步，实际调用仍按当前权限拒绝。无订阅/会话且无在途请求时回收 peer，结束一轮不关闭有效共享连接，服务关闭才撤销剩余 SDK 会话。没有轮询或应用重试。官方公开订阅能保留动态上下文并确认目录刷新后，应删除目录 Cookie 和等待适配。
+目录通过 SDK AddTool/RemoveTools 通知；开轮有界等待目录确认，具体等待值见 [超时与取消](configuration.md#超时与取消)。无会话/订阅且无在途请求时回收 peer，结束轮次不关闭有效共享连接，服务关闭撤销剩余会话。官方公开订阅支持动态上下文和目录确认后删除 Cookie 及等待适配。
 
 ## 生命周期边界
 
-浏览器断开不取消任务；目标停止只取消自己的轮次。重启把原执行收束为 interrupted，暂停用户队列、移除自动补交付队列并退役旧审批，不重放工具或自动恢复执行。关闭先撤销网络 owner、取消任务，再关引擎和存储。
+浏览器断开不取消任务，停止只取消目标轮次。服务重启将旧执行收束为 interrupted、暂停用户队列、移除自动交付项并退役旧审批，不重放工具或自动续跑。关闭先撤销网络 owner、取消任务，再关引擎和存储。
 
-任务、工具调用、问题、原生会话和后台任务分别保留各自身份。只有公开事件或响应提供了子会话 ID 才能进入其历史，不从后台任务 ID 或输出文本推断。立即补充和协作的接收、上下文送达及目标完成分别记录；原生 delivered 不保证模型遵循新指令。具体参数见 [工具参考](tools-reference.md)。
+任务、工具调用、问题、原生会话和后台任务保持各自身份。只有公开事件或响应给出子会话 ID 才可读取其历史，不从后台任务 ID 或输出文本推断。登记、最近验证、当前连接与实际执行分别展示，未取得的状态不推断为在线或成功。
 
-工具调用 ID 按当前执行来源和原生 agent_name 关联，完成后移除在途记录，允许供应商后续复用 ID；计时按所属任务隔离。队列准备完成后核对整条队列项，编辑或移除过的旧内容不发送；收尾期间新接收的消息由原队列 owner 继续启动。配置应用先阻止新执行，再检查当前任务；创建与 fork 的异步响应不能跨越配置切换后发布。
+工具调用按执行来源及原生 agent_name 关联，完成后移除在途记录，允许后续复用调用 ID。队列准备后重新核对整项，已编辑或删除的旧内容不发送；收尾期间的新消息由原队列 owner 继续处理。配置应用先阻止新执行，再检查当前任务；创建和 fork 的异步结果不能跨配置切换发布。
 
 ## 平台与安全
 
-Discovery 先验证身份和路径，同部署改地址先无凭据校验。Snapshot v4/v5 校验 schema、闭包、ETag、模型来源和 MCP 合同；内嵌合同及来源见 [client-schemas.json](../internal/tuck/contract/client-schemas.json) 和 [provenance.json](../internal/tuck/contract/provenance.json)。刷新先持久化平台公开幂等键，失响应保留；这不改变原生重试语义。平台绑定用配置的 32 字节密钥加密存入业务库。现行平台枚举允许的 ANDROID 兼容值仍保留，不能擅自新增枚举。
+Discovery 验证身份及路径，同部署改地址先无凭据校验。Snapshot v4/v5 校验 schema、闭包、ETag、模型来源和 MCP 合同，来源见 [client-schemas.json](../internal/tuck/contract/client-schemas.json) 和 [provenance.json](../internal/tuck/contract/provenance.json)。刷新先持久化平台幂等键，失响应保留；不改变原生重试语义。平台绑定由配置的 32 字节密钥加密存入业务库，合同允许的 ANDROID 兼容枚举继续保留，不擅自新增枚举。
 
-本地登录采用 scrypt、哈希会话令牌、Cookie/CSRF、持久限流和有界密码校验。Host/Origin 校验忽略 Forwarded/X-Forwarded。凭据变化、到期、退出撤销对应流，不结束有效后台任务。配置保护用独立 Cookie，绑定当前登录、固定一小时，并同时检查分类读取和写入。
+登录使用 scrypt、哈希会话令牌、Cookie/CSRF、持久限流和有界密码校验。Host/Origin 检查不信任 Forwarded/X-Forwarded。凭据变化、到期和退出撤销对应流，不结束有效后台任务。配置保护独立于登录，读取和写入均核对授权；操作规则见 [配置保护与密码](configuration.md#配置保护与密码)。
 
 ## API与文件
 
-主接口保持 /api/runtime、/api/connection*、/api/settings/*、/api/tasks*、/api/events、/api/enterprise-workspace*。任务快照带 cursor；SSE 用 seq/taskId/type、since/Last-Event-ID，拒绝未来游标。消息按 index/revision 和块修订定位，媒体从规范化历史按需读取，不改写历史。
+主接口为 `/api/runtime`、`/api/connection*`、`/api/settings/*`、`/api/tasks*`、`/api/events`、`/api/enterprise-workspace*`。任务快照带 cursor；SSE 使用 seq/taskId/type 和 since/Last-Event-ID，拒绝未来游标。消息通过 index/revision 及块修订定位，媒体按需读取，不改写历史。
 
-Hash URL 是页面位置合同：对话、任务、文件和设置详情能直达，刷新/登录返回恢复目标及筛选分页；不含秘密、提交正文、草稿或本地 File。参考场景在 #/reference，架构在 #/architecture。真实工作台采用对话、任务、设置和企业工作区路由。
+Hash URL 的页面合同以 [router.ts](../frontend/src/app/router.ts) 为准：支持详情直达、刷新/登录返回及筛选分页恢复，不在 URL 中保存秘密、草稿、提交正文或本地 File。导航与渲染归 [前端](frontend.md)。
 
-具体页面路径以 [router.ts](../frontend/src/app/router.ts) 为准：对话为 `#/chat/conversations/:id`，消息定位为其 `/messages/:message`，任务为 `#/tasks/:id`，设置为 `#/settings/...`，企业工作区为 `#/workspace`。任务交付和对话交付分别在各自详情路径下的 `/delivery`。导航恢复目标和有意义的筛选/分页，不承诺恢复未提交正文或 File；回到嵌套来源时保留对应页面上下文。
-
-附件每条最多 8 件、16 MiB；图片实际解码、40M 像素、方向修正、2048px 静态缩放，动画保留原字节。普通文件下载 64 MiB，编辑/文本预览 2 MiB。os.Root 及发布前父目录/目标身份检查防止 symlink/junction 逃逸。
-
-企业面板代理 Core Files API，工具通过明确绑定空间的 DAV。默认创建 If-None-Match:*，替换需强 ETag。上传失响应标记 outcome_unknown，不重复提交。下载先预检整个目标集合，再逐件临时写入发布，保留已完成结果及失败目标原字节。浏览器文件响应头 15s、体无进展 120s；DAV 文件体无进展 30s，只约束文件操作，不应用于原生 MCP/模型流。
-
-交付属于主助手，每成功调用新版本，1000 Unicode 字符、10 文件、单件 512 MiB、合计 2 GiB。界面只展示已取得事实，不从工具输出文本推测状态。配置、存储与部署细节见对应文档。
-
-工具定义、提示词及结果披露遵守 [模型可见内容的唯一入口](#模型可见内容的唯一入口)，权限与执行 owner 保持独立。模型可见结果统一英文错误且不输出空可选字段；合同见[工具返回](tool-results.md)。远程交付复用 Deliveries 暂存和不可变快照；远程识别复用企业文件授权与内存图片准备，不依赖本地目录，不增加缓存或后台任务。预览身份只保存在 Tuck 消息 presentation，不进入引擎上下文。未来工具编排边界见[工具参考](tools-reference.md#模型可见内容与编排边界)。
+Files 通过 os.Root 和发布前目录/目标身份校验阻止 symlink/junction 越界。企业面板代理 Core Files API，工具访问明确绑定空间的 DAV；未知写入结果不得自动重发。文件布局与原图/快照边界见 [任务文件](task-files.md)，工具限制见 [工具参考](tools-reference.md)，阶段超时见 [配置](configuration.md#超时与取消)。预览身份只存在 Tuck presentation，不进入引擎上下文。

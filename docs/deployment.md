@@ -6,7 +6,9 @@
 
 解包后在发行目录依次执行 `tuck init`、`tuck engine install`、`tuck serve`；下文命令在 Windows 使用 `.\tuck.exe`、Linux 使用 `./tuck`。可用 `--config <path>` 选择配置，所有相对路径从配置目录解析。首次引擎安装需要访问官方发行下载地址；配置模型或平台后才可进行实际任务。
 
-默认引擎安装使用 [嵌入清单](../internal/tuck/contract/engine-release.json) 的官方基线。配置其他版本时，安装命令仅接受与当前官方稳定版一致的版本，核对官方发行 URL、SHA256 和实际 version；规则见 [engine_updates.go](../internal/tuck/engine_updates.go)。不编译或补丁引擎。自定义官方程序通过 `engine.binary` 指定，外接公开 API 用 `engine.mode=external` 和 `engine.url`；外接实例更新和配置由宿主管理。Tuck 停止时结束自己管理的引擎，不关闭外接实例。
+默认引擎安装使用 [嵌入清单](../internal/tuck/contract/engine-release.json) 的官方基线。配置其他版本时，安装命令仅接受与当前官方稳定版一致的版本，核对官方发行 URL、SHA256 和实际 version；规则见 [engine_updates.go](../internal/tuck/engine_updates.go)。自选程序通过 `engine.binary` 指定，外接公开 API 用 `engine.mode=external` 和 `engine.url`；外接实例更新和配置由宿主管理。Tuck 停止时结束自己管理的引擎，不关闭外接实例。
+
+上游缺陷的临时修复及切回官方版本按 [补丁约定](../patches/docker-agent/README.md) 执行。
 
 默认配置没有业务凭据，只有回环监听，模型需接入平台或配置供应商。登录、设置保护和配置密钥见 [配置合同](configuration.md)。启动失败不会抹掉配置或历史；`/healthz` 与 `tuck health` 表示当前服务及引擎就绪，不代替模型/DAV 业务验收。
 
@@ -35,7 +37,7 @@ npm run docker:logs
 
 设置 → 引擎可检查官方稳定版、下载、校验、应用。下载/校验失败不停止当前引擎。应用先重新检查保护授权，停止目标引擎，备份不透明原生会话资产，再启动并校验公开 API；失败恢复原程序、配置选择和相匹配会话资产。不读取原生 SQLite 内部表。其他待应用设置保持 pending。
 
-正式发布前先停服务及对应引擎，备份配置、完整 dataDir 和全部实际工作目录，再替换程序和前端。正式 Go v1 升级当前 v2，先用新程序执行 `tuck migrate --check`，再执行 `tuck migrate --backup <新的外部备份目录>`，复查后启动。迁移命令的备份只覆盖变更输入，不能代替发布前完整冷备份；未知或封存 Node 格式不导入。中断可续迁，回退恢复相匹配整套资产，不能仅换二进制。执行与恢复细则见 [持久化版本与迁移](persistence-migrations.md)。
+正式发布先停服务及对应引擎，完成 [完整冷备份](persistence-migrations.md#完整备份与回退) 后再替换程序和前端。格式升级须显式离线迁移，支持范围、命令及中断恢复只维护在 [迁移文档](persistence-migrations.md)；容器执行方式如下。
 
 每次停服、替换和验收重启前，都要重新确认当前任务和队列状态；首次停服前的检查不能代表服务恢复后的状态。协调维护期间的新提交，有运行任务时先等待结束，或在已明确授权中断的范围内停止。重启不会自动续跑旧执行，不能为验证恢复而重放工具。新版本已经接收新消息或写入文件后，不能再把升级前副本当作最新运行数据覆盖回去。
 

@@ -4,11 +4,9 @@
 
 下文 `?` 表示可采用默认值。原生工具经过模型协议转换后，部分可选字段会出现在 `required` 中并允许 `null`；此时应按模型收到的 schema 填写 `null`，不能照抄省略字段的示意调用。七个 Tuck 工具的成功字段、英文错误类型及可选字段遵守[工具返回合同](tool-results.md)，外部和原生工具保持原合同。
 
-Tuck 自实现工具统一不加来源或分组前缀：`list_sessions`、`send_session_message`、`deliver_result`、`upload_runcove_file`、`download_runcove_files`、`generate_images`、`inspect_attachments`。名称采用动词在前、对象在后，保留会话、Runcove 等必要限定。工具定义与全部 Tuck 自组织提示词遵守 [模型可见内容的唯一入口](architecture.md#模型可见内容的唯一入口)，资源标识和工具文字展示见本文末尾。
+Tuck 自实现工具统一不加来源或分组前缀：`list_sessions`、`send_session_message`、`deliver_result`、`upload_runcove_file`、`download_runcove_files`、`generate_images`、`inspect_attachments`。名称采用动词在前、对象在后，保留会话、Runcove 等必要限定。工具定义与全部 Tuck 自组织提示词遵守 [模型可见内容的唯一入口](architecture.md#模型可见内容的唯一入口)；实际文案资源维护在源码中。
 
-Tuck 原生工具集统一采用一套进程内 MCP 服务和一个工具入口；服务级 `instructions`、工具描述及权限边界见 [架构约定](architecture.md#tuck-原生工具集与-mcp)。本文定义工具的参数、返回和许可合同。
-
-服务级 `instructions` 本期只用一句英文列出本次实际装配的工具名，由统一内容入口从最终工具定义派生；标准字段是字符串，内部名称数组不能直接作为协议值。空集、单工具及配置应用后的重新装配规则均以架构约定为准，不额外注入工具使用流程或交付要求。
+装配方式、服务级说明及引擎边界见 [架构](architecture.md#tuck-原生工具集与-mcp)。本文维护工具输入和调用行为，输出字段及错误码统一见 [工具返回合同](tool-results.md)。
 
 本机 MCP 使用官方公开配置省略 `name`，因此引擎直接暴露工具原名；保留上述七个名称，不添加旧工具别名，不改写已有原生历史。目录 Cookie 和执行权限按既有职责管理。第三方/平台 MCP 的命名空间规则不变。依据：[官方 MCP 配置](https://docs.docker.com/ai/docker-agent/tools/mcp/)。
 
@@ -24,7 +22,7 @@ Tuck 原生工具集统一采用一套进程内 MCP 服务和一个工具入口�
 
 任务工作目录支持自动生成、指定已有目录和 `none`，详见 [工作目录配置](configuration.md#模型助手与工作目录)。自动模式按任务独立生成，指定模式使用用户选择的目录；`none` 不向原生会话设置工作目录，禁止 Tuck 本地写入；远程识别和远程文件交付无需本地目录，本地只读能力仍要求已知目录。
 
-在有明确工作目录时，原生文件工具默认以该目录为基准，配置 `allow_list: ["."]`，用户附件、工具产物和 DAV 下载文件可在其中使用；这里不采用 Android 的受管 `/upload/<file>` 路径约定。`shell` 在后端所在环境运行，拥有该进程的权限，不继承文件工具的 `allow_list` 路径限制；`none` 也不关闭原生工具或构成 Docker 沙箱。
+在有明确工作目录时，原生文件工具默认以该目录为基准，配置 `allow_list: ["."]`，用户附件、工具产物和 DAV 下载文件可在其中使用。`shell` 在后端所在环境运行，拥有该进程的权限，不继承文件工具的 `allow_list` 路径限制；`none` 也不关闭原生工具或构成 Docker 沙箱。
 
 企业文件管理界面通过 Core Files API 管理远端工作区；两个 DAV 工具通过该空间明确关联的 DAV 上传单文件、下载一批文件。两条链路指向同一企业空间，本地工作目录仍由 Tuck 管理。MCP 连接的远端文件系统和凭据属于各自服务，不能凭同名路径或工具名推断它们就是企业工作区。
 
@@ -32,7 +30,7 @@ Tuck 原生工具集统一采用一套进程内 MCP 服务和一个工具入口�
 
 ## 附件识别：1 个
 
-附件识别另提供只读工具 `inspect_attachments`，接收 `attachments`（1–4 个按序文件引用，每项为 path 和可选 source）与 `request`（识别要求）。source 默认为 local，读取任务目录内绝对或相对路径；source=runcove 时读取已连接工作区根目录下的相对路径。支持 PNG/JPEG/GIF/WebP，暂不支持 PDF、任意 URL 或 base64。专用识图模型返回文字，纯文本主模型也能接收；各 Agent 可覆盖全局默认，显式配置失效不回退。具体合同见[附件识别](attachment-inspection.md)。
+`inspect_attachments` 接收两个必填参数：`attachments` 为按序的 1–4 个引用，每项必填 `path`、可选 `source`（local/runcove，默认 local）；`request` 说明要提取、比较或核实什么。本地路径相对任务目录或为目录内绝对路径，远程路径相对已授权空间根目录。支持图片并返回文字，读取限制与上下文见 [附件识别](attachment-inspection.md)，模型选择见 [配置](configuration.md#附件识别模型)。
 
 ## 文生图：1 个
 
@@ -46,11 +44,13 @@ Tuck 原生工具集统一采用一套进程内 MCP 服务和一个工具入口�
 | `count?` | 默认 1，可选整数 1–4；平台资源还受下发的数量许可约束；null 等同省略 |
 | `reference_images?` | 默认不传；0–4 个任务目录内 PNG/JPEG/WebP 相对文件路径，使用 `/` 分隔；仅保留主体/风格或编辑已有图片确有必要时才传，否则省略、null 或 `[]`；顺序对应提示词中的图片角色 |
 
-使用设置中的明确默认资源，不接受 resource、size、resolution 或比例参数。尺寸由供应商决定。参考图不接受 URL、base64、绝对路径、越界路径、重复路径或指向同一文件的别名；实际解码，单张最多 16 MiB、合计最多 48 MiB，保留原字节和顺序，不创建副本。上传文件、已有工作文件和前次生成的图片都可引用。
+使用设置中的明确默认资源，不接受 resource、size、resolution 或比例参数。尺寸由供应商决定。参考图不接受 URL、base64、绝对路径、越界路径、重复路径或指向同一文件的别名；实际解码并校验 40M 像素上限，单张最多 16 MiB、合计最多 48 MiB，保留原字节和顺序，不创建副本。上传文件、已有工作文件和前次生成的图片都可引用。
 
-本地资源有参考图时使用标准 OpenAI Images Edits 文件上传，无参考图时使用 Images Generations。描述明确非必要不用参考图；不自动附带会话中的图片。现行平台合同没有编辑路由，工具描述明确平台资源不接受参考图；若传入非空参考图，在读取图片、平台准入和模型请求前直接报错。不支持遮罩、厂商专有参考图格式、异步生成或流式图片。协议和设置见 [文生图资源](configuration.md#文生图资源)，供应商差异见[调研记录](image-generation.md)。
+本地资源无参考图时 `POST <baseUrl>/images/generations`，JSON 发送 model、prompt、n；有参考图时 `POST <baseUrl>/images/edits`，multipart/form-data 按顺序上传 `image[]`。本地省略 size，平台固定发送 `size="auto"`，均不发送 resolution/aspect_ratio，不保证精确比例。响应格式设置见 [配置](configuration.md#文生图资源)。
 
-成功返回 `status=completed` 与 `files` 中的 path、prompt_path，并通过标准 MCP ImageContent 返回可供模型理解的图片表示。每张原图使用 `img_<16位Base62ID>` 文件名，配套同名 `.prompt.txt`，不覆盖旧文件；产物列表和交付沿用既有 Files/Deliveries。从对话或任务产物点击生成图片，可预览并查看、复制提示词。
+不自动附带会话图片，不支持遮罩、厂商专有参考图格式、异步或流式图片。平台合同没有编辑路由，非空参考图在读取、准入和模型请求前拒绝；不猜测新路径、丢弃参考图或切换接口。
+
+成功通过标准 MCP ImageContent 返回图片表示，并提供原图与提示词路径。文件布局、原图和历史表示的区别见 [任务文件](task-files.md#生图原图与提示词)。对话及任务产物均支持图片预览和提示词查看、复制。
 
 单张原图最多 16 MiB，一次原图合计最多 48 MiB；响应 JSON 上限 72 MiB，模型表示合计最多 16 MiB。校验实际图片解码及像素限制，模型表示按现有 PrepareModelImage 规则准备，不能用它覆盖原图。URL 结果仅接受公开 HTTPS、无跳转的图片地址，下载不携带供应商或平台凭据，不访问本地网络；不符合要求的兼容服务应提供 base64。
 
@@ -106,7 +106,7 @@ Tuck 原生工具集统一采用一套进程内 MCP 服务和一个工具入口�
 
 ### `list_sessions`
 
-可选整数 `limit` 默认 10、范围 1–100。按已有创建时间和最近一轮开始/结束时间中较新值排序，不新增持久化活动状态。返回 `{status: "completed", sessions: [...]}`，每项包含 `task_id`、`title`、`assistant_name` 和 `status`，仅确有待处理交互时提供 `pending_interaction`。只列出当前未归档主会话，不包含原生子会话。后续发送使用这里的精确 `task_id`，不能使用标题或后台任务 ID 代替。 Tuck 会话 ID 为服务端生成的 16 位随机 base62；原生工具调用、后台任务和问题的 `elicitation_id` 保持原生值，不能按 Tuck ID 格式改写或推断。
+可选整数 `limit` 默认 10、范围 1–100。按已有创建时间和最近一轮开始/结束时间中较新值排序，不新增持久化活动状态。只列出当前未归档主会话，不包含原生子会话。后续发送使用这里的精确 `task_id`，不能使用标题或后台任务 ID 代替。 Tuck 会话 ID 为服务端生成的 16 位随机 base62；原生工具调用、后台任务和问题的 `elicitation_id` 保持原生值，不能按 Tuck ID 格式改写或推断。
 
 通过统一 Tuck MCP 工具入口调用；`limit` 按 schema 接收整数，拒绝无效值和未知字段，不另装配 HTTP API 工具。
 
@@ -131,7 +131,7 @@ Tuck 原生工具集统一采用一套进程内 MCP 服务和一个工具入口�
 
 ## 企业 DAV 文件交换：2 个
 
-原生模型目录中的名称是 `upload_runcove_file` 和 `download_runcove_files`；本地 MCP 定义为 `upload_runcove_file` / `download_runcove_files`。连接由 Core `WorkspaceProjection.fileExchangeWebdavResourceId` 和 Snapshot v5 的 `webdav[]` 明确确定，不接收连接 ID。没有确定可用目标时两者一起隐藏；只读 DAV 的上传返回 `webdav_read_only`。`none` 模式隐藏并拒绝下载，上传仍可读取已知任务目录，不限制源文件位于 artifacts 下。reviewer 默认不装配这两个写入工具。
+连接由 Core `WorkspaceProjection.fileExchangeWebdavResourceId` 和 Snapshot v5 的 `webdav[]` 明确确定，不接收连接 ID。没有确定可用目标时两工具一起隐藏；只读 DAV 的上传返回 `webdav_read_only`。`none` 模式隐藏并拒绝下载，上传仍可读取已知任务目录，不限制源文件位于 artifacts 下。reviewer 默认不装配这两个传输工具。
 
 每轮捕获企业身份、空间、DAV 授权和当前任务目录；调用及下载发布前重新核对授权、配置与登录状态。本轮中途切换目标不会使调用转向新空间；条件变化时拒绝执行。没有目录同步、差异比较、后台同步或自动重试。协议与实现见 [企业工作区](architecture.md#api与文件)。
 
@@ -149,12 +149,6 @@ Tuck 原生工具集统一采用一套进程内 MCP 服务和一个工具入口�
 {"file_path":"reports/report.pdf","remote_path":"reports/report.pdf","overwrite":false}
 ```
 
-成功结果中 `overwritten` 表示实际是否替换了已有文件：
-
-```json
-{"status":"completed","overwritten":false}
-```
-
 ### `download_runcove_files`
 
 | 参数 | 必填 | 含义 |
@@ -169,11 +163,7 @@ Tuck 原生工具集统一采用一套进程内 MCP 服务和一个工具入口�
 {"remote_paths":["reports/report.pdf","tables/data.csv"],"local_directory":"review","overwrite":false}
 ```
 
-`files` 只列出已成功下载的本地路径。全部成功为 `completed`，部分成功为 `partial`，全部失败为 `failed`；后两者标记 MCP 工具错误并提供 code/message，逐项错误放入 errors，field 指向 remote_paths 的原下标。请求级预检失败不输出 files/errors；无成功文件时省略 files。取消或授权失效停止后续下载，未开始项为 not_attempted；已成功文件保留，修复原因后只处理失败项。
-
-```json
-{"status":"partial","code":"partial_download","message":"Some files could not be downloaded. Completed files were kept.","files":[{"path":"review/report.pdf"}],"errors":[{"field":"remote_paths[1]","code":"webdav_file_not_found","message":"The remote file does not exist."}]}
-```
+部分完成时保留已成功文件，取消或撤权后不再下载后续项。修正原因后只处理失败项，返回状态及逐项错误字段见 [工具返回合同](tool-results.md)。
 
 `files[].path` 是后续本地工具或上传使用的路径。下载图片也不自动将其像素加入上下文；需要识别时显式调用识别工具。原始落盘字节不改变。传输不套用聊天附件的 16 MiB 限制，继续受 Core 授权、存储和服务限制约束；没有新增目录同步、总容量配额或自动重试。
 
@@ -185,31 +175,7 @@ Tuck 原生工具集统一采用一套进程内 MCP 服务和一个工具入口�
 - 调用只使用当前工具定义的参数，其他字段忽略，不新增其暗示的功能；例如 `create_parents`、`timeout_secs`、`connection_id` 不改变既有父目录创建、超时或固定企业目标。上传只有明确的 `overwrite=true` 才允许远端条件覆盖；下载只有明确的 `overwrite=true` 才允许替换整批的已有本地普通文件。
 - 缺少必需参数、已定义参数的错误类型及非法路径仍返回 `invalid_arguments`；跨任务路径、保护目录与访问授权规则不因参数兼容而放宽。
 
-普通失败返回 JSON，并标记 MCP 工具错误：
-
-```json
-{"status":"failed","code":"webdav_file_exists","message":"The remote file already exists. Set overwrite=true only if replacement is intended."}
-```
-
-| `code` | 含义与处理 |
-| --- | --- |
-| `invalid_arguments` | 已定义参数的类型或路径无效；按 schema 修正，额外字段按上述容错规则忽略 |
-| `local_file_not_found` | 本地源不存在、不是普通文件或无法读取 |
-| `local_file_exists` | 本地下载目标已存在；换用其他目录，或从重试清单移除已成功文件 |
-| `local_name_conflict` | 批内多个源文件映射到同一本地文件名；拆分到不同目录下载 |
-| `operation_canceled` / `not_attempted` | 当前文件已取消或停止后未开始，前面成功的文件保留 |
-| `webdav_file_not_found` | 远端源文件不存在 |
-| `webdav_not_file` | 指定远端目标是目录 |
-| `webdav_parent_not_directory` | 远端父路径不是目录或不能建立所需目录 |
-| `webdav_file_exists` | 未允许同名替换，或上传条件写入返回 412；核实当前文件再决定是否替换 |
-| `webdav_version_unavailable` | 缺少安全替换所需的强 ETag |
-| `webdav_version_changed` | 下载读取前远端版本变化；重新核实源文件 |
-| `webdav_read_only` | 当前 DAV 无写入权限 |
-| `webdav_path_not_permitted` | 远端路径包含 `.agent-space*` 保留目录；先用远程工作区工具将选定截图或产物复制到普通项目目录，再传输该文件；不自动重试受保护路径 |
-| `tool_not_permitted` | 本轮身份、任务目录、配置、登录或访问授权失效 |
-| `webdav_unavailable` | 企业文件服务或属性查询不可用 |
-| `webdav_upload_failed` / `webdav_download_failed` | 服务未确认该操作成功；依据 message 核实目标 |
-| `outcome_unknown` | 远端写入可能已经完成；返回 `status: "unknown"`，先通过企业文件管理器核实，不自动重试 |
+错误码和状态统一见 [工具返回合同](tool-results.md#错误类型)。远端 `.agent-space*` 为受保护路径：需要截图或产物时，先用工作区工具复制选定文件到普通项目目录，再传输，不自动重试受保护路径。远端写入失响应时先核实目标，缺少强 ETag 时不强行覆盖。
 
 取消沿原生取消流程处理；已经发起的远端写入无法确认时返回未知结果，不承诺远端回滚。
 
@@ -219,66 +185,14 @@ Tuck 原生工具集统一采用一套进程内 MCP 服务和一个工具入口�
 
 访问令牌刷新与资源更新见 [资源更新与续聊](architecture.md#平台与安全)；MCP 会话恢复及调用重试由官方引擎管理，见 [MCP 生命周期](architecture.md#docker-agent-合同)。会话恢复不重新下发 Core 配置，也不重新签发 Agent Space 密钥。
 
-本地配置 MCP 来自 `localMcp`，按连接的 `enabled`、凭据和 `agents` 绑定装配。可选 `localMcp[].tools` 使用服务器原始工具名作为精确白名单；省略时开放全部工具，空数组表示全部停用且不生成该连接的原生 toolset，重复名称拒绝。绑定和 `readonly` 继续约束最终可见工具，示例见 [本地 MCP 工具选择](configuration.md#本地-mcp-工具选择)。平台连接的本机选择保存在 `platformMcpTools`，只缩小平台授权范围，空数组同样停用全部工具。工具含义、参数、返回值和文件访问范围由该服务负责；认证令牌使用同一 JSON 的 `authToken` 字段并由文件权限保护，与企业 DAV、本地任务目录没有关联。动态服务清单不写死在本文。
+本地/平台 MCP 的选择字段及空数组语义见 [MCP 配置](configuration.md#本地-mcp-工具选择)。工具含义、参数、输出和文件范围由服务自身负责，不因同名路径推断为企业工作区；动态清单不写死在本文。
 
 ## 对话交付：`deliver_result`
 
-受管主助手默认启用，`workbench.assistants[].deliveryTool=false` 可关闭；子代理不获得此工具。不要求企业登录或 WebDAV 可用，但运行时使用官方请求头模板传递每轮交付令牌。设置 → 编排 →“启用交付要求”默认关闭；在主 Agent 一轮明确正常结束后，检查当时的开关、交付工具许可和该轮交付记录；运行中开启或关闭也按结束时的配置判断。普通输入正常结束但未交付时最多补充一次自动请求。自动补交付不能再触发自动补交付；仍未交付就按原生完成事实结束，界面保留无本轮交付的事实。后续用户输入独立判断；依据持久化 source.kind 而非提示词文字区分，沿用既有队列和取消行为。
+受管主助手默认启用，子代理不获得此工具。不要求企业登录或 DAV，但调用须绑定有效任务及轮次。编排中的交付要求默认关闭，开启后普通根轮次正常结束而未交付时最多自动补充一次，自动轮次不能触发自身。启停字段见 [配置](configuration.md#tuck-原生工具集)，判定与队列规则见 [编排边界](architecture.md#上下文披露与编排)。
 
 参数为必填 `summary` 和可选 `files`。摘要支持 Markdown，通常 1–3 句，最多 1,000 字符；只列出需要交付的关键文件，每项必填 `path`，选填 `source`（local/runcove，默认 local）和可省略的 `description`；path 相对所选来源根目录。Runcove 文件必须来自本轮已授权的工作区，直接流入现有交付暂存并形成快照，不先写任务目录；无本地目录仍可交付远程文件。文件读取失败不提交新版本。无需文件时省略 `files`，`files: []` 或 `null` 同样表示无文件。不提供由模型填写的 request_id、版本号或会话身份。
 
 一次最多 10 个关键文件；未变文件仅在使用本次成果必需时附带，不重复提交历史整套文件。单文件不超过 512 MiB，合计不超过 2 GiB。成功后保存独立副本并增加版本；普通对话和任务频道使用相同记录回看。源文件后续修改、删除或任务归档不会改变历史交付。路径、链接、复制期间的变化及文件大小均由服务验证，失败整次不建版。持久化与保留规则见 [交付存储合同](database-design.md#交付与清理)，实际模型描述与参数以 [工具定义](../internal/tuck/model_content_tools.go) 为准。
 
-维护入口：唯一配置为 tuck.config.json；原生装配在 internal/tuck/engine_config.go，会话协作在 interactions.go / tasks.go，统一 MCP 在 local_tools.go，内容入口在 model_content.go，自动交付规则在 orchestration.go，生图协议在 image_generation.go，DAV 在 workspace_tools.go，企业代理在 mcp.go，交付在 deliveries.go。更改名称、参数或执行规则时同步本文、配置合同和对应测试。
-
-对应测试和真实服务验收要求见 [验证指南](verification.md#真实服务与已知限制)；本工具目录不声明当前部署已完成所有真实副作用验收。
-
-### 工具设置中的启停
-
-两张入口卡片分别进入原生工具同页列表和 Tuck 工具开关列表。`agents.<agent>.disabledTuckTools` 支持 `list_sessions`、`send_session_message`、`upload_runcove_file`、`download_runcove_files`、`generate_images`、`inspect_attachments`，缺省全部启用，保存并应用后按 Agent 过滤原生运行时的工具目录。附件识别允许只读 Agent 使用。交付沿用 `workbench.assistants[].deliveryTool`。停用不会改变其他 Agent；原有主/子代理边界和企业文件权限保持有效。
-
-## 模型可见内容与编排边界
-
-Tuck 自组织的模型可见内容统一经过 `model_content.go` 的调用界面，内部按文字资源、工具定义和结果投影克制拆分，范围及职责见 [架构约定](architecture.md#模型可见内容的唯一入口)。工具文字沿用 `tuck.<工具名>.description` 和 `tuck.<工具名>.param.<参数路径>` 等稳定资源标识；服务级工具名清单、自动补交付及其他模型内容由入口对应的构造函数生成。编排策略决定业务需要，Manager 负责运行协调和提交校验，业务 owner 保留权限及执行职责；调用者不能绕过入口直接拼接文字或调用子模块。
-
-编排可引用 Tuck、外部 MCP、Docker Agent 内置工具的来源身份和选择配置；工具使用指导与真正修改工具 description 的边界见 [上下文披露与编排](architecture.md#上下文披露与编排)。本期只整理已有规则及内容路径，不启用工具描述优化或新的编排运行器。外部 MCP 原始合同和哈希不得被本地文案改写破坏；引擎内置工具仅按实际版本的公开能力配置，不读取或改写引擎内部实现。模型和提供商显示值不能代替稳定工具身份。
-
-<!-- tool-text-resources:start -->
-
-下表是统一资源的工具文字展示，不是另一份独立文案来源；资源导出与合同校验共同维护一致性，不能仅在文档中修改模型文案。
-
-| 资源名 | 英文描述原文 |
-| --- | --- |
-| `tuck.list_sessions.description` | List Tuck conversations and their task IDs to find a conversation to contact. |
-| `tuck.list_sessions.param.limit` | Number of conversations to return, from 1 to 100; default 10. |
-| `tuck.send_session_message.description` | Send a message to a Tuck conversation as requested by the user. When needed, ask for a reply in the message and explain what feedback is needed. Acceptance means the message was received, not that the task is complete. |
-| `tuck.send_session_message.param.target_task_id` | Target conversation task ID. |
-| `tuck.send_session_message.param.message` | Message to send; when a reply is needed, explain what feedback you want. |
-| `tuck.deliver_result.description` | Submit the results as a new delivery version with a brief summary and, when needed, key files from the task working directory or the connected Runcove workspace. |
-| `tuck.deliver_result.param.summary` | Briefly describe the completed work. |
-| `tuck.deliver_result.param.files` | Up to 10 key files to deliver. Omit when no files are needed. |
-| `tuck.deliver_result.param.files[].source` | File source: local for the task working directory, or runcove for the connected Runcove workspace. Default local. |
-| `tuck.deliver_result.param.files[].path` | File path relative to the selected source root, including the filename. |
-| `tuck.deliver_result.param.files[].description` | Brief description of the file's content or purpose. May be omitted. |
-| `tuck.upload_runcove_file.description` | Upload one file from the task working directory to the connected Runcove workspace. Existing files are not overwritten by default. |
-| `tuck.upload_runcove_file.param.file_path` | Source file path relative to the task working directory, such as reports/result.pdf. |
-| `tuck.upload_runcove_file.param.remote_path` | Destination file path relative to the Runcove workspace root, including the filename. Do not start with / or /workspace/. |
-| `tuck.upload_runcove_file.param.overwrite` | Whether to overwrite an existing remote file at the same path. Default false. |
-| `tuck.download_runcove_files.description` | Download 1–20 files from the connected Runcove workspace to the task working directory, preserving filenames. Existing files are not overwritten by default. |
-| `tuck.download_runcove_files.param.remote_paths` | 1–20 source file paths relative to the Runcove workspace root. Do not start with / or /workspace/. |
-| `tuck.download_runcove_files.param.local_directory` | Destination directory relative to the task working directory. Use . for its root or specify a subdirectory; stay inside the working directory. |
-| `tuck.download_runcove_files.param.overwrite` | Whether to overwrite existing files with the same names in the destination directory. Default false. |
-| `tuck.generate_images.description` | Generate images from a prompt, one image by default. Provide references only when needed to preserve a subject or style, or edit existing images. Generated images and their prompts are saved in artifacts/images; returns images and file paths. |
-| `tuck.generate_images.model` | Model: {model}. |
-| `tuck.generate_images.provider` | Provider: {provider}. |
-| `tuck.generate_images.platform_references` | This platform image resource does not accept reference images; omit reference_images. |
-| `tuck.generate_images.param.prompt` | Describe the desired image. With references, explain each image's role in order and what to preserve or change. |
-| `tuck.generate_images.param.count` | Number of images to generate, from 1 to 4; default 1, subject to resource limits. |
-| `tuck.generate_images.param.reference_images` | Optional 0–4 PNG/JPEG/WebP reference images. Use file paths relative to the task working directory; omit unless needed. |
-| `tuck.inspect_attachments.description` | Use when you need to understand attachment content, extract information, or compare differences. Reads files from the task working directory or the connected Runcove workspace and returns text. Supports images; PDF and other attachment types are not yet supported. Provide relevant background and specific questions. |
-| `tuck.inspect_attachments.param.attachments` | 1–4 attachments to inspect, in order. Supports PNG/JPEG/GIF/WebP images. |
-| `tuck.inspect_attachments.param.attachments[].source` | Attachment source: local for the task working directory, or runcove for the connected Runcove workspace. Default local. |
-| `tuck.inspect_attachments.param.attachments[].path` | For local files, a relative or absolute path inside the task working directory. For Runcove files, a path relative to the workspace root, without /workspace/. |
-| `tuck.inspect_attachments.param.request` | What to identify, extract, compare, or verify. Refer to attachments by array order and include relevant background and the desired answer format when needed. |
-
-<!-- tool-text-resources:end -->
+启停与应用见 [Tuck 工具配置](configuration.md#tuck-原生工具集)，测试及真实服务验收见 [验证指南](verification.md)。

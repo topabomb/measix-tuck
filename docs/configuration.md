@@ -27,7 +27,7 @@
 
 工作目录有 auto / specified / none。auto 用工作根目录生成；specified 必须是存在、可访问的绝对目录，与交付存储隔离；none 不设置原生任务目录，也不承诺本地附件/交付文件能力。助手配置是默认值，创建时明确选择优先；已有对话和 fork 保留实际目录事实。
 
-Tuck 自动管理的上传附件和生成图片统一进入工作目录下 `artifacts/` 的用途子目录；DAV 下载可指定任务根目录内的任意位置。`none` 明确禁止 Tuck 向引擎默认目录写入附件、编辑结果、生图或 DAV 下载。目录、命名、提示词配套保存及只读/交付例外见 [任务文件规范](task-files.md)。
+文件布局、目录模式的读写边界、命名与交付副本见 [任务文件](task-files.md)。
 
 交付保留数为整数 0–100，默认 10，助手可覆盖。0 表示不保留历史版本，当前最新版本始终保留。只有成功提交新版本才裁剪旧记录。
 
@@ -52,9 +52,9 @@ Tuck 自动管理的上传附件和生成图片统一进入工作目录下 `arti
 }
 ```
 
-当前实现标准 OpenAI Images 非流式调用：无参考图时 `POST <baseUrl>/images/generations`，JSON 包含 model、prompt、n；有参考图时 `POST <baseUrl>/images/edits`，使用 multipart/form-data，按参数顺序发送 `image[]` 文件。工具默认生成 1 张，可选 1–4 张；参考图默认不传，可选 0–4 张。本地省略 size，平台固定发送 size="auto"；均不发送 resolution 或 aspect_ratio，尺寸由服务决定，不承诺精确比例。
+当前协议为标准 OpenAI Images：无参考图调用 Generations，有参考图调用 Edits；服务必须实际支持相应接口。请求编码、参考图及数量限制见 [生图工具](tools-reference.md#文生图1-个)。
 
-本地配置不提供尺寸清单和数量上限。`responseFormat` 缺省或空字符串时不发送 response_format；兼容服务可明确选 `b64_json` 或 `url`。GPT 图片模型使用服务默认返回格式。参考图要求服务实现标准 OpenAI Images Edits 文件上传；不能因为支持文字生成或声称 OpenAI 兼容就推定支持参考图。具体差异见[参考图调研与实施边界](image-generation.md)。不按主机或模型名分支，不自动重试、丢弃参考图或切换接口。
+本地配置不提供尺寸清单和数量上限。`responseFormat` 缺省或空字符串时不发送 response_format，兼容服务可明确选 `b64_json` 或 `url`。参考图要求服务实现标准 Edits 文件上传，不能从文字生成能力推定。
 
 平台生图资源来自快照 `imageGenerators`，保持只读，使用明确下发的 runtimePath、admit 和短期 access；数量仍受平台 maxImagesPerRequest 约束，工具上限为两者较小值。平台 allowedSizes 保留原合同校验，但不作为请求参数或本地设置。现行合同未声明参考图编辑路由，工具描述明确提示平台资源不接受参考图，调用时在读取文件和申请准入前拒绝；不把 generations 路径替换成 edits，不改写外部合同。其他线协议显示不可用。
 
@@ -68,15 +68,15 @@ Agent 可通过 `agents.<name>.imageGenerator` 覆盖生图资源，值与全局
 
 ## 附件识别模型
 
-附件识别的全局默认位于“提供商与模型”；各 Agent 的 Tuck 工具页可开启“识别附件”并覆盖识图模型。模型需声明 TEXT、IMAGE 输入，无需 TOOL；未指定时沿用平台明确下发的默认识图模型。明确选择失效时不回退。工具只读，支持任务目录任意位置的图片；参数、子代理及上下文边界见[附件识别](attachment-inspection.md)。新增字段可省略，不改变已有数据解释，不需要数据库迁移。
+附件识别复用现有本地/平台模型，要求 TEXT、IMAGE 输入，不要求 TOOL；聊天模型仍要求 TOOL。选择顺序为 Agent 的 `attachmentInspectionModelId` → 全局 `defaultAttachmentInspectionModelId` → 平台 `policy.defaultAttachmentInspectionModelId`，空值表示继承。子代理不继承主 Agent 覆盖，明确选择失效报告 unavailable，全部未配置报告 required，不使用聊天模型或目录首项兜底。
+
+全局默认在“提供商与模型”，覆盖及开关在各 Agent 的 Tuck 工具页，分别受 providers/agents 配置保护。新增字段可省略，不改变现有数据解释；只读 Agent 可使用。读取和上下文规则见 [附件识别](attachment-inspection.md)。
 
 ## Tuck 原生工具集
 
-Tuck 自实现工具使用服务进程内的统一 MCP 入口，不通过 `localMcp` 登记为外部连接。`agents.<name>.disabledTuckTools` 和助手的 `deliveryTool` 继续控制工具许可，主/子代理、只读和资源条件共同决定装配集合；每个 Agent 最多生成一个 Tuck MCP toolset，没有工具可装配时省略。
+Tuck 工具不通过 `localMcp` 登记。`agents.<name>.disabledTuckTools` 可停用六个工具：`list_sessions`、`send_session_message`、`upload_runcove_file`、`download_runcove_files`、`generate_images`、`inspect_attachments`；缺省不额外禁用。交付由 `workbench.assistants[].deliveryTool` 控制。最终集合仍受主/子代理、只读及资源条件限制。
 
-工具定义和服务级 `instructions` 从同一集合经 `model_content` 生成；本期说明只列工具名，不提供单独的数组配置、规则编辑器或持久化副本。工具开关按既有保存与应用流程生效，重新装配后验证对应说明已进入模型请求；单纯保存不能当作已应用。`requireDelivery` 保留运行中更新语义，由自动交付策略提出补充请求，Manager 校验并提交，不通过修改初始化 instructions 表达。内容与生命周期合同见 [架构约定](architecture.md#tuck-原生工具集与-mcp)。
-
-工具使用指导、任务背景及编排审查按 [上下文披露与编排](architecture.md#上下文披露与编排) 扩展，不新增 MCP instructions 配置来代替这些职责。本期不增加编排代理分类设置或背景生成开关；默认 Agent 文案由统一内容入口供给初始化，已有用户保存的指令不被静默改写。
+开关保存并应用后重新装配，不把保存当作已生效；`requireDelivery` 保留运行中更新语义。默认指令只供初始化，不静默改写已有用户指令。统一 MCP 和服务级说明见 [架构](architecture.md#tuck-原生工具集与-mcp)，工具用途见 [工具参考](tools-reference.md)。
 
 ## 本地 MCP 工具选择
 
@@ -124,7 +124,7 @@ server、storage、登录 auth、credentialKey，以及引擎 mode/version/binar
 | 连接池 | 空闲连接 90 秒回收 | 只回收未使用的连接，不中断正在传输的文件、模型流或 SSE；TCP keepalive 的 30 秒也不是调用期限 |
 | 工作台与本机模型通道 HTTP 服务 | 读取请求头 60 秒；无全局请求体读取、写入或操作总期限 | 防止请求头无限占用连接，同时允许大文件、模型流与 MCP/SSE 持续执行 |
 | 平台控制面 | 每次 HTTP 操作总期限 15 秒，包含连接、响应头与响应体读取 | 用于发现、认证、快照、准入等控制请求；不用于文件数据或原生执行流；关闭响应体释放该次操作 |
-| 工作区浏览器代理 → Core | 请求体发送完后等响应头 120 秒；上传和下载分别连续 120 秒无字节进展才取消；无传输总时长限制 | Core 当前 DAV 客户端响应头等待为 90 秒，外层留出确认余量。原 15 秒等待会先于 Core 结束请求，已用 8 MiB 数据和延迟确认复现；不能只按浏览器上传 100% 判定保存成功 |
+| 工作区浏览器代理 → Core | 请求体发送完后等响应头 120 秒；上传和下载分别连续 120 秒无字节进展才取消；无传输总时长限制 | 不能按浏览器上传 100% 判定保存成功，仍须等待服务端确认 |
 | Tuck 文件工具 → 企业 DAV | 响应头沿用模型客户端的 180 秒；上传与响应体连续 120 秒无字节进展才取消 | 与工作区采用相同文件空闲边界；覆盖 PUT、下载及 PROPFIND 等元数据响应体，不设置文件总期限 |
 | 供应商返回的图片 URL | DNS/TCP 30 秒、TLS 10 秒、响应头 60 秒、响应体连续空闲 120 秒 | 仍只允许公开 HTTPS、固定解析后的公开地址、无代理/凭据/重定向；文件大小限制独立生效 |
 | 前台主图预览 | 不另设浏览器总期限，使用后端文件传输边界 | 避免仍有数据进展的图片在 30 秒时被前端取消；切换文件、关闭标签及用户取消继续中止对应读取 |
@@ -133,7 +133,7 @@ server、storage、登录 auth、credentialKey，以及引擎 mode/version/binar
 
 响应头等待不包含请求体发送时间，响应体空闲时限在每次读到字节后重置。请求体发送结束只停止该请求体的空闲计时，不取消尚在等待的响应；响应体关闭才释放该次操作。超时不关闭共享客户端，也不为写操作增加自动重试。
 
-浏览器 100% 只表示浏览器侧上传进度完成，Tuck、Core 和 DAV 的确认仍可能在后面。只有成功响应才能显示“服务端已确认保存”；断连、超时或取消后，无法确认的写入保持“结果未知”。工作区传输失败的 `workspace.transport_failed` 日志记录操作 ID、HTTP 方法、资源类型、整体耗时、发完请求后的确认等待时长及超时/取消标志；`confirmationWaitMs=-1` 表示尚未取得请求已完整发出的事实。日志不记录令牌、完整 URL、文件路径或文件内容。Core 的 90 秒是已核对的当前实现，并非 Tuck 可修改的远端配置；反向代理或远端服务仍可能更早结束请求。
+浏览器 100% 只表示浏览器侧上传进度完成，Tuck、Core 和 DAV 的确认仍可能在后面。只有成功响应才能显示“服务端已确认保存”；断连、超时或取消后，无法确认的写入保持“结果未知”。工作区传输失败的 `workspace.transport_failed` 日志记录操作 ID、HTTP 方法、资源类型、整体耗时、发完请求后的确认等待时长及超时/取消标志；`confirmationWaitMs=-1` 表示尚未取得请求已完整发出的事实。日志不记录令牌、完整 URL、文件路径或文件内容。反向代理或远端服务仍可能更早结束请求，部署时须核对实际上下游配置。
 
 ### 模型、MCP 与原生执行
 
@@ -165,5 +165,3 @@ server、storage、登录 auth、credentialKey，以及引擎 mode/version/binar
 | SQLite 锁等待 | 5 秒 | 既有 `busy_timeout=5000`，不等于事务或任务期限；存储合同见[存储设计](database-design.md) |
 
 配置解锁的一小时有效期及登录会话有效期属于认证合同，不随网络超时调整。引擎状态刷新 1.5 秒、预览防抖 250 毫秒、流式预览更新 180 毫秒、复制提示 1.8 秒，以及对象 URL 延后释放属于刷新或展示调度，不会结束业务操作。
-
-回归应分别覆盖“请求体发完后延迟确认”“持续进展超过原总时限”“连续空闲被取消”“取消后下一操作可用”“关闭请求体仍可等待响应”，并核对未新增写入重试或长连接总寿命。涉及远端配置变更时重新核对上下游阶段时限，不能只增大外层数字掩盖未定位的断连。

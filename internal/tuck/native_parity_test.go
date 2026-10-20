@@ -121,7 +121,7 @@ func TestParityHistoricalToolRepair(t *testing.T) {
 			}
 			history := []any{M{"message": M{"role": "assistant", "tool_calls": calls}}, M{"message": M{"role": "tool", "tool_call_id": "call", "content": "failed", "is_error": !delivery}}}
 			m.mu.Lock()
-			e := m.normalizer.importHistory(m.tasks[id], history)
+			e := m.normalizer.importHistory(fixtureTaskLocked(m, id), history)
 			m.mu.Unlock()
 			if e != nil {
 				t.Fatal(e)
@@ -148,7 +148,7 @@ func TestParityHistoricalToolRepair(t *testing.T) {
 				}
 			}
 			m.mu.Lock()
-			e = m.normalizer.restoreToolMetadata(m.tasks[id], history)
+			e = m.normalizer.restoreToolMetadata(fixtureTaskLocked(m, id), history)
 			m.mu.Unlock()
 			if e != nil {
 				t.Fatal(e)
@@ -161,7 +161,7 @@ func TestParityHistoricalToolRepair(t *testing.T) {
 				t.Fatal(repaired)
 			}
 			m.mu.Lock()
-			e = m.normalizer.restoreToolMetadata(m.tasks[id], history)
+			e = m.normalizer.restoreToolMetadata(fixtureTaskLocked(m, id), history)
 			m.mu.Unlock()
 			if e != nil || !bytes.Equal(JSON(taskMessages(t, s, id)), JSON(repaired)) || I(mustTask(t, m, id)["logicalCount"]) != 2 {
 				t.Fatal("repair was not idempotent", e)
@@ -198,9 +198,9 @@ func TestParityChildFailureAndRestart(t *testing.T) {
 		t.Fatal(r)
 	}
 	m.mu.Lock()
-	e := m.settleLocked(m.tasks[S(child["id"])], "max-tokens", nil)
+	e := m.settleLocked(fixtureTaskLocked(m, S(child["id"])), "max-tokens", nil)
 	if e == nil {
-		e = m.normalizer.delegation(m.tasks[id])
+		e = m.normalizer.delegation(fixtureTaskLocked(m, id))
 	}
 	m.mu.Unlock()
 	if e != nil {
@@ -237,7 +237,7 @@ func TestParityBackgroundReports(t *testing.T) {
 	mustUpdate(t, m, id, M{"turnId": "turn-1"})
 	for _, key := range []string{"a", "b", "c"} {
 		m.mu.Lock()
-		e := m.normalizer.backgroundRun(m.tasks[id], M{"agent": "worker", "task": key}, "Background agent task started with ID: "+key)
+		e := m.normalizer.backgroundRun(fixtureTaskLocked(m, id), M{"agent": "worker", "task": key}, "Background agent task started with ID: "+key)
 		m.mu.Unlock()
 		if e != nil {
 			t.Fatal(e)
@@ -1133,7 +1133,17 @@ func TestParityNativeShutdownPendingMCP(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("upstream call leaked")
 	}
-	done := mustTask(t, app.Manager, id)
+	// The closed Manager no longer keeps idle payloads; inspect the durable
+	// settlement through a fresh read-only connection.
+	db, err := openDatabase(app.Store.Path, "ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	done, err := (&Store{DB: db}).Task(id)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if done["lastTurnReason"] != "interrupted" || done["status"] != "idle" || app.Manager.Running(id) {
 		t.Fatal(done)
 	}

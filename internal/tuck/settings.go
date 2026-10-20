@@ -19,6 +19,8 @@ func (a *App) settingsRoute(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 	switch path {
+	case "/api/settings/retention":
+		return a.retentionSettings(w, r)
 	case "/api/settings/access":
 		if r.Method != "GET" {
 			break
@@ -223,7 +225,11 @@ func (a *App) settingsRoute(w http.ResponseWriter, r *http.Request) error {
 				return e
 			}
 			if !B(data["requireDelivery"]) {
-				for _, task := range a.Manager.List() {
+				tasks, err := a.Manager.Snapshots()
+				if err != nil {
+					return err
+				}
+				for _, task := range tasks {
 					if _, e = a.Manager.Update(S(task["id"]), func(t M) error {
 						queue := []any{}
 						for _, item := range A(t["queue"]) {
@@ -293,7 +299,11 @@ func (a *App) saveRuntime(r *http.Request, data M, check func() error) error {
 		return Problem(409, "settings_interrupt_required", "有任务正在执行或等待交互。可中断任务并立即生效，也可保存到下一次应用。")
 	}
 	a.Workspace.Close()
-	for _, task := range a.Manager.List() {
+	tasks, err := a.Manager.Snapshots()
+	if err != nil {
+		return err
+	}
+	for _, task := range tasks {
 		if a.Manager.Running(S(task["id"])) || S(task["status"]) != "idle" {
 			if e = a.Manager.Abort(r.Context(), S(task["id"])); e != nil {
 				return e

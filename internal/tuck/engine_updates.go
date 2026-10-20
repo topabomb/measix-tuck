@@ -533,7 +533,11 @@ func (a *App) engineSettings(w http.ResponseWriter, r *http.Request) error {
 		if e = authorize(); e != nil {
 			return e
 		}
-		for _, task := range a.Manager.List() {
+		tasks, err := a.Manager.Snapshots()
+		if err != nil {
+			return err
+		}
+		for _, task := range tasks {
 			if a.Manager.Running(S(task["id"])) || S(task["status"]) != "idle" {
 				if e = a.Manager.Abort(r.Context(), S(task["id"])); e != nil {
 					return e

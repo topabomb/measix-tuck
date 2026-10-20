@@ -139,7 +139,7 @@ func TestCompletionReviewSnapshotCursorReplay(t *testing.T) {
 					_, err = manager.Update(id, func(task M) error { task["title"] = "after-snapshot"; return nil })
 				} else {
 					manager.mu.Lock()
-					_, err = manager.appendLocked(manager.tasks[id], M{"role": "assistant", "blocks": []any{newBlock("audit", "markdown", M{"markdown": "after-snapshot"})}})
+					_, err = manager.appendLocked(fixtureTaskLocked(manager, id), M{"role": "assistant", "blocks": []any{newBlock("audit", "markdown", M{"markdown": "after-snapshot"})}})
 					manager.mu.Unlock()
 				}
 				close(proceed)

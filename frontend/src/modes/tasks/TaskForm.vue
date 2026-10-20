@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { api, type DockerWorkspaceRuntime } from '../../shared/workspace/runtime'
 import TuckLoading from '../../shared/ui/TuckLoading.vue'
 import TaskResult from './TaskResult.vue'
+import RetentionStatus from '../chat/components/RetentionStatus.vue'
 import { makeTaskTitle } from '../../../shared/task-channel.mjs'
 import { channelLimit, taskIsActive, taskHasEnded, taskName, tasksAssistantPath, createTaskDraft, type TaskDraft, type Assistant } from './task-view'
 import {workspacePolicy} from '../../../shared/workspace-mode.mjs'
@@ -127,6 +128,7 @@ const fileSize = (bytes: number) => bytes < 1024*1024 ? `${Math.ceil(bytes/1024)
       <p v-if="unavailableModel || imageIssue || draft.error" class="task-error" role="alert">{{ unavailableModel || imageIssue || draft.error }}</p>
       <p v-if="continuationIssue && !draft.busy" class="task-error" role="status">{{ continuationIssue }}</p>
       <p v-if="full" role="status">进行中任务已满，请等待任务结束后再提交</p>
+      <RetentionStatus v-if="task" :task="task" :workspace="workspace" />
       <div class="task-form-actions"><RouterLink v-if="draft.taskId && !task || draft.uncertain || continuationIssue" :to="tasksAssistantPath(assistant.agent)">全部任务</RouterLink><button class="primary" type="submit" :aria-label="draft.busy ? '正在提交…' : task ? '提交补充' : '提交任务'" :disabled="draft.busy || draft.uncertain || full || !connected || !!imageIssue || !!continuationIssue || modelIssue"><TuckLoading v-if="draft.busy" label="正在提交…" /><template v-else>{{ task ? '提交补充' : '提交任务' }}</template></button></div>
     </form>
   </section>

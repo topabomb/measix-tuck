@@ -39,14 +39,15 @@ type toolPeerBinding struct {
 
 // LocalTools uses the official MCP SDK; the turn binding fills a public header gap.
 type LocalTools struct {
-	Models   *Models
-	Manager  *Manager
-	Files    *Files
-	Delivery *Deliveries
-	mu       sync.RWMutex
-	turns    map[string]*toolTurn
-	peers    []*toolPeer
-	handler  *mcp.StreamableHTTPHandler
+	Models    *Models
+	Manager   *Manager
+	Files     *Files
+	Delivery  *Deliveries
+	mu        sync.RWMutex
+	turns     map[string]*toolTurn
+	peers     []*toolPeer
+	handler   *mcp.StreamableHTTPHandler
+	operation func(context.Context) (context.Context, func(), error)
 }
 
 const tuckToolsPath = "/tuck-tools"
@@ -275,6 +276,21 @@ func (l *LocalTools) installDefinitions(peer *toolPeer, defs []M) bool {
 			stop := context.AfterFunc(turn.ctx, cancel)
 			defer stop()
 			defer cancel()
+			if l.operation != nil {
+				var finish func()
+				combined, finish, e = l.operation(combined)
+				if e != nil {
+					return modelContent.MCPResult(modelContent.Error(e)), nil
+				}
+				defer finish()
+			}
+			// A native turn may finish before its canceled tool handler unwinds.
+			// Keep an independent lease until this invocation has actually exited.
+			release, e := l.Manager.useWorkspace(turn.Task)
+			if e != nil {
+				return modelContent.MCPResult(modelContent.Error(e)), nil
+			}
+			defer release()
 			var result M
 			switch name {
 			case "list_conversations":
@@ -393,6 +409,16 @@ func platformIdentity(b M) string {
 	return strings.Join([]string{S(b["origin"]), S(b["deploymentId"]), S(b["userId"]), S(b["sessionId"]), S(O(b["snapshot"])["snapshotHash"])}, "\x00")
 }
 func (l *LocalTools) Begin(ctx context.Context, task M) (map[string]string, func(), error) {
+	release, err := l.Manager.useWorkspace(task)
+	if err != nil {
+		return nil, nil, err
+	}
+	accepted := false
+	defer func() {
+		if !accepted {
+			release()
+		}
+	}()
 	workspace := ""
 	if S(task["workspace"]) != "" {
 		var e error
@@ -462,7 +488,8 @@ func (l *LocalTools) Begin(ctx context.Context, task M) (map[string]string, func
 	}
 
 	headers := map[string]string{tuckTurnHeader: turn.Key}
-	finish := func() { cancel(); l.mu.Lock(); delete(l.turns, turn.Key); l.mu.Unlock() }
+	accepted = true
+	finish := sync.OnceFunc(func() { cancel(); l.mu.Lock(); delete(l.turns, turn.Key); l.mu.Unlock(); release() })
 	return headers, finish, nil
 }
 func (l *LocalTools) ServeHTTP(w http.ResponseWriter, r *http.Request) {

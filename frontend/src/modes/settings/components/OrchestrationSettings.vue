@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { authFetch } from '../../../app/auth'
+import RetentionSettings from './RetentionSettings.vue'
 const controller=new AbortController()
 onBeforeUnmount(()=>controller.abort())
 const busy=ref(false),loaded=ref(false),error=ref(''),enabled=ref(false),available=ref(false),assistants=ref<string[]>([])
@@ -14,6 +15,7 @@ onMounted(load)
       <div id="delivery-policy-description"><p>对已启用交付工具的主助手，每次普通输入正常完成但未交付时，自动补充一次交付要求。补充后仍未交付就结束，不会反复续轮。你可以随时停止。</p><p>在主助手一轮正常结束后检查此开关；关闭后不再自动补交付。子代理不适用。</p></div>
       <p v-if="loaded&&available" class="delivery-assistants">适用助手：{{ assistants.join('、') }}</p><p v-else-if="loaded">当前没有可使用交付工具的主助手，此设置暂不触发自动续轮。</p>
       <p v-if="error" role="alert">{{ error }}</p>
+      <RetentionSettings />
     </section>
 </template>
 <style scoped>

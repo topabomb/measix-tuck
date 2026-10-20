@@ -180,6 +180,11 @@ type InspectedAttachment struct {
 // Inspection is read-only and accepts any file location inside the task root,
 // not just Tuck's managed artifact folders. No external URL or cache is used.
 func (f *Files) ReadInspectionAttachments(ctx context.Context, task M, paths []any) ([]InspectedAttachment, error) {
+	release, err := f.useWorkspace(task)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if len(paths) < 1 || len(paths) > 4 {
 		return nil, Problem(422, "invalid_arguments", "附件识别每次需要 1–4 个文件")
 	}
@@ -265,6 +270,11 @@ func (f *Files) ReadInspectionAttachments(ctx context.Context, task M, paths []a
 // Read references through the task root, preserving original pixels and order.
 // No network input or temporary reference files are created.
 func (f *Files) ReadImageReferences(ctx context.Context, task M, paths []any) ([]ImageReference, error) {
+	release, err := f.useWorkspace(task)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if len(paths) == 0 {
 		return nil, nil
 	}
@@ -332,6 +342,11 @@ func (f *Files) ReadImageReferences(ctx context.Context, task M, paths []any) ([
 }
 
 func (f *Files) List(task M) ([]any, error) {
+	release, err := f.useWorkspace(task)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	result := []any{}
 	if S(task["workspace"]) == "" || S(task["workspaceMode"]) == "none" {
 		return result, nil
@@ -383,6 +398,11 @@ func (f *Files) editable(task M) error {
 	return writableTaskWorkspace(task)
 }
 func (f *Files) Upload(task M, data M) (M, error) {
+	release, err := f.useWorkspace(task)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if e := f.editable(task); e != nil {
 		return nil, e
 	}
@@ -476,6 +496,11 @@ func (f *Files) Upload(task M, data M) (M, error) {
 	return attachment, nil
 }
 func (f *Files) attachments(task M, ids []string) ([]M, error) {
+	release, err := f.useWorkspace(task)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if len(ids) > 8 {
 		return nil, Problem(400, "attachment_limit", "每条消息最多 8 个附件，且不能重复")
 	}
@@ -511,6 +536,11 @@ func (f *Files) attachments(task M, ids []string) ([]M, error) {
 	return result, nil
 }
 func (f *Files) Prepare(task M, prompt string, ids []string) (M, []any, error) {
+	release, err := f.useWorkspace(task)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer release()
 	attachments, e := f.attachments(task, ids)
 	if e != nil {
 		return nil, nil, e
@@ -582,6 +612,11 @@ func (f *Files) canInspect(task M) bool {
 	return e == nil
 }
 func (f *Files) Serve(w http.ResponseWriter, r *http.Request, task M) error {
+	release, err := f.useWorkspace(task)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if r.URL.Query().Has("inspection") {
 		var images []InspectedAttachment
 		var e error
@@ -660,6 +695,11 @@ func (f *Files) Serve(w http.ResponseWriter, r *http.Request, task M) error {
 	return nil
 }
 func (f *Files) Save(task M, data M) error {
+	release, err := f.useWorkspace(task)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if e := f.editable(task); e != nil {
 		return e
 	}
@@ -702,6 +742,11 @@ func (f *Files) Save(task M, data M) error {
 // SaveGeneratedImages publishes originals and exact submitted prompts together.
 // Rollback removes only files exclusively created by this call.
 func (f *Files) SaveGeneratedImages(ctx context.Context, task M, images []GeneratedImage, prompt string) ([]M, error) {
+	release, err := f.useWorkspace(task)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if e := f.editable(task); e != nil {
 		return nil, e
 	}

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "server": {
     "listenHost": "127.0.0.1",
     "port": 8090,
@@ -214,5 +214,20 @@
     "requireDelivery": false
   },
   "providers": [],
-  "defaultModelId": ""
+  "defaultModelId": "",
+  "retention": {
+    "conversations": {
+      "autoArchive": true,
+      "inactiveDays": 30,
+      "autoDelete": false,
+      "archivedDays": 90
+    },
+    "temporaryRuns": {
+      "autoDelete": false,
+      "archivedDays": 30
+    },
+    "managedWorkspaces": {
+      "autoCleanup": false
+    }
+  }
 }

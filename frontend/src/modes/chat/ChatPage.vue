@@ -15,6 +15,7 @@ import NewConversationDialog from './components/NewConversationDialog.vue'
 import ForkConversationDialog from './components/ForkConversationDialog.vue'
 import RenameConversationDialog from './components/RenameConversationDialog.vue'
 import DeleteConversationDialog from './components/DeleteConversationDialog.vue'
+import RetentionStatus from './components/RetentionStatus.vue'
 import { useLightDismiss } from '../../shared/use-light-dismiss'
 import TaskFiles from './components/TaskFiles.vue'
 import EnterpriseWorkspace from '../../shared/enterprise-workspace/EnterpriseWorkspace.vue'
@@ -272,6 +273,7 @@ async function archiveTask(): Promise<void> { if (!liveWorkspace) return; try { 
             <span class="archive-title">{{ taskName(task.title) }}</span><span class="archive-action"><svg aria-hidden="true" viewBox="0 0 20 20"><path d="M4 8a6 6 0 1 1 0 5M4 3v5h5" /></svg>{{ restoringArchive === task.id ? '恢复中…' : '恢复' }}</span>
           </button>
           <button type="button" :aria-label="`删除 ${taskName(task.title)}`" @click="deleteTask = task">删除</button>
+          <RetentionStatus v-if="liveWorkspace" :task="task" :workspace="liveWorkspace" />
           </div>
         </div>
       </details>
@@ -321,6 +323,7 @@ async function archiveTask(): Promise<void> { if (!liveWorkspace) return; try { 
             <button class="mobile-header-item" type="button" @click="toggleEnterprise();sessionMenu&&(sessionMenu.open=false)"><RuncoveMark /><span>工作区</span></button>
             <button type="button" @click="copyLink(); sessionMenu && (sessionMenu.open = false)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m8 12 4-4 M7 13l-1 1a3 3 0 0 1-4-4l4-4a3 3 0 0 1 4 0 M13 7l1-1a3 3 0 0 1 4 4l-4 4a3 3 0 0 1-4 0" /></svg><span>复制对话链接</span></button><button v-if="taskInfo" type="button" @click="renameOpen = true; sessionMenu && (sessionMenu.open = false)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 3 5 5 M3 17l4-1L17 6a2 2 0 0 0-3-3L4 13Z" /></svg><span>重命名</span></button><button v-if="!taskInfo?.parentTaskId && taskInfo?.status === 'idle' && taskInfo.logicalCount" @click="forkTaskId = activeSession.id; sessionMenu && (sessionMenu.open = false)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 5v10 M6 10h5a3 3 0 0 0 3-3V5 M4 3h4v3H4Z M12 2h4v3h-4Z M4 15h4v3H4Z" /></svg><span>创建分支</span></button>
             <button v-if="!taskInfo?.parentTaskId && activeUiState.sessionStatus === 'idle'" type="button" data-testid="task-archive" @click="archiveTask"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 3h14v4H3Z M4 7v10h12V7 M8 10h4" /></svg><span>归档对话</span></button>
+            <RetentionStatus v-if="taskInfo && !taskInfo.parentTaskId && liveWorkspace" :task="taskInfo" :workspace="liveWorkspace" />
             <button v-if="taskInfo && !taskInfo.parentTaskId" type="button" data-testid="task-delete" @click="deleteTask = taskInfo; sessionMenu && (sessionMenu.open = false)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12 M8 3h4 M6 6l1 11h6l1-11" /></svg><span>删除对话</span></button>
             <button v-if="taskInfo?.queue.length" type="button" @click="liveWorkspace?.command(activeSession.id, 'clear-queue', {}); sessionMenu && (sessionMenu.open = false)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12 M8 3h4 M6 6l1 11h6l1-11" /></svg><span>清空队列</span></button>
             <button data-testid="diagnostics-open" type="button" :aria-pressed="diagnosticsOpen" @click="diagnosticsOpen = !diagnosticsOpen; sessionMenu && (sessionMenu.open = false); sessionMenu?.querySelector('summary')?.focus()"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 16V9 M8 16V4 M13 16v-6 M18 16V7" /></svg><span>运行详情</span></button>

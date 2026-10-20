@@ -141,7 +141,6 @@ func fixtureOperation(app *App, ctx context.Context, data M) (any, error) {
 			task := BaseTask(id, fmt.Sprintf("list-native-%d", i), fmt.Sprintf("历史会话 %04d", i), S(data["workspace"]), "root", "agent")
 			task["createdAt"] = time.Date(2025, 1, 1, 0, 0, i, 0, time.UTC).Format(time.RFC3339Nano)
 			manager.tasks[id] = task
-			manager.taskOrder[id] = len(manager.taskOrder)
 			if _, e := manager.appendLocked(task, M{"role": "assistant", "turnId": "history", "blocks": []any{M{"id": "old", "type": "markdown", "data": M{"markdown": "历史内容"}}}}); e != nil {
 				return nil, e
 			}
@@ -245,9 +244,6 @@ func fixtureOperation(app *App, ctx context.Context, data M) (any, error) {
 		manager.mu.Lock()
 		defer manager.mu.Unlock()
 		manager.tasks[S(task["id"])] = Clone(task)
-		if _, ok := manager.taskOrder[S(task["id"])]; !ok {
-			manager.taskOrder[S(task["id"])] = len(manager.taskOrder)
-		}
 		return nil, app.Store.SaveTask(task)
 	case "saveMessage":
 		return nil, app.Store.SaveMessage(id, O(data["message"]))

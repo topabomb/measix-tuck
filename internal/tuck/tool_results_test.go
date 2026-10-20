@@ -194,7 +194,7 @@ func TestInspectionPresentationForkAmbiguity(t *testing.T) {
 	appendCall := func(data M) {
 		manager.mu.Lock()
 		defer manager.mu.Unlock()
-		_, e := manager.appendLocked(manager.tasks[id], M{"role": "assistant", "blocks": []any{newBlock("call:"+ID(), "tool-call", data)}})
+		_, e := manager.appendLocked(fixtureTaskLocked(manager, id), M{"role": "assistant", "blocks": []any{newBlock("call:"+ID(), "tool-call", data)}})
 		if e != nil {
 			t.Fatal(e)
 		}

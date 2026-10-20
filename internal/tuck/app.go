@@ -17,29 +17,32 @@ import (
 )
 
 type App struct {
-	Config            *Config
-	Store             *Store
-	Engine            *Engine
-	Manager           *Manager
-	Models            *Models
-	Platform          *Platform
-	Security          *Security
-	Protection        *SettingsProtection
-	Files             *Files
-	Delivery          *Deliveries
-	Local             *LocalTools
-	Workspace         *EnterpriseWorkspace
-	Updates           *EngineUpdates
-	Server            *http.Server
-	URL               string
-	listener          net.Listener
-	changeMu          sync.Mutex
-	changing, closing atomic.Bool
-	closeOnce         sync.Once
-	closeErr          error
-	instanceLocks     []*os.File
-	ctx               context.Context
-	cancel            context.CancelFunc
+	Config             *Config
+	Store              *Store
+	Engine             *Engine
+	Manager            *Manager
+	Models             *Models
+	Platform           *Platform
+	Security           *Security
+	Protection         *SettingsProtection
+	Files              *Files
+	Delivery           *Deliveries
+	Local              *LocalTools
+	Workspace          *EnterpriseWorkspace
+	Updates            *EngineUpdates
+	Server             *http.Server
+	URL                string
+	listener           net.Listener
+	lifecycleMu        sync.Mutex
+	lifecycleWG        sync.WaitGroup
+	maintenanceStarted bool
+	changeMu           sync.Mutex
+	changing, closing  atomic.Bool
+	closeOnce          sync.Once
+	closeErr           error
+	instanceLocks      []*os.File
+	ctx                context.Context
+	cancel             context.CancelFunc
 }
 
 func NewApp(config *Config) (app *App, err error) {
@@ -136,6 +139,7 @@ func NewApp(config *Config) (app *App, err error) {
 		return nil, err
 	}
 	app.Local = NewLocalTools(app.Models, app.Manager, app.Files, app.Delivery)
+	app.Local.operation = app.lifecycleOperation
 	app.Delivery.Local = app.Local
 	app.Models.Local = app.Local
 	app.Workspace = NewEnterpriseWorkspace(app.Platform)
@@ -172,6 +176,7 @@ func (a *App) Start(ctx context.Context) error {
 	if e := a.Manager.RestoreChildStatistics(ctx); e != nil {
 		return e
 	}
+	a.startLifecycle()
 	return a.publishConnection()
 }
 func (a *App) publishConnection() error {
@@ -183,6 +188,17 @@ func (a *App) Close(ctx context.Context) error {
 		if a.cancel != nil {
 			a.cancel()
 		}
+		// Canceling request contexts does not unblock a ResponseWriter stalled
+		// on a slow client. Close transports before draining their operations.
+		if a.Server != nil {
+			a.closeErr = a.Server.Close()
+		}
+		if a.listener != nil {
+			_ = a.listener.Close()
+		}
+		a.lifecycleMu.Lock()
+		a.lifecycleMu.Unlock()
+		a.lifecycleWG.Wait()
 		if a.Workspace != nil {
 			a.Workspace.Close()
 		}
@@ -196,7 +212,9 @@ func (a *App) Close(ctx context.Context) error {
 			a.Models.cancel()
 		}
 		if a.Manager != nil {
-			a.closeErr = a.Manager.Close(ctx)
+			if e := a.Manager.Close(ctx); e != nil && a.closeErr == nil {
+				a.closeErr = e
+			}
 		}
 		if a.Local != nil {
 			a.Local.Close()
@@ -206,18 +224,6 @@ func (a *App) Close(ctx context.Context) error {
 		}
 		if a.Models != nil {
 			_ = a.Models.Close(ctx)
-		}
-		if a.Server != nil {
-			if e := a.Server.Close(); e != nil {
-				if a.closeErr == nil {
-					a.closeErr = e
-				}
-			}
-			if a.listener != nil {
-				_ = a.listener.Close()
-			}
-		} else if a.listener != nil {
-			a.listener.Close()
 		}
 		if a.Store != nil {
 			if e := a.Store.Close(); e != nil && a.closeErr == nil {
@@ -340,7 +346,7 @@ func (a *App) route(w http.ResponseWriter, r *http.Request) error {
 			return e
 		}
 		state := a.Engine.State()
-		WriteJSON(w, 200, Merge(state, M{"version": state["version"], "workspaceRoot": a.Config.WorkspaceRoot(), "connection": connection, "assistants": a.Manager.AssistantCatalog(), "orchestration": a.orchestration(), "deliveryToolAvailable": true}))
+		WriteJSON(w, 200, Merge(state, M{"version": state["version"], "workspaceRoot": a.Config.WorkspaceRoot(), "connection": connection, "assistants": a.Manager.AssistantCatalog(), "orchestration": a.orchestration(), "retentionRevision": Hash(JSON(a.Models.Config()["retention"])), "deliveryToolAvailable": true}))
 		return nil
 	}
 	if p == "/api/connection" && r.Method == "GET" {
@@ -363,12 +369,22 @@ func (a *App) route(w http.ResponseWriter, r *http.Request) error {
 		return a.Workspace.Handle(w, r.WithContext(ctx))
 	}
 	if p == "/api/tasks" {
+		op, finish, err := a.lifecycleOperation(r.Context())
+		if err != nil {
+			return err
+		}
+		defer finish()
+		r = r.WithContext(op)
 		if r.Method == "GET" {
 			cursor, e := a.Store.Cursor()
 			if e != nil {
 				return e
 			}
-			WriteJSON(w, 200, M{"cursor": cursor, "tasks": a.Manager.List()})
+			tasks, err := a.Manager.Snapshots()
+			if err != nil {
+				return err
+			}
+			WriteJSON(w, 200, M{"cursor": cursor, "tasks": tasks})
 			return nil
 		}
 		if r.Method == "POST" {
@@ -396,6 +412,12 @@ func (a *App) route(w http.ResponseWriter, r *http.Request) error {
 	return a.static(w, r)
 }
 func (a *App) taskRoute(w http.ResponseWriter, r *http.Request) error {
+	op, finish, err := a.lifecycleOperation(r.Context())
+	if err != nil {
+		return err
+	}
+	defer finish()
+	r = r.WithContext(op)
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/tasks/"), "/")
 	id := parts[0]
 	action := strings.Join(parts[1:], "/")
@@ -409,9 +431,24 @@ func (a *App) taskRoute(w http.ResponseWriter, r *http.Request) error {
 			return e
 		}
 	}
+	if Contains([]string{"files", "upload", "save-file", "deliveries"}, action) || strings.HasPrefix(action, "deliveries/") {
+		release, err := a.Manager.useTask(id)
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
 	task, e := a.Manager.Get(id)
 	if e != nil {
 		return e
+	}
+	if action == "retention" && r.Method == "GET" {
+		state, err := a.Manager.RetentionState(id, O(a.Models.Config()["retention"]), NowMS())
+		if err != nil {
+			return err
+		}
+		WriteJSON(w, 200, state)
+		return nil
 	}
 	send := func(status int, v any) error { WriteJSON(w, status, v); return nil }
 	if action == "" && r.Method == "GET" {
@@ -592,16 +629,12 @@ func (a *App) taskRoute(w http.ResponseWriter, r *http.Request) error {
 		if v["confirmed"] != true {
 			return Problem(400, "delete_confirmation_required", "请确认删除此对话及其子会话")
 		}
-		var deleted M
-		deleted, e = a.Manager.Delete(r.Context(), id)
-		if e == nil {
-			for _, key := range Strings(deleted["deletedTaskIds"]) {
-				if err := a.Delivery.cleanup(key); err != nil {
-					deleted["cleanupPending"] = true
-				}
-			}
-			out = deleted
+		out, e = a.deleteConversation(r.Context(), id, false, NowMS())
+	case "keep":
+		if !isBool(v["keep"]) {
+			return Problem(400, "invalid_keep", "保留标记必须为布尔值")
 		}
+		out, e = a.Manager.Keep(id, B(v["keep"]))
 	case "clear-queue":
 		_, e = a.Manager.UpdateQueue(r.Context(), id, M{"action": "clear"})
 		out = M{"cleared": true}

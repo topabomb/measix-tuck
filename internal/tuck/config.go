@@ -33,7 +33,7 @@ var tuckTools = func() []string {
 }()
 var runtimeFields = map[string][]string{"providers": {"providers", "defaultModelId", "modelDefaults", "platformModelSettings", "imageGenerators", "defaultImageGenerator", "defaultAttachmentInspectionModelId"}, "agents": {"agents", "workbench"}, "mcp": {"localMcp", "platformMcpTools"}}
 
-const configVersion = 3
+const configVersion = 4
 
 type Config struct {
 	mu                        sync.RWMutex
@@ -160,6 +160,9 @@ func (c *Config) RequireRuntimeCompatible(next M) error {
 	if string(JSON(startup(c.Applied()))) != string(JSON(startup(next))) {
 		return Problem(409, "restart_required", "监听、存储目录、登录凭据、加密密钥或引擎身份已在文件中改变；请停服并核对配置与数据后重新启动")
 	}
+	if string(JSON(c.Applied()["retention"])) != string(JSON(next["retention"])) {
+		return Problem(409, "retention_apply_required", "保留策略有未应用的文件修改，请先在归档与保留设置中预览并保存")
+	}
 	return nil
 }
 func stringField(v any, min, max int) bool {
@@ -220,11 +223,14 @@ func validBudget(v M, defaults M) bool {
 }
 func ValidateConfig(c M, paths bool) error {
 	fail := func(s string) error { return Problem(422, "invalid_config", s) }
-	if !noUnknown(c, "schemaVersion", "server", "storage", "engine", "security", "providers", "defaultModelId", "modelDefaults", "platformModelSettings", "agents", "permissions", "localMcp", "platformMcpTools", "workbench", "imageGenerators", "defaultImageGenerator", "defaultAttachmentInspectionModelId") {
+	if !noUnknown(c, "schemaVersion", "server", "storage", "engine", "security", "providers", "defaultModelId", "modelDefaults", "platformModelSettings", "agents", "permissions", "localMcp", "platformMcpTools", "workbench", "imageGenerators", "defaultImageGenerator", "defaultAttachmentInspectionModelId", "retention") {
 		return fail("配置包含未知字段")
 	}
 	if !Integer(c["schemaVersion"], configVersion, configVersion) {
-		return Problem(409, "config_version", "配置版本不受当前程序支持；正式 Go v1/v2 配置请停服后运行 tuck migrate --check")
+		return Problem(409, "config_version", "配置版本不受当前程序支持；正式 Go v1/v2/v3 配置请停服后运行 tuck migrate --check")
+	}
+	if err := validateRetention(c["retention"]); err != nil {
+		return err
 	}
 	server := O(c["server"])
 	if !noUnknown(server, "listenHost", "port", "frontendDir") || net.ParseIP(S(server["listenHost"])) == nil || !Integer(server["port"], 0, 65535) || !stringField(server["frontendDir"], 1, 4096) {

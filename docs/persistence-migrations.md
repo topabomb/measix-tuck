@@ -1,13 +1,13 @@
 # 持久化版本与迁移
 
-本文描述正式 Go 配置 v1 → v2 → v3、数据库 v1 → v2 → v3 迁移及后续维护约定。实现入口为 [migrations.go](../internal/tuck/migrations.go)，结构识别在 [storage_schema.go](../internal/tuck/storage_schema.go)，离线数据检查在 [persistence_check.go](../internal/tuck/persistence_check.go)。正常启动只接受当前版本或初始化空库，不在启动过程中升级已有数据。
+本文描述正式 Go 配置 v1 → v2 → v3 → v4、数据库 v1 → v2 → v3 → v4 迁移及后续维护约定。实现入口为 [migrations.go](../internal/tuck/migrations.go)，结构识别在 [storage_schema.go](../internal/tuck/storage_schema.go)，离线数据检查在 [persistence_check.go](../internal/tuck/persistence_check.go)。正常启动只接受当前版本或初始化空库，不在启动过程中升级已有数据。
 
 ## 所有权与版本
 
 | 持久内容 | 版本及事实来源 | 迁移与保留规则 |
 | --- | --- | --- |
-| 唯一配置 `tuck.config.json` | 顶层 `schemaVersion=3`，独立于数据库和程序版本 | 配置 owner 校验后原子替换；保留密码哈希、credentialKey、身份、路径、用户参数及合法原生扩展 |
-| Tuck `tuck.db` | `application_id=0x5455434b`、`user_version=3`，并核对完整实际 DDL | 编号 SQL 和必要的数据变换在一个事务内提交；不根据表名或版本数字猜来源 |
+| 唯一配置 `tuck.config.json` | 顶层 `schemaVersion=4`，独立于数据库和程序版本 | 配置 owner 校验后原子替换；保留密码哈希、credentialKey、身份、路径、用户参数及合法原生扩展 |
+| Tuck `tuck.db` | `application_id=0x5455434b`、`user_version=4`，并核对完整实际 DDL | 编号 SQL 和必要的数据变换在一个事务内提交；不根据表名或版本数字猜来源 |
 | tasks / messages / events 的 JSON | 由数据库版本统一管理；不在每个 DTO 再加一套版本 | 结构或语义变更必须写数据库迁移；规范化历史保留原值，短期事件缓存可重建 |
 | `task_deliveries.files_json` 与 `deliveries/snapshots/<task>/<delivery>/files/<file>` | 当前文件布局 v1；其解释由数据库版本管理 | 当前迁移不搬移或重写文件；保留交付 ID、版本、摘要、路径、大小和 SHA256 |
 | `platform_session` | `format_version=2` 独立标识平台密文格式；解密后的绑定形状由该格式管理 | 保留安装身份、绑定、凭据、快照、pendingRefresh 幂等键与 applied 回执；密钥丢失时拒绝，绝不生成新密钥覆盖旧身份 |
@@ -36,7 +36,9 @@
 
 数据库 2 → 3 在同一事务内，先按旧统计口径将非当前轮次的累计时长、数量和不完整标记写入 tasks.historyTiming，再用旧 user_message 事件确认尚未收束的补充消息；有唯一匹配回执才标为 delivered，其余为 unknown。只更新相关消息的回执元数据和展示标签，位置、修订号、正文及附件不变。然后执行 [003.sql](../internal/tuck/contract/storage/003.sql)，清空旧同步缓存、移除旧统计索引和生成列，保留 sqlite_sequence 高水位。零时间事件不猜日期，也不作为长期历史保留。旧事件不搬入第二个库；原始数据留在升级备份中。
 
-迁移不改变 pendingInteraction、队列、任务当前 turnTiming、usage、交付、认证或平台密文 v2。配置 v3 无需再升级。升级须同时发布配套前端，已经打开的旧版页面需要刷新；新版前端在游标过期时通过 reset 重新取得快照。正常启动仍只做既有恢复收束。事件日常保留策略与用途见 [存储设计](database-design.md)。首次释放的页可由 SQLite 复用；如需立即缩小文件，备份和校验后另行停服执行 Tuck 库的 VACUUM，在线程序不做全库重写。
+配置 3 → 4 增加[默认 retention 策略](configuration.md#归档与保留)，普通对话自动归档开启，永久删除和目录回收默认关闭。数据库 3 → 4 只追加 [004.sql](../internal/tuck/contract/storage/004.sql)：创建空 managed_workspaces 表，以及从任务 JSON 生成的目录引用、父子关系列和索引。v3 来源不再执行旧统计提取或清空 events；任务 JSON、消息、事件及游标保持。历史时间继续未知，旧目录不扫描、不纳管；对应策略首次检查才写观察起点。
+
+迁移不改变 pendingInteraction、队列、任务当前 turnTiming、usage、交付、认证或平台密文 v2。升级须同时发布配套前端，已经打开的旧版页面需要刷新；新版前端在游标过期时通过 reset 重新取得快照。正常启动先做既有恢复收束，再启动按已应用策略运行的维护。事件日常保留策略与用途见 [存储设计](database-design.md)。首次释放的页可由 SQLite 复用；如需立即缩小文件，备份和校验后另行停服执行 Tuck 库的 VACUUM，在线程序不做全库重写。
 
 任务、消息和单事件沿用 128 MiB 读取上限，MCP 目录沿用 4 MiB 上限，写入也使用同一上限。超限或序列化失败返回明确错误，不写入重启后无法读取的记录；任务/消息/事件的联合发布整体回滚，保留旧消息、任务和游标。Go 的 nil 工具切片规范化为空数组，仍与“没有缓存记录”区分。
 
@@ -55,13 +57,13 @@ tuck migrate --check --config /path/to/tuck.config.json
 tuck serve --config /path/to/tuck.config.json
 ```
 
-Windows 使用 `tuck.exe` 和实际 Windows 路径。`--check` 打开只读业务库，核对配置、DDL、quick_check、foreign_key_check、平台解密与安装身份、JSON/类型列一致性，以及所有已提交交付文件的类型、大小和 SHA256。检查文件流式读取，不把历史或文件整体载入内存。它不修复内容，也不清理孤儿；锁文件和 SQLite 必需的协调侧文件不属于业务变更。大量交付文件会增加离线检查时间。
+Windows 使用 `tuck.exe` 和实际 Windows 路径。`--check` 打开只读业务库，核对配置、DDL、quick_check、foreign_key_check、平台解密与安装身份、JSON/类型列一致性、v4 生命周期字段及目录归属/引用状态，以及所有已提交交付文件的类型、大小和 SHA256。检查文件流式读取，不把历史或文件整体载入内存。它不修复内容，也不清理孤儿；锁文件和 SQLite 必需的协调侧文件不属于业务变更。大量交付文件会增加离线检查时间。
 
 `--backup` 必须指定一个尚不存在、父目录已存在且位于 dataDir 之外的目录。先完成同样检查，再保存原配置字节、`VACUUM INTO` 一致 Tuck 库和 `manifest.json`；清单标明范围、源路径、源/目标版本和 SHA256。备份文件以 0600、目录以 0700 创建（Windows 仍受宿主 ACL 约束）。备份库通过结构与完整性检查，文件和目录同步后才开始迁移。备份失败不变更源格式；未生成完整 manifest 的目录视为不完整备份，不能覆盖复用。
 
 备份范围是 `migration-inputs`，不是完整部署备份：本次迁移只变更配置和 Tuck 库，工作文件、快照及原生资产不变。发布前仍需另外做下文规定的完整冷备份。已是当前版本时重复执行为无写入操作，不创建多余备份；不存在或真正空白的库留到首次启动初始化。
 
-数据库 DDL、平台密文和 user_version 同事务提交，失败整体回滚。之后再次比较配置原始字节，原子保存配置。配置与 SQLite 不能联合原子提交：断电或写配置失败可能留下“旧配置 + 数据库 v3”。这是一种可识别的中间状态；保留第一次备份，重新检查，再用另一个新备份目录续迁，只完成余下配置。反向组合“配置 v3 + 旧数据库”也可检查并仅迁移数据库。不得只手改版本数字绕过检查。
+数据库 DDL、平台密文和 user_version 同事务提交，失败整体回滚。之后再次比较配置原始字节，原子保存配置。配置与 SQLite 不能联合原子提交：断电或写配置失败可能留下“旧配置 + 数据库 v4”。这是一种可识别的中间状态；保留第一次备份，重新检查，再用另一个新备份目录续迁，只完成余下配置。反向组合“配置 v4 + 旧数据库”也可检查并仅迁移数据库。不得只手改版本数字绕过检查。
 
 ## 完整备份与回退
 
@@ -79,4 +81,4 @@ Windows 使用 `tuck.exe` 和实际 Windows 路径。`--check` 打开只读业�
 4. 未来文件布局变更须先复制到新布局、校验并同步，再事务切换数据库引用；旧文件在确认引用和回退边界后清理。不能原地搬走仍被已提交记录引用的文件。当前迁移没有文件布局变换。
 5. 覆盖空安装、每个支持的旧版和混合中间状态、重复执行、未知/未来格式、错误密钥、备份/DDL/配置保存失败、游标与交付保留、恢复后读取和进程占用。用真实发布基线夹具保留事实，不能只测试新建空库。
 
-回归入口见 [migrations_test.go](../internal/tuck/migrations_test.go) 和 [验证指南](verification.md)。v1 配置夹具使用冻结的[无凭据发布模板](../internal/tuck/testdata/config-v1.json)，业务库由冻结的 001.sql 构造；不从未来默认值反推旧配置。本机测试与冷备份恢复不能证明真实断电、坏盘或尚未部署的外部服务行为。
+回归入口见 [migrations_test.go](../internal/tuck/migrations_test.go)、[生命周期回归](../internal/tuck/resource_lifecycle_test.go) 和 [验证指南](verification.md)。旧配置使用冻结的 [v1 模板](../internal/tuck/testdata/config-v1.json)、[v3 模板](../internal/tuck/testdata/config-v3.json)，旧库由已发布编号 SQL 构造；不从未来默认值反推旧配置。本机测试与冷备份恢复不能证明真实断电、坏盘或尚未部署的外部服务行为。

@@ -42,6 +42,16 @@ node scripts/project.mjs e2e product-navigation.spec.ts mobile-chat.spec.ts comp
 
 表中的 Go 文件位于 [internal/tuck/](../internal/tuck/)。夹具 JavaScript 只合成外部服务并驱动 Go，不是另一个产品实现。存储变化还须核对 [迁移约定](persistence-migrations.md#后续修改约定) 的支持范围与失败边界。
 
+生命周期使用 `resource_lifecycle_test.go` 验证可注入时间下的到期、主子活动/保留/队列阻止、未知时间观察、恢复重新计时、策略重验、配置热应用及 CAS、v3 事件不重裁、托管目录共享/替换/链接/在途使用、失败责任恢复和关闭等待。`retention.spec.ts` 用官方引擎及合成模型验证确认/取消、保留、归档恢复、续聊、多窗口和 1365/390px；与删除回归一起检查历史和共享文件。Windows 不支持链接时的跳过不能代替 Linux 上实际运行。
+
+`TestMigrationV3OfficialHistoryResumeAndDelete` 用已发布 v3 DDL 和冻结配置构造旧业务库，经离线迁移后核对公开历史不变、同一原生会话恢复和续聊的实际模型输入，再验证统一删除及旧工作文件保留；只通过公开 API 操作官方引擎，不读取其 SQLite。
+
+空闲对象释放用 `TUCK_PERF=1 go test ./internal/tuck -run '^TestIdleTaskHeapRetention$' -count=1 -v -memprofile <本机临时路径>` 对比固定 64 条约 512 KiB payload 的按需读取和完整快照持有内存，并核对空闲缓存为空；列表快照和启动恢复的瞬时内存另计。race 与内存测量分开；还需通过增量计划、统计、审批、队列、原生停止及 MCP 生命周期回归，不能只用 map 长度证明资源已全部释放。
+
+`TestIdleTaskOperationsReleaseWithoutAnotherRead` 检查审批模式成功/失败、清空暂停队列、空闲停止、分支选项及审批响应与原生完成竞争后的释放，不用下一次读取触发清理掩盖收尾遗漏。
+
+`TestLifecycleCloseDrainsHTTPBeforeStore` 使用真实 TCP 连接及等待连接取消的 HTTP 处理函数，验证关闭先释放 HTTP 连接，等待处理函数退出后才关闭 Store。
+
 显式删除覆盖 `task_delete_test.go`、`conversation-delete.test.ts` 和 `conversation-delete.spec.ts`：主子会话范围、独立分支、暂停队列/审批/后台执行拦截、并发修改、原生失败与本地事务回滚后的重试、共享源文件与符号链接保护、删除事件及过期快照同步、迟到响应与默认会话缓存不能复活已删除对话、旧事件补读已删除历史后的快照恢复。浏览器使用官方引擎和合成模型，检查确认/取消、归档与任务频道入口、多窗口同步以及 1365/390px 布局；文件链接测试在支持符号链接的平台运行。
 
 ## 附件识别链路

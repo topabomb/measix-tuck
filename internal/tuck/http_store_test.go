@@ -290,7 +290,7 @@ func TestHTTPStaticAssetsAndMedia(t *testing.T) {
 	}
 	id := S(task["id"])
 	app.Manager.mu.Lock()
-	message, e := app.Manager.appendLocked(app.Manager.tasks[id], M{"role": "assistant", "blocks": []any{M{"id": "media", "type": "attachments", "data": M{"items": []any{M{"id": "image", "name": "pixel.png", "kind": "image", "mimeType": "image/png", "src": "data:image/png;base64," + "aGVsbG8="}}}}}})
+	message, e := app.Manager.appendLocked(fixtureTaskLocked(app.Manager, id), M{"role": "assistant", "blocks": []any{M{"id": "media", "type": "attachments", "data": M{"items": []any{M{"id": "image", "name": "pixel.png", "kind": "image", "mimeType": "image/png", "src": "data:image/png;base64," + "aGVsbG8="}}}}}})
 	app.Manager.mu.Unlock()
 	if e != nil {
 		t.Fatal(e)

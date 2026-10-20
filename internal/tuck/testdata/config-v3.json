@@ -1,0 +1,230 @@
+{
+  "schemaVersion": 3,
+  "server": {
+    "listenHost": "127.0.0.1",
+    "port": 8090,
+    "frontendDir": "frontend/dist"
+  },
+  "storage": {
+    "dataDir": "data",
+    "workspaceRoot": "data/workspaces"
+  },
+  "engine": {
+    "mode": "managed",
+    "version": "v1.150.0",
+    "binary": "",
+    "url": "http://127.0.0.1:8091",
+    "desktopProxy": false
+  },
+  "security": {
+    "auth": {
+      "enabled": false,
+      "username": "admin",
+      "passwordHash": ""
+    },
+    "settingsProtection": {
+      "categories": []
+    }
+  },
+  "modelDefaults": {
+    "contextWindow": 240640,
+    "maxOutputTokens": 32768
+  },
+  "agents": {
+    "root": {
+      "max_iterations": 500,
+      "sub_agents": [
+        "worker",
+        "reviewer"
+      ],
+      "toolsets": [
+        {
+          "type": "filesystem",
+          "allow_list": [
+            "."
+          ]
+        },
+        {
+          "type": "shell"
+        },
+        {
+          "type": "todo"
+        },
+        {
+          "type": "user_prompt"
+        },
+        {
+          "type": "background_agents"
+        }
+      ],
+      "description": "Released v3 migration fixture root",
+      "instruction": "Complete the user task using the permitted tools."
+    },
+    "worker": {
+      "max_iterations": 300,
+      "toolsets": [
+        {
+          "type": "filesystem",
+          "allow_list": [
+            "."
+          ]
+        },
+        {
+          "type": "shell"
+        },
+        {
+          "type": "todo"
+        }
+      ],
+      "description": "Released v3 migration fixture worker",
+      "instruction": "Complete the user task using the permitted tools."
+    },
+    "reviewer": {
+      "readonly": true,
+      "max_iterations": 200,
+      "toolsets": [
+        {
+          "type": "filesystem",
+          "allow_list": [
+            "."
+          ]
+        }
+      ],
+      "description": "Released v3 migration fixture reviewer",
+      "instruction": "Complete the user task using the permitted tools."
+    },
+    "video": {
+      "max_iterations": 500,
+      "sub_agents": [
+        "worker",
+        "reviewer"
+      ],
+      "toolsets": [
+        {
+          "type": "filesystem",
+          "allow_list": [
+            "."
+          ]
+        },
+        {
+          "type": "shell"
+        },
+        {
+          "type": "todo"
+        },
+        {
+          "type": "user_prompt"
+        },
+        {
+          "type": "background_agents"
+        }
+      ],
+      "description": "Released v3 migration fixture video",
+      "instruction": "Complete the user task using the permitted tools."
+    },
+    "image": {
+      "max_iterations": 500,
+      "sub_agents": [
+        "worker",
+        "reviewer"
+      ],
+      "toolsets": [
+        {
+          "type": "filesystem",
+          "allow_list": [
+            "."
+          ]
+        },
+        {
+          "type": "shell"
+        },
+        {
+          "type": "todo"
+        },
+        {
+          "type": "user_prompt"
+        },
+        {
+          "type": "background_agents"
+        }
+      ],
+      "description": "Released v3 migration fixture image",
+      "instruction": "Complete the user task using the permitted tools."
+    },
+    "publishing": {
+      "max_iterations": 500,
+      "sub_agents": [
+        "worker",
+        "reviewer"
+      ],
+      "toolsets": [
+        {
+          "type": "filesystem",
+          "allow_list": [
+            "."
+          ]
+        },
+        {
+          "type": "shell"
+        },
+        {
+          "type": "todo"
+        },
+        {
+          "type": "user_prompt"
+        },
+        {
+          "type": "background_agents"
+        }
+      ],
+      "description": "Released v3 migration fixture publishing",
+      "instruction": "Complete the user task using the permitted tools."
+    }
+  },
+  "permissions": {
+    "allow": [
+      "create_todo*",
+      "update_todos",
+      "list_todos",
+      "user_prompt",
+      "transfer_task",
+      "*_background_agent*",
+      "list_conversations",
+      "send_conversation_message"
+    ]
+  },
+  "localMcp": [],
+  "workbench": {
+    "defaultAgent": "root",
+    "assistants": [
+      {
+        "agent": "root",
+        "displayName": "通用助手",
+        "taskConcurrency": 2,
+        "description": "通用任务、资料整理与工作区操作"
+      },
+      {
+        "agent": "video",
+        "displayName": "视频创作",
+        "taskConcurrency": 2,
+        "description": "创意脚本、分镜、视频生成与成片检查"
+      },
+      {
+        "agent": "image",
+        "displayName": "图片创作",
+        "taskConcurrency": 2,
+        "description": "视觉构思、图片生成与编辑"
+      },
+      {
+        "agent": "publishing",
+        "displayName": "内容发布",
+        "taskConcurrency": 2,
+        "description": "平台文案、素材检查与发布执行"
+      }
+    ],
+    "deliveryRetentionCount": 10,
+    "requireDelivery": false
+  },
+  "providers": [],
+  "defaultModelId": ""
+}

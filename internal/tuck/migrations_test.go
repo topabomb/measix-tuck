@@ -148,6 +148,7 @@ func TestMigrationV1PreservesAllOwnedData(t *testing.T) {
 	}
 	want := Clone(config)
 	want["schemaVersion"] = configVersion
+	want["retention"] = defaultRetention()
 	O(want["permissions"])["allow"] = append(A(O(want["permissions"])["allow"]), "list_conversations", "send_conversation_message")
 	if !reflect.DeepEqual(current.Applied(), Clone(want)) {
 		t.Fatal("configuration values changed")
@@ -323,7 +324,7 @@ func TestMigrationTaskToolNamesPreservesPolicy(t *testing.T) {
 			if !bytes.Equal(before, JSON(source)) {
 				t.Fatal("migration mutated source")
 			}
-			if I(next["schemaVersion"]) != 3 || S(O(O(next["agents"])["root"])["instruction"]) != instruction {
+			if I(next["schemaVersion"]) != configVersion || S(O(O(next["agents"])["root"])["instruction"]) != instruction {
 				t.Fatal("wrong version or custom instruction changed")
 			}
 			wantDisabled := []any{"list_conversations", "send_conversation_message", "generate_images"}

@@ -611,7 +611,7 @@ func TestImageHistoryRepeatedCallIDs(t *testing.T) {
 		)
 	}
 	m.mu.Lock()
-	err := m.normalizer.importHistory(m.tasks[id], history)
+	err := m.normalizer.importHistory(fixtureTaskLocked(m, id), history)
 	m.mu.Unlock()
 	if err != nil {
 		t.Fatal(err)

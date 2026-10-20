@@ -20,7 +20,7 @@ async function remove() {
       <h2>删除对话？</h2>
       <p class="delete-title">{{ taskName(task.title) }}</p>
       <p>将永久删除此对话及其全部子会话的历史、统计和交付副本，无法撤销。</p>
-      <p>独立分支、工作目录、上传源文件及共享文件会保留。</p>
+      <p>独立分支、未纳管工作目录及仍被引用的共享文件会保留。开启目录回收后，已纳管且无引用的自动目录（包括上传源文件）可能一并清理。</p>
       <p v-if="error" role="alert">{{ error }}</p>
       <div class="dialog-actions"><button type="button" autofocus :disabled="busy" @click="emit('close')">取消</button><button type="submit" class="delete-confirm" :disabled="busy">{{ busy ? '删除中…' : '确认删除' }}</button></div>
     </form>

@@ -19,6 +19,8 @@ import { taskName, isChannelTask } from '../../../shared/task-channel.mjs'
 export type WorkSessionDescriptor = ConversationDescriptor & { age: string; agent?: string; taskChannel?: boolean }
 
 export interface DockerTask extends ConversationDescriptor {
+  lifecycle?: { purpose: string; keep: boolean; lastActivityAt: number; archivedAt: number; lastDeleteError?: string }
+  managedWorkspaceId?: string
   turnId?: string
   activity?: { phase: 'preparing' | 'processing' | 'reasoning' | 'responding' | 'tool' | 'compacting' | 'finishing'; detail?: string; startedAt: number; afterCompaction?: boolean } | null
   turnTiming?: { turnId: string; startedAt: number; observedAt: number; endedAt?: number; waitingMs: number; waitingSince?: number; incomplete?: boolean }
@@ -56,8 +58,8 @@ export interface AssistantSummaryInfo {
 }
 export const defaultAssistants: AssistantCatalog = { defaultAgent: 'root', items: [{ agent: 'root', displayName: '通用助手' }] }
 export interface OrchestrationInfo { requireDelivery:boolean; updatedAt:number }
-export interface RuntimeInfo { deliveryToolAvailable?:boolean; orchestration?:OrchestrationInfo; state: string; version: string; workspaceRoot: string; error: string | null; connection?: ConnectionInfo; assistants?: AssistantCatalog }
-type WorkbenchEvent = { seq: number; taskId: string; type: 'deleted' | 'created' | 'state' | 'message' | 'message-delta' | 'native' | 'connection' | 'orchestration'; deletedTaskIds?:string[]; orchestration?:OrchestrationInfo; task?: DockerTask; message?: LogicalMessage; delta?: MessageDelta; connection?: ConnectionInfo; assistants?: AssistantCatalog }
+export interface RuntimeInfo { retentionRevision?:string; deliveryToolAvailable?:boolean; orchestration?:OrchestrationInfo; state: string; version: string; workspaceRoot: string; error: string | null; connection?: ConnectionInfo; assistants?: AssistantCatalog }
+type WorkbenchEvent = { seq: number; taskId: string; type: 'deleted' | 'created' | 'state' | 'message' | 'message-delta' | 'native' | 'connection' | 'orchestration' | 'retention'; retentionRevision?:string; deletedTaskIds?:string[]; orchestration?:OrchestrationInfo; task?: DockerTask; message?: LogicalMessage; delta?: MessageDelta; connection?: ConnectionInfo; assistants?: AssistantCatalog }
 
 export async function api<T>(path: string, body?: unknown, signal?:AbortSignal): Promise<T> {
   const response = await authFetch(path, { method: body === undefined ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),signal })
@@ -240,6 +242,7 @@ export class DockerWorkspaceRuntime {
         if (update.type === 'orchestration' && update.orchestration && (!this.runtimeInfo.orchestration || update.orchestration.updatedAt>=this.runtimeInfo.orchestration.updatedAt)) this.runtimeInfo.orchestration=update.orchestration
         if (update.type === 'connection' && update.connection) this.runtimeInfo.connection = update.connection
         if (update.type === 'connection' && update.assistants) this.runtimeInfo.assistants = update.assistants
+        if (update.type === 'retention') this.runtimeInfo.retentionRevision=update.retentionRevision
         if (update.type === 'connection') this.taskRevision++
         if (update.type === 'created' && update.task && !this.#kernels.has(update.task.id)) await this.#register(update.task)
         const kernel = this.#kernels.get(update.taskId)
@@ -468,6 +471,7 @@ export class DockerWorkspaceRuntime {
     const accessGeneration=settingsAccess.generation
     const info = await api<RuntimeInfo>('/api/runtime')
     if(this.#disposed||accessGeneration!==settingsAccess.generation)return
+    this.runtimeInfo.retentionRevision = info.retentionRevision
     this.runtimeInfo.deliveryToolAvailable = info.deliveryToolAvailable
     if(info.orchestration && (!this.runtimeInfo.orchestration || info.orchestration.updatedAt>=this.runtimeInfo.orchestration.updatedAt))this.runtimeInfo.orchestration=info.orchestration
     this.runtimeInfo.connection = info.connection
@@ -505,7 +509,7 @@ export class DockerWorkspaceRuntime {
   async deleteSession(id: string): Promise<void> {
     const result = await api<{deletedTaskIds:string[];cleanupPending?:boolean}>(`/api/tasks/${encodeURIComponent(id)}/delete`,{confirmed:true})
     this.#removeSessions(result.deletedTaskIds)
-    if (result.cleanupPending) this.error = '对话已删除，部分交付副本暂未清理，服务下次启动时会继续清理。'
+    if (result.cleanupPending) this.error = '对话已删除，部分文件暂未回收。交付副本将在重启时复查，托管目录按当前回收策略继续处理。'
     this.#notifier.notifyNow()
   }
   async command(id: string, action: string, body: unknown): Promise<boolean> {

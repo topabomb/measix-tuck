@@ -145,7 +145,7 @@ func TestSteeringReceiptWriteFailureCanBeRetried(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.mu.Lock()
-	err = m.settleSteeringLocked(m.tasks[id])
+	err = m.settleSteeringLocked(fixtureTaskLocked(m, id))
 	m.mu.Unlock()
 	if err == nil || m.steering[id][0].status != "pending" {
 		t.Fatal("failed settlement was acknowledged in memory", err)
@@ -154,7 +154,7 @@ func TestSteeringReceiptWriteFailureCanBeRetried(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.mu.Lock()
-	err = m.settleSteeringLocked(m.tasks[id])
+	err = m.settleSteeringLocked(fixtureTaskLocked(m, id))
 	m.mu.Unlock()
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +204,7 @@ func TestStoreAutomaticallyPrunesExpiredReplayOnOpen(t *testing.T) {
 
 func TestNativeProgressCheckpointSurvivesRestartWithoutReplay(t *testing.T) {
 	m, s, _, id := taskFixture(t)
-	task := m.tasks[id]
+	task := fixtureTaskLocked(m, id)
 	task["status"], task["turnId"] = "working", "turn"
 	task["turnTiming"] = M{"turnId": "turn", "startedAt": 1, "observedAt": 1}
 	task["activity"] = M{"phase": "processing"}
@@ -302,7 +302,7 @@ func TestMigrationV2ExtractsFactsBeforeDroppingReplay(t *testing.T) {
 	if err := MigrateCommand(path, []string{"--check"}, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
-	if version, err := inspectDatabase(s.DB); err != nil || version != 3 {
+	if version, err := inspectDatabase(s.DB); err != nil || version != databaseVersion {
 		t.Fatal(version, err)
 	}
 	got, _ := s.Task(id)
@@ -336,7 +336,7 @@ func TestMigrationV2ExtractsFactsBeforeDroppingReplay(t *testing.T) {
 	if N(stats["previousMs"]) != 3000 || I(stats["toolCalls"]) != 1 {
 		t.Fatal(stats)
 	}
-	if err := migrateDatabase(s, config, 3); err != nil {
+	if err := migrateDatabase(s, config, databaseVersion); err != nil {
 		t.Fatal(err)
 	}
 	again, _ := s.Task(id)

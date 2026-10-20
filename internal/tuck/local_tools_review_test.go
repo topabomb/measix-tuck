@@ -176,7 +176,7 @@ func TestLocalMCPCatalogCookieTurnAndPeerLifecycle(t *testing.T) {
 func TestNoneWorkspaceRejectsTuckWrites(t *testing.T) {
 	f := newWorkspaceFixture(t)
 	l, turn := f.turn(t)
-	turn.Task = mustUpdate(t, l.Manager, turn.TaskID, M{"workspaceMode": "none"})
+	turn.Task = mustUpdate(t, l.Manager, turn.TaskID, M{"workspaceMode": "none", "managedWorkspaceId": nil})
 	path := filepath.Join(turn.Workspace, "existing.txt")
 	if e := os.WriteFile(path, []byte("keep"), 0600); e != nil {
 		t.Fatal(e)

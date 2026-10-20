@@ -101,7 +101,11 @@ func (d *Deliveries) recover() error {
 			_ = d.cleanup(task.Name())
 		}
 	}
-	for _, task := range d.Manager.List() {
+	snapshots, err := d.Manager.Snapshots()
+	if err != nil {
+		return err
+	}
+	for _, task := range snapshots {
 		if S(task["workspaceMode"]) != "none" {
 			if e = d.CheckWorkspace(S(task["workspace"])); e != nil {
 				return e
@@ -548,11 +552,15 @@ func (d *Deliveries) Submit(ctx context.Context, turn *toolTurn, args M) (result
 func (d *Deliveries) commit(ctx context.Context, turn *toolTurn, value M) (M, error) {
 	manager := d.Manager
 	manager.mu.Lock()
-	defer manager.mu.Unlock()
+	defer manager.unlock()
 	if e := ctx.Err(); e != nil {
 		return nil, e
 	}
-	task := Clone(manager.tasks[turn.TaskID])
+	current, loadErr := manager.getLocked(turn.TaskID)
+	if loadErr != nil {
+		return nil, loadErr
+	}
+	task := Clone(current)
 	if task == nil || manager.deleting[turn.TaskID] || S(task["turnId"]) != turn.TurnID || turn.ctx.Err() != nil {
 		return nil, Problem(409, "delivery_canceled", "Delivery context expired")
 	}

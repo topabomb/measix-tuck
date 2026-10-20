@@ -9,7 +9,7 @@ import (
 )
 
 const databaseID = 0x5455434b
-const databaseVersion = 3
+const databaseVersion = 4
 
 // Released SQL is immutable. New versions append a numbered step. The same
 // chain initializes a fresh store and upgrades an existing store.
@@ -22,6 +22,9 @@ var schemaV2 string
 
 //go:embed contract/storage/003.sql
 var schemaV3 string
+
+//go:embed contract/storage/004.sql
+var schemaV4 string
 
 var schemaShapes struct {
 	sync.Once
@@ -60,7 +63,7 @@ func expectedSchemas() (map[int]map[string]string, error) {
 		}
 		defer db.Close()
 		schemaShapes.values = map[int]map[string]string{}
-		for i, ddl := range []string{schemaV1, schemaV2, schemaV3} {
+		for i, ddl := range []string{schemaV1, schemaV2, schemaV3, schemaV4} {
 			if _, err = db.Exec(ddl); err == nil {
 				schemaShapes.values[i+1], err = readSchema(db)
 			}

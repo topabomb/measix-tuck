@@ -57,7 +57,10 @@ func NewStore(path string) (*Store, error) {
 			if _, e := tx.Exec(schemaV2); e != nil {
 				return e
 			}
-			_, e := tx.Exec(schemaV3)
+			if _, e := tx.Exec(schemaV3); e != nil {
+				return e
+			}
+			_, e := tx.Exec(schemaV4)
 			return e
 		}); err != nil {
 			return nil, err
@@ -163,6 +166,9 @@ func openDatabase(path, mode string) (*sql.DB, error) {
 }
 
 func saveTask(q executor, t M) error {
+	if err := validateLifecycle(t); err != nil {
+		return err
+	}
 	created, _ := time.Parse(time.RFC3339Nano, S(t["createdAt"]))
 	archived := 0
 	if B(t["archived"]) {
@@ -172,7 +178,10 @@ func saveTask(q executor, t M) error {
 	if err != nil {
 		return err
 	}
-	_, err = q.Exec("INSERT INTO tasks VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,archived=excluded.archived,native_session_id=excluded.native_session_id,payload_json=excluded.payload_json", S(t["id"]), created.UnixMilli(), S(t["status"]), archived, S(t["nativeSessionId"]), raw)
+	_, err = q.Exec("INSERT INTO tasks(id,created_at_ms,status,archived,native_session_id,payload_json) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,archived=excluded.archived,native_session_id=excluded.native_session_id,payload_json=excluded.payload_json", S(t["id"]), created.UnixMilli(), S(t["status"]), archived, S(t["nativeSessionId"]), raw)
+	if err == nil && S(t["managedWorkspaceId"]) != "" {
+		_, err = q.Exec("UPDATE managed_workspaces SET state='attached',last_error=CASE WHEN identity='' THEN last_error ELSE '' END WHERE id=?", S(t["managedWorkspaceId"]))
+	}
 	return err
 }
 func saveMessage(q executor, id string, m M) error {

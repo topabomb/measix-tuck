@@ -111,7 +111,7 @@ func (m *Manager) ResolveInteraction(ctx context.Context, id string, response M)
 	pending = Clone(pending)
 	m.resolving[id] = true
 	m.mu.Unlock()
-	defer func() { m.mu.Lock(); delete(m.resolving, id); m.mu.Unlock() }()
+	defer func() { m.mu.Lock(); delete(m.resolving, id); m.unlock() }()
 	path := nativePath(snapshot, "/resume")
 	body := M{"confirmation": "reject", "reason": modelContent.ApprovalRejectionReason()}
 	if kind == "approval" {
@@ -142,7 +142,7 @@ func (m *Manager) ResolveInteraction(ctx context.Context, id string, response M)
 		return err
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	defer m.unlock()
 	task = m.tasks[id]
 	if O(task["pendingInteraction"])["id"] != pending["id"] {
 		return nil
@@ -217,7 +217,7 @@ func (m *Manager) Steer(ctx context.Context, id, prompt string, ids []string, so
 	}
 	_, requestErr := m.options.Engine.Request(ctx, "POST", nativePath(snapshot, "/steer"), M{"messages": []M{native}})
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	defer m.unlock()
 	task = m.tasks[id]
 	if requestErr != nil && record.status != "delivered" {
 		m.forgetSteeringLocked(id, record)
@@ -382,7 +382,10 @@ func (m *Manager) ListConversations(args M) (M, error) {
 	if args["limit"] != nil {
 		limit = I(args["limit"])
 	}
-	tasks := m.List()
+	tasks, err := m.Snapshots()
+	if err != nil {
+		return nil, err
+	}
 	activity := func(task M) int64 {
 		created, _ := time.Parse(time.RFC3339Nano, S(task["createdAt"]))
 		timing := O(task["turnTiming"])

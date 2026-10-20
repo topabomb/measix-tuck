@@ -6,7 +6,7 @@
 
 | 分组 | 内容 |
 | --- | --- |
-| schemaVersion | 当前 3；正式 Go v1/v2 须显式离线迁移，拒绝未知格式与重复 JSON 键 |
+| schemaVersion | 当前 4；正式 Go v1/v2/v3 须显式离线迁移，拒绝未知格式与重复 JSON 键 |
 | server | listenHost、port、frontendDir；默认 127.0.0.1:8090、frontend/dist |
 | storage | dataDir、workspaceRoot；默认 data、data/workspaces |
 | engine | mode=managed/external、version、binary、url、desktopProxy；默认官方 v1.150.0、回环 8091 |
@@ -18,6 +18,7 @@
 | agents | 原生提示、模型、工具集、allow_list、readonly、子代理、执行上限及 Tuck/企业工具选择 |
 | permissions | 官方工具 allow/ask/deny 规则，生成引擎输入时保留 |
 | workbench | 主助手目录、默认助手、每助手工作目录/任务并发、requireDelivery、deliveryRetentionCount |
+| retention | 普通对话、临时记录的归档保留策略，以及新建自动目录纳管/回收开关 |
 | localMcp | 启用状态、HTTP(S) URL、直接凭据、助手范围、精确工具选择；不解析历史环境变量引用 |
 | platformModelSettings / platformMcpTools | 当前平台资源预算、temperature/topP 和工具选择；不能替换平台身份/许可 |
 
@@ -30,6 +31,36 @@
 文件布局、目录模式的读写边界、命名与交付副本见 [任务文件](task-files.md)。
 
 交付保留数为整数 0–100，默认 10，助手可覆盖。0 表示不保留历史版本，当前最新版本始终保留。只有成功提交新版本才裁剪旧记录。
+
+## 归档与保留
+
+设置 → 编排设置 → 归档与保留编辑同一个配置文件，受 orchestration 分类保护。默认值如下：
+
+```json
+"retention": {
+  "conversations": {
+    "autoArchive": true,
+    "inactiveDays": 30,
+    "autoDelete": false,
+    "archivedDays": 90
+  },
+  "temporaryRuns": {
+    "autoDelete": false,
+    "archivedDays": 30
+  },
+  "managedWorkspaces": {
+    "autoCleanup": false
+  }
+}
+```
+
+期限为 1–36500 的整数天，每天是连续 24 小时；开关只接受布尔值，0 不表示禁用。普通对话无活动到期后归档；三个删除/目录回收开关默认关闭。临时记录必须由业务明确登记用途，当前没有创建此类记录的调度 owner，不能据来源推断用途。`autoCleanup` 同时控制新自动目录纳管和已纳管目录回收；旧目录不追溯纳管，关闭后保留既有回收责任。目录没有独立过期时钟。
+
+30/90 天是 Tuck 的默认选择，不是行业统一期限。设计参考 [Coder 的休眠与删除分离](https://coder.com/docs/user-guides/workspace-scheduling#dormancy)、[Codespaces 的保留与到期提示](https://docs.github.com/en/codespaces/setting-your-user-preferences/configuring-automatic-deletion-of-your-codespaces)、[n8n 按执行用途裁剪](https://docs.n8n.io/hosting/scaling/execution-data/)及 [Docker 对持久卷的独立清理边界](https://docs.docker.com/reference/cli/docker/system/prune/)。
+
+保存只热应用 retention，不重启引擎、不终止会话，也不把其他待应用修改一并应用。预览绑定配置 revision 与拟议规则；启用永久删除、缩短已启用的删除保留期或开启目录回收必须确认，取消不写入。服务在执行每个候选前重验当前策略；保存不会同步批量删除。停服编辑同一配置在下次启动生效，仍遵守历史未知时间保护。
+
+关闭开关阻止新的对应删除，已取得准入的删除按原授权收束。永久删除会移除对话历史、原生续聊上下文及该对话统计，不是可恢复压缩；归档本身仍能恢复并继续最早历史，前提是原生会话和文件仍在。资格、时间与恢复规则唯一维护在[存储设计](database-design.md#归档、保留与自动维护)，目录边界见[任务文件](task-files.md#保留、交付与维护)。
 
 ## 文生图资源
 

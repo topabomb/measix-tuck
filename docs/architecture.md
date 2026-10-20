@@ -10,7 +10,7 @@ Tuck 提供单用户 Web 工作台：登录与配置、平台接入、任务队�
 
 | owner | 职责 |
 | --- | --- |
-| app/settings | HTTP 装配、认证和配置切换 |
+| app/settings/task_lifecycle | HTTP 装配、认证、配置切换，归档/删除协调与可取消维护 |
 | tasks/events/interactions/statistics | 任务、产品队列、规范化运行事实和交互 |
 | engine/engine_updates | 公开引擎进程与官方发行管理 |
 | platform/models/model_resources/mcp | 平台身份、资源访问、准入和企业工具合同 |
@@ -20,6 +20,10 @@ Tuck 提供单用户 Web 工作台：登录与配置、平台接入、任务队�
 | config/store/security | 配置、业务持久化和 Web 身份 |
 
 网络和文件复制不持有全局任务锁，每任务队列和交付串行。任务、消息、事件在 Store 短事务内联合发布，提交后唤醒浏览器。SSE 的可靠来源是持久化游标，不在每个订阅者中积累事件。DDL、事务及清理归 [存储设计](database-design.md)，离线升级归 [迁移约定](persistence-migrations.md)。
+
+全局保留规则只存 `tuck.config.json`，生命周期与目录归属事实只存 `tuck.db`。App 方法协调手动及自动删除；Manager 判定整个主子范围并阻止并发变更，Store 事务解除引用，Files 与 Deliveries 各自回收所属文件。一个启动后每日运行的可取消循环复用这些入口，不增加调度服务、通用资源中心或原生跟删轮询。关闭先停止 HTTP 准入并解除连接上的阻塞，取消并等待生命周期操作，再关闭依赖 owner；具体合同见[存储设计](database-design.md#归档、保留与自动维护)。
+
+Manager 持有执行、交互、队列、在途操作及其相关子树的完整对象；空闲任务完成操作后释放，历史访问从 Store 按需读取。列表和恢复可以产生暂时的完整快照，必要的排序/关系索引仍可驻留；不保存另一份历史缓存，也不以归档删除数据。计划的增量更新从持久 activePlan 恢复。释放引用允许 GC 回收，不能据此承诺 RSS 即时下降。
 
 ## 模型操作的目标架构与实施范围
 

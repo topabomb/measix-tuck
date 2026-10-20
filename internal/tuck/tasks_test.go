@@ -143,7 +143,7 @@ func TestNativeRecoveryAndMissingSession(t *testing.T) {
 	}
 	m, store, engine, root := taskFixture(t)
 	m.mu.Lock()
-	child, err := m.createChildLocked(m.tasks[root], UUID(), "worker", "background")
+	child, err := m.createChildLocked(fixtureTaskLocked(m, root), UUID(), "worker", "background")
 	if err != nil {
 		m.mu.Unlock()
 		t.Fatal(err)
@@ -190,7 +190,7 @@ func TestTaskIdentifiersRestart(t *testing.T) {
 		t.Fatal(task)
 	}
 	m.mu.Lock()
-	child, e := m.createChildLocked(m.tasks[id], "unchanged-native-child", "worker", "foreground")
+	child, e := m.createChildLocked(fixtureTaskLocked(m, id), "unchanged-native-child", "worker", "foreground")
 	m.mu.Unlock()
 	if e != nil || len(S(child["id"])) != 16 || child["nativeSessionId"] != "unchanged-native-child" {
 		t.Fatal(child, e)
@@ -652,7 +652,7 @@ func TestCompactionOwnershipAndActivity(t *testing.T) {
 	m, s, _, id := taskFixture(t)
 	root := mustUpdate(t, m, id, M{"status": "working", "context": M{"reported": true, "projectedTokens": 214668}})
 	m.mu.Lock()
-	child, e := m.createChildLocked(m.tasks[id], "child", "worker", "foreground")
+	child, e := m.createChildLocked(fixtureTaskLocked(m, id), "child", "worker", "foreground")
 	m.mu.Unlock()
 	if e != nil {
 		t.Fatal(e)

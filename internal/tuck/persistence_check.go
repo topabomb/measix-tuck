@@ -30,6 +30,11 @@ func checkPersistentData(db *sql.DB, data string, version int) error {
 			return err
 		}
 	}
+	if version >= 4 {
+		if err := checkLifecycleData(db); err != nil {
+			return err
+		}
+	}
 	rows, err := db.Query("SELECT task_id,id,file_count,total_bytes,files_json FROM task_deliveries ORDER BY task_id,version")
 	if err != nil {
 		return err
@@ -87,6 +92,52 @@ func checkPersistentData(db *sql.DB, data string, version int) error {
 		}
 		if size != total {
 			return Problem(409, "persistent_delivery", "交付字节总数与清单不一致")
+		}
+	}
+	return rows.Err()
+}
+
+func checkLifecycleData(db *sql.DB) error {
+	// Project only the new facts; large idle history is not an audit cache.
+	rows, err := db.Query(`SELECT json_object('lifecycle',json_extract(payload_json,'$.lifecycle'),'managedWorkspaceId',managed_workspace_id,'workspaceMode',json_extract(payload_json,'$.workspaceMode')) FROM tasks`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var raw string
+		if err = rows.Scan(&raw); err != nil {
+			break
+		}
+		var value any
+		value, err = DecodeJSON([]byte(raw), maxStoredJSON)
+		if err == nil {
+			err = validateLifecycle(O(value))
+		}
+		if err != nil {
+			break
+		}
+	}
+	readErr := rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	if readErr != nil {
+		return readErr
+	}
+	rows, err = db.Query(`SELECT id,root,path,state,EXISTS(SELECT 1 FROM tasks WHERE managed_workspace_id=managed_workspaces.id) FROM managed_workspaces`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, root, path, state string
+		var referenced bool
+		if err = rows.Scan(&id, &root, &path, &state, &referenced); err != nil {
+			return err
+		}
+		if !publicID.MatchString(id) || !filepath.IsAbs(root) || filepath.Clean(root) != root || path != filepath.Join(root, id) || (state == "attached") != referenced {
+			return Problem(409, "persistent_workspace", "托管目录归属或引用状态无效；保留文件并核对数据")
 		}
 	}
 	return rows.Err()

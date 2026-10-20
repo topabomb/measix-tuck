@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -54,10 +53,12 @@ type Manager struct {
 	mu                                sync.Mutex
 	options                           ManagerOptions
 	tasks                             map[string]M
-	taskOrder                         map[string]int
 	runs                              map[string]*taskRun
 	interactions                      map[string][]interaction
 	resolving, policyChanges, sending map[string]bool
+	workspaceUses                     map[string]int
+	taskUses                          map[string]int
+	workspaceDeleting                 map[string]bool
 	deleting                          map[string]bool
 	nativeChanges                     map[string]int
 	sendWait                          map[string]chan struct{}
@@ -77,14 +78,12 @@ func NewManager(o ManagerOptions) (*Manager, error) {
 	m.sendWait = map[string]chan struct{}{}
 	m.deleting = map[string]bool{}
 	m.nativeChanges = map[string]int{}
-	m.taskOrder = map[string]int{}
 	m.normalizer.init(m)
 	tasks, err := o.Store.Tasks()
 	if err != nil {
 		return nil, err
 	}
 	for _, task := range tasks {
-		m.taskOrder[S(task["id"])] = len(m.taskOrder)
 		m.tasks[S(task["id"])] = task
 		if S(task["workspaceMode"]) == "none" {
 			task["workspace"] = o.NativeDirectory
@@ -136,6 +135,7 @@ func NewManager(o ManagerOptions) (*Manager, error) {
 			}
 		}
 	}
+	m.releaseIdleLocked()
 	return m, nil
 }
 func (m *Manager) Config() M {
@@ -148,7 +148,11 @@ func (m *Manager) Config() M {
 // RestoreChildStatistics uses only the public recovery response and preserves
 // the readable Tuck history when an original native session is unavailable.
 func (m *Manager) RestoreChildStatistics(ctx context.Context) error {
-	for _, snapshot := range m.List() {
+	snapshots, err := m.Snapshots()
+	if err != nil {
+		return err
+	}
+	for _, snapshot := range snapshots {
 		if S(snapshot["parentTaskId"]) == "" || S(snapshot["mode"]) != "background" || S(snapshot["usageSource"]) == "live" {
 			continue
 		}
@@ -160,7 +164,11 @@ func (m *Manager) RestoreChildStatistics(ctx context.Context) error {
 			continue
 		}
 		m.mu.Lock()
-		task := m.tasks[S(snapshot["id"])]
+		task, loadErr := m.getLocked(S(snapshot["id"]))
+		if loadErr != nil {
+			m.mu.Unlock()
+			return loadErr
+		}
 		if task != nil && S(task["usageSource"]) != "live" {
 			err = m.normalizer.restoreToolMetadata(task, A(recovery["messages"]))
 			if err == nil {
@@ -170,7 +178,7 @@ func (m *Manager) RestoreChildStatistics(ctx context.Context) error {
 				err = m.publishLocked(task, M{"type": "state", "task": task}, nil)
 			}
 		}
-		m.mu.Unlock()
+		m.unlock()
 		if err != nil {
 			return err
 		}
@@ -186,31 +194,29 @@ func (m *Manager) getLocked(id string) (M, error) {
 	}
 	t := m.tasks[id]
 	if t == nil {
+		var err error
+		t, err = m.options.Store.Task(id)
+		if err != nil {
+			return nil, err
+		}
+		if t != nil {
+			m.tasks[id] = t
+		}
+	}
+	if t == nil {
 		return nil, Problem(404, "task_not_found", "Task not found")
 	}
 	return t, nil
 }
 func (m *Manager) Get(id string) (M, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	defer m.unlock()
 	t, e := m.getLocked(id)
 	return Clone(t), e
 }
-func (m *Manager) List() []M {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	r := make([]M, 0, len(m.tasks))
-	for _, t := range m.tasks {
-		r = append(r, Clone(t))
-	}
-	sort.Slice(r, func(i, j int) bool {
-		return m.taskOrder[S(r[i]["id"])] < m.taskOrder[S(r[j]["id"])]
-	})
-	return r
-}
 func (m *Manager) Update(id string, fn func(M) error) (M, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	defer m.unlock()
 	task, err := m.getLocked(id)
 	if err != nil {
 		return nil, err
@@ -227,7 +233,7 @@ func (m *Manager) Update(id string, fn func(M) error) (M, error) {
 }
 func (m *Manager) Subscribe() (<-chan struct{}, func()) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	defer m.unlock()
 	ch := make(chan struct{}, 1)
 	m.listeners[ch] = struct{}{}
 	return ch, func() { m.mu.Lock(); delete(m.listeners, ch); m.mu.Unlock() }
@@ -242,7 +248,7 @@ func (m *Manager) notifyLocked() {
 }
 func (m *Manager) PublishGlobal(event M) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	defer m.unlock()
 	_, err := m.options.Store.Publish(nil, nil, event)
 	if err == nil {
 		m.notifyLocked()
@@ -251,19 +257,15 @@ func (m *Manager) PublishGlobal(event M) error {
 }
 func (m *Manager) publishLocked(task, event, message M) error {
 	ObserveTurnTiming(task, NowMS())
+	if message != nil || S(task["status"]) != "idle" {
+		activity(task, NowMS())
+	}
 	_, err := m.options.Store.Publish(task, message, event)
 	if err != nil {
 		if previous, e := m.options.Store.Task(S(task["id"])); e == nil {
 			m.tasks[S(task["id"])] = previous
 		}
 		return err
-	}
-	if _, ok := m.taskOrder[S(task["id"])]; !ok {
-		next := 0
-		for _, order := range m.taskOrder {
-			next = max(next, order+1)
-		}
-		m.taskOrder[S(task["id"])] = next
 	}
 	m.notifyLocked()
 	return nil
@@ -325,7 +327,7 @@ func (m *Manager) appendTextLocked(task, message M, blockID, field, delta string
 	return errors.New("text block missing")
 }
 func BaseTask(id, nativeID, title, workspace, agent, ref string) M {
-	return M{"id": id, "nativeSessionId": nativeID, "title": title, "workspace": workspace, "agent": agent, "agentRef": ref, "status": "idle", "logicalCount": 0, "queuedPrompts": 0, "queue": []any{}, "createdAt": NowISO(), "pendingInteraction": nil, "activePlan": nil, "lastTurnReason": nil, "lastFailure": nil, "modelCalls": 0, "usage": EmptyUsage(), "context": M{"projectedTokens": 0, "contextWindow": 0}, "turnCount": 0, "stepCount": 0, "activeAssistantIndex": nil, "artifacts": []any{}, "archived": false}
+	return M{"id": id, "nativeSessionId": nativeID, "title": title, "workspace": workspace, "agent": agent, "agentRef": ref, "status": "idle", "logicalCount": 0, "queuedPrompts": 0, "queue": []any{}, "createdAt": NowISO(), "pendingInteraction": nil, "activePlan": nil, "lastTurnReason": nil, "lastFailure": nil, "modelCalls": 0, "usage": EmptyUsage(), "context": M{"projectedTokens": 0, "contextWindow": 0}, "turnCount": 0, "stepCount": 0, "activeAssistantIndex": nil, "artifacts": []any{}, "archived": false, "lifecycle": M{"purpose": "conversation", "keep": false, "lastActivityAt": NowMS(), "archivedAt": 0}}
 }
 
 var channelTitle = regexp.MustCompile(`^T-([A-Za-z0-9_]{4}) · ([^\r\n]+)$`)
@@ -425,7 +427,7 @@ func promptText(prompt string, attachments bool) (string, error) {
 func nativePath(t M, suffix string) string {
 	return "/api/sessions/" + url.PathEscape(S(t["nativeSessionId"])) + suffix
 }
-func (m *Manager) Create(ctx context.Context, in M) (M, error) {
+func (m *Manager) Create(ctx context.Context, in M) (result M, resultErr error) {
 	m.mu.Lock()
 	blocked := m.changing || m.closed
 	revision := m.configurationRevision
@@ -489,8 +491,7 @@ func (m *Manager) Create(ctx context.Context, in M) (M, error) {
 	}
 	directory := m.options.NativeDirectory
 	if mode == "auto" {
-		directory = filepath.Join(m.options.WorkspaceRoot, id)
-		err = os.MkdirAll(directory, 0700)
+		directory, err = m.allocateWorkspace(id, B(O(O(m.Config()["retention"])["managedWorkspaces"])["autoCleanup"]))
 	} else if mode == "specified" {
 		directory = S(in["workspace"])
 		if directory == "" {
@@ -501,11 +502,23 @@ func (m *Manager) Create(ctx context.Context, in M) (M, error) {
 	if err != nil {
 		return nil, err
 	}
+	if mode == "auto" {
+		defer func() {
+			if resultErr != nil {
+				m.workspaceError(id, resultErr)
+			}
+		}()
+	}
 	if mode != "none" && m.options.CheckWorkspace != nil {
 		if err = m.options.CheckWorkspace(directory); err != nil {
 			return nil, err
 		}
 	}
+	releaseWorkspace, err := m.useWorkspace(M{"workspace": directory})
+	if err != nil {
+		return nil, err
+	}
+	defer releaseWorkspace()
 	title := S(in["title"])
 	if title == "" {
 		title = "新任务"
@@ -522,10 +535,13 @@ func (m *Manager) Create(ctx context.Context, in M) (M, error) {
 		return nil, err
 	}
 	task := BaseTask(id, S(native["id"]), title, directory, agent, m.options.AgentRef)
+	if mode == "auto" {
+		task["managedWorkspaceId"] = id
+	}
 	task = Merge(task, selected, M{"workspaceMode": mode, "assistantName": assistant["displayName"], "approvalMode": approval})
 	m.setContext(task)
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	defer m.unlock()
 	if m.changing || m.closed || m.configurationRevision != revision {
 		return nil, Problem(409, "configuration_changing", "配置已变化，请重新新建任务")
 	}
@@ -590,7 +606,7 @@ func (m *Manager) SelectModel(id string, modelID any, reasoning string) (M, erro
 		reasoning = "default"
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	defer m.unlock()
 	t, e := m.getLocked(id)
 	if e != nil {
 		return nil, e
@@ -641,7 +657,7 @@ func (m *Manager) Submit(id, prompt string, ids []string, expected any, source M
 		}
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	defer m.unlock()
 	task, err := m.getLocked(id)
 	if err != nil {
 		return nil, err
@@ -770,7 +786,7 @@ func (m *Manager) drain(ctx context.Context, id string, run *taskRun) {
 		if task := m.tasks[id]; task != nil && canContinue && ctx.Err() == nil && !m.changing && !m.closed && !B(task["queuePaused"]) && len(A(task["queue"])) > 0 {
 			m.startLocked(id)
 		}
-		m.mu.Unlock()
+		m.unlock()
 	}()
 	for ctx.Err() == nil {
 		if !m.waitSending(ctx, id) {
@@ -982,7 +998,7 @@ func (m *Manager) Abort(ctx context.Context, id string) error {
 	r := m.runs[id]
 	if r == nil {
 		err = m.publishLocked(t, M{"type": "state", "task": t}, nil)
-		m.mu.Unlock()
+		m.unlock()
 		return err
 	}
 	r.stopping = true
@@ -998,7 +1014,7 @@ func (m *Manager) Abort(ctx context.Context, id string) error {
 }
 func (m *Manager) Active() bool {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	defer m.unlock()
 	if len(m.runs) > 0 || len(m.deleting) > 0 || len(m.nativeChanges) > 0 {
 		return true
 	}
@@ -1009,10 +1025,10 @@ func (m *Manager) Active() bool {
 	}
 	return false
 }
-func (m *Manager) Running(id string) bool { m.mu.Lock(); defer m.mu.Unlock(); return m.runs[id] != nil }
+func (m *Manager) Running(id string) bool { m.mu.Lock(); defer m.unlock(); return m.runs[id] != nil }
 func (m *Manager) SetConfigurationChanging(v bool) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	defer m.unlock()
 	m.changing = v
 	if v {
 		m.configurationRevision++
@@ -1047,8 +1063,11 @@ func (m *Manager) refreshFiles(id string) {
 		return
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	task := m.tasks[id]
+	defer m.unlock()
+	task, err := m.getLocked(id)
+	if err != nil {
+		return
+	}
 	known := map[string]float64{}
 	for _, v := range A(task["artifacts"]) {
 		known[S(O(v)["path"])] = N(O(v)["modified"])
@@ -1089,7 +1108,7 @@ func (m *Manager) SetApprovalMode(ctx context.Context, id, mode string) (M, erro
 	m.policyChanges[id] = true
 	t := Clone(task)
 	m.mu.Unlock()
-	defer func() { m.mu.Lock(); delete(m.policyChanges, id); m.mu.Unlock() }()
+	defer func() { m.mu.Lock(); delete(m.policyChanges, id); m.unlock() }()
 	policy := "balanced"
 	if mode == "auto" {
 		policy = "autonomous"
@@ -1203,7 +1222,7 @@ func (m *Manager) UpdateQueue(ctx context.Context, id string, in M) (M, error) {
 	if e == nil && (action == "resume" || action == "send") && !B(task["queuePaused"]) {
 		m.startLocked(id)
 	}
-	m.mu.Unlock()
+	m.unlock()
 	return result, e
 }
 func (m *Manager) ForkOptions(ctx context.Context, id string) ([]M, error) {
@@ -1216,7 +1235,7 @@ func (m *Manager) ForkOptions(ctx context.Context, id string) ([]M, error) {
 		e = Problem(409, "task_active", "请等待当前执行结束后创建分支")
 	}
 	task := Clone(t)
-	m.mu.Unlock()
+	m.unlock()
 	if e != nil {
 		return nil, e
 	}
@@ -1284,12 +1303,12 @@ func (m *Manager) Fork(ctx context.Context, id string, index int) (M, error) {
 		}
 	}
 	task := BaseTask(ID(), S(native["id"]), title, S(parent["workspace"]), S(parent["agent"]), m.options.AgentRef)
-	for _, k := range []string{"model", "modelId", "modelSource", "modelName", "modelProtocol", "reasoningEffort", "approvalMode", "agentRef", "assistantName", "workspaceMode"} {
+	for _, k := range []string{"model", "modelId", "modelSource", "modelName", "modelProtocol", "reasoningEffort", "approvalMode", "agentRef", "assistantName", "workspaceMode", "managedWorkspaceId"} {
 		task[k] = parent[k]
 	}
 	task["forkedFrom"] = M{"id": id, "title": parent["title"], "userMessageIndex": index}
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	defer m.unlock()
 	if m.configurationRevision != revision || m.changing || m.closed {
 		return nil, Problem(409, "configuration_changing", "配置已变化，请重新创建分支")
 	}
@@ -1324,16 +1343,14 @@ func (m *Manager) Fork(ctx context.Context, id string, index int) (M, error) {
 	return M{"task": Clone(task), "draft": selected["prompt"]}, nil
 }
 func (m *Manager) Archive(id string, archived bool) (M, error) {
-	return m.Update(id, func(t M) error {
-		if S(t["status"]) != "idle" || m.runs[id] != nil {
-			return Problem(409, "task_active", "请先等待任务结束、停止任务或处理当前交互")
-		}
-		t["archived"] = archived
-		return nil
-	})
+	return m.setArchived(id, archived, false, NowMS())
 }
 func (m *Manager) createChildLocked(root M, nativeID, agent, mode string) (M, error) {
-	for _, t := range m.tasks {
+	tree, err := m.taskTreeLocked(root)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range tree {
 		if S(t["nativeSessionId"]) == nativeID {
 			return t, nil
 		}
@@ -1342,11 +1359,15 @@ func (m *Manager) createChildLocked(root M, nativeID, agent, mode string) (M, er
 	task["parentTaskId"] = root["id"]
 	task["mode"] = mode
 	task["workspaceMode"] = root["workspaceMode"]
+	if root["managedWorkspaceId"] != nil {
+		task["managedWorkspaceId"] = root["managedWorkspaceId"]
+	}
 	task["turnId"] = S(task["id"]) + ":turn-1"
 	m.tasks[S(task["id"])] = task
 	return task, m.publishLocked(task, M{"type": "created", "task": task}, nil)
 }
 func (m *Manager) settleLocked(task M, reason string, failure M) error {
+	activity(task, NowMS())
 	if err := m.interruptToolsLocked(task); err != nil {
 		return err
 	}

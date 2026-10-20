@@ -39,7 +39,7 @@ for(const width of [1365,390])test(`confirmed delete preserves independent fork 
     await page.getByTestId('session-menu').click()
     await page.getByTestId('task-delete').click()
     const dialog=page.getByRole('dialog',{name:'删除对话',exact:true})
-    await expect(dialog).toContainText('独立分支、工作目录、上传源文件及共享文件会保留')
+    await expect(dialog).toContainText('独立分支、未纳管工作目录及仍被引用的共享文件会保留')
     await expect(dialog.getByRole('button',{name:'取消',exact:true})).toBeFocused()
     await page.screenshot({path:info.outputPath(`delete-confirm-${width}.png`)})
     await dialog.getByRole('button',{name:'取消',exact:true}).click()

@@ -16,7 +16,7 @@ import (
 // SQL, product JSON and referenced file layout; platform format owns its cipher.
 func migrateConfiguration(v M) (M, error) {
 	if !Integer(v["schemaVersion"], 1, configVersion) {
-		return nil, Problem(409, "config_version", "只支持正式 Go v1/v2/v3 配置；未知或封存格式不能迁移")
+		return nil, Problem(409, "config_version", "只支持正式 Go v1/v2/v3/v4 配置；未知或封存格式不能迁移")
 	}
 	next := Clone(v)
 	if I(next["schemaVersion"]) == 1 {
@@ -57,6 +57,10 @@ func migrateConfiguration(v M) (M, error) {
 			}
 		}
 		next["schemaVersion"] = 3
+	}
+	if I(next["schemaVersion"]) == 3 {
+		next["retention"] = defaultRetention()
+		next["schemaVersion"] = 4
 	}
 	if err := ValidateConfig(next, false); err != nil {
 		return nil, err
@@ -140,10 +144,15 @@ func migrateDatabase(s *Store, config M, expected int) error {
 				}
 			}
 		}
-		if err = migrateEventFacts(tx); err != nil {
-			return err
+		if version < 3 {
+			if err = migrateEventFacts(tx); err != nil {
+				return err
+			}
+			if _, err = tx.Exec(schemaV3); err != nil {
+				return err
+			}
 		}
-		_, err = tx.Exec(schemaV3)
+		_, err = tx.Exec(schemaV4)
 		return err
 	})
 }

@@ -11,7 +11,7 @@ import (
 // This is an operation guard only; no deletion state is persisted.
 func (m *Manager) beginNativeChange(id string) (M, func(), error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	defer m.unlock()
 	task, err := m.getLocked(id)
 	if err != nil {
 		return nil, nil, err
@@ -19,7 +19,7 @@ func (m *Manager) beginNativeChange(id string) (M, func(), error) {
 	m.nativeChanges[id]++
 	return Clone(task), func() {
 		m.mu.Lock()
-		defer m.mu.Unlock()
+		defer m.unlock()
 		m.nativeChanges[id]--
 		if m.nativeChanges[id] == 0 {
 			delete(m.nativeChanges, id)
@@ -36,6 +36,10 @@ func nativeSessionMissing(err error) bool {
 // Delete removes only an explicitly selected root and its owned descendants.
 // Independent forks and all workspace/source files remain untouched.
 func (m *Manager) Delete(ctx context.Context, id string) (M, error) {
+	return m.deleteConversation(ctx, id, false, NowMS())
+}
+
+func (m *Manager) deleteConversation(ctx context.Context, id string, automatic bool, now int64) (out M, resultErr error) {
 	m.mu.Lock()
 	root, err := m.getLocked(id)
 	if err == nil && (m.changing || m.closed) {
@@ -48,21 +52,21 @@ func (m *Manager) Delete(ctx context.Context, id string) (M, error) {
 		m.mu.Unlock()
 		return nil, err
 	}
-	tasks := []M{Clone(root)}
-	selected := map[string]bool{id: true}
-	for i := 0; i < len(tasks); i++ {
-		for childID, task := range m.tasks {
-			if !selected[childID] && S(task["parentTaskId"]) == S(tasks[i]["id"]) {
-				selected[childID] = true
-				tasks = append(tasks, Clone(task))
-			}
-		}
+	tasks, err := m.taskTreeLocked(root)
+	if err != nil {
+		m.mu.Unlock()
+		return nil, err
+	}
+	selected := map[string]bool{}
+	for i, t := range tasks {
+		selected[S(t["id"])] = true
+		tasks[i] = Clone(t)
 	}
 	for _, task := range tasks {
 		key := S(task["id"])
 		busy := S(task["status"]) != "idle" || task["pendingInteraction"] != nil ||
 			len(A(task["queue"])) > 0 || I(task["queuedPrompts"]) > 0 ||
-			m.runs[key] != nil || len(m.interactions[key]) > 0 || m.resolving[key] ||
+			m.runs[key] != nil || m.taskUses[key] > 0 || len(m.interactions[key]) > 0 || m.resolving[key] ||
 			m.policyChanges[key] || m.sending[key] || m.deleting[key] || m.nativeChanges[key] > 0
 		for _, run := range A(task["backgroundRuns"]) {
 			busy = busy || S(O(run)["status"]) == "running"
@@ -72,16 +76,25 @@ func (m *Manager) Delete(ctx context.Context, id string) (M, error) {
 			return nil, Problem(409, "task_active", "请先结束主对话及子会话的执行、处理审批，并清空队列后再删除")
 		}
 	}
+	if automatic && S(m.retentionLocked(root, O(m.Config()["retention"]), now)["action"]) != "delete" {
+		m.mu.Unlock()
+		return nil, Problem(409, "retention_changed", "删除资格已变化")
+	}
 	for key := range selected {
 		m.deleting[key] = true
 	}
 	m.mu.Unlock()
 	defer func() {
 		m.mu.Lock()
+		if resultErr != nil && m.tasks[id] != nil {
+			t := m.tasks[id]
+			lifecycle(t)["lastDeleteError"] = lifecycleError(resultErr)
+			_ = m.publishLocked(t, M{"type": "state", "task": t}, nil)
+		}
 		for key := range selected {
 			delete(m.deleting, key)
 		}
-		m.mu.Unlock()
+		m.unlock()
 	}()
 
 	// Children first also releases their separately registered native runtimes.
@@ -111,14 +124,13 @@ func (m *Manager) Delete(ctx context.Context, id string) (M, error) {
 		ids = append(ids, S(task["id"]))
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	defer m.unlock()
 	result, err := m.options.Store.DeleteTasks(ctx, ids)
 	if err != nil {
 		return nil, Problem(500, "delete_commit_failed", "原生会话已删除，但本地提交失败；本地记录仍保留，请重试删除")
 	}
 	for key := range selected {
 		delete(m.tasks, key)
-		delete(m.taskOrder, key)
 		delete(m.interactions, key)
 		delete(m.steering, key)
 		delete(m.receipts, key)
@@ -156,6 +168,9 @@ func (s *Store) DeleteTasks(ctx context.Context, ids []string) (M, error) {
 			if _, e := tx.Exec("DELETE FROM tasks WHERE id=?", id); e != nil {
 				return e
 			}
+		}
+		if e := reconcileWorkspaceReferences(tx); e != nil {
+			return e
 		}
 		raw, e := storedJSON(event, maxStoredJSON)
 		if e != nil {

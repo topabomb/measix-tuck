@@ -92,34 +92,38 @@ func nativeCallKey(root M, event M) string {
 	// Provider call IDs are only unique within their execution, not globally.
 	return S(root["id"]) + "\x00" + S(event["agent_name"]) + "\x00" + id
 }
-func (n *normalizer) owner(root, event M) M {
+func (n *normalizer) owner(root, event M) (M, error) {
 	session := S(event["session_id"])
 	if session != "" {
-		for _, task := range n.m.tasks {
+		tree, err := n.m.taskTreeLocked(root)
+		if err != nil {
+			return nil, err
+		}
+		for _, task := range tree {
 			if S(task["nativeSessionId"]) == session {
-				return task
+				return task, nil
 			}
 		}
-		return root
+		return root, nil
 	}
 	if r := n.calls[nativeCallKey(root, event)]; r != nil {
 		if task := n.m.tasks[S(r["taskId"])]; task != nil {
-			return task
+			return task, nil
 		}
 	}
 	var candidate M
 	for _, child := range n.children {
 		if child["rootId"] == root["id"] && child["agent"] == event["agent_name"] {
 			if candidate != nil {
-				return root
+				return root, nil
 			}
 			candidate = n.m.tasks[S(child["id"])]
 		}
 	}
 	if candidate != nil {
-		return candidate
+		return candidate, nil
 	}
-	return root
+	return root, nil
 }
 func (n *normalizer) assistant(task, event M) (M, error) {
 	messageID := S(event["message_id"])
@@ -157,12 +161,21 @@ func (m *Manager) HandleEvent(rootID string, event M) error {
 	kind := S(event["type"])
 	if kind == "tool_call" || kind == "tool_call_confirmation" || kind == "tool_call_response" {
 		m.mu.Lock()
-		root := m.tasks[rootID]
+		root, loadErr := m.getLocked(rootID)
+		if loadErr != nil {
+			m.mu.Unlock()
+			return loadErr
+		}
 		if root == nil {
 			m.mu.Unlock()
 			return Problem(404, "task_not_found", "Task not found")
 		}
-		task := Clone(m.normalizer.owner(root, event))
+		owner, err := m.normalizer.owner(root, event)
+		if err != nil {
+			m.mu.Unlock()
+			return err
+		}
+		task := Clone(owner)
 		call := O(event["tool_call"])
 		name := S(O(call["function"])["name"])
 		input := O(parseValue(O(call["function"])["arguments"]))
@@ -238,7 +251,10 @@ func (n *normalizer) handle(root, event M, observed *string) error {
 			return err
 		}
 	}
-	task := n.owner(root, event)
+	task, ownerErr := n.owner(root, event)
+	if ownerErr != nil {
+		return ownerErr
+	}
 	if kind == "user_message" {
 		if err := m.confirmSteeringLocked(task, event); err != nil {
 			return err
@@ -750,6 +766,9 @@ func (n *normalizer) finishAssistant(task M, reason string) error {
 }
 func (n *normalizer) plan(task M, name string, input M, output any) error {
 	todos := n.todos[S(task["id"])]
+	if todos == nil {
+		todos = A(Clone(O(task["activePlan"]))["items"])
+	}
 	decoded := parseValue(output)
 	object := O(decoded)
 	switch {
@@ -813,7 +832,11 @@ func (n *normalizer) plan(task M, name string, input M, output any) error {
 }
 func (n *normalizer) delegation(root M) error {
 	runs := []any{}
-	for _, child := range n.m.tasks {
+	tree, err := n.m.taskTreeLocked(root)
+	if err != nil {
+		return err
+	}
+	for _, child := range tree {
 		if child["parentTaskId"] != root["id"] {
 			continue
 		}

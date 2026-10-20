@@ -425,7 +425,7 @@ func BuiltinTools(ctx context.Context, binary, kind string) ([]M, error) {
 		}
 		agents[name] = M{"model": "check", "toolsets": []any{tool}}
 	}
-	raw, _ := yaml.Marshal(M{"version": "15", "models": M{"check": M{"provider": "openai", "model": "check", "base_url": "http://127.0.0.1:1"}}, "agents": agents})
+	raw, _ := yaml.Marshal(M{"version": "16", "models": M{"check": M{"provider": "openai", "model": "check", "base_url": "http://127.0.0.1:1"}}, "agents": agents})
 	file := filepath.Join(directory, "inspect.yaml")
 	if e = os.WriteFile(file, raw, 0600); e != nil {
 		return nil, e

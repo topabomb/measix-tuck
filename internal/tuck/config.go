@@ -33,7 +33,7 @@ var tuckTools = func() []string {
 }()
 var runtimeFields = map[string][]string{"providers": {"providers", "defaultModelId", "modelDefaults", "platformModelSettings", "imageGenerators", "defaultImageGenerator", "defaultAttachmentInspectionModelId"}, "agents": {"agents", "workbench"}, "mcp": {"localMcp", "platformMcpTools"}}
 
-const configVersion = 2
+const configVersion = 3
 
 type Config struct {
 	mu                        sync.RWMutex
@@ -224,7 +224,7 @@ func ValidateConfig(c M, paths bool) error {
 		return fail("配置包含未知字段")
 	}
 	if !Integer(c["schemaVersion"], configVersion, configVersion) {
-		return Problem(409, "config_version", "配置版本不受当前程序支持；正式 Go v1 配置请停服后运行 tuck migrate --check")
+		return Problem(409, "config_version", "配置版本不受当前程序支持；正式 Go v1/v2 配置请停服后运行 tuck migrate --check")
 	}
 	server := O(c["server"])
 	if !noUnknown(server, "listenHost", "port", "frontendDir") || net.ParseIP(S(server["listenHost"])) == nil || !Integer(server["port"], 0, 65535) || !stringField(server["frontendDir"], 1, 4096) {

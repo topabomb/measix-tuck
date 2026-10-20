@@ -216,7 +216,7 @@ func (m *Manager) Steer(ctx context.Context, id, prompt string, ids []string, so
 	m.mu.Unlock()
 	submissionError := func(err error) error {
 		if S(source["kind"]) == "collaboration" {
-			return Problem(Status(err), "session_message_unconfirmed", "跨会话消息提交结果未确认")
+			return Problem(Status(err), "conversation_message_unconfirmed", "跨会话消息提交结果未确认")
 		}
 		return err
 	}
@@ -446,8 +446,8 @@ func (m *Manager) restoreSteeringLocked() error {
 	return nil
 }
 
-// ListSessions returns product facts. Model field selection belongs to modelContent.
-func (m *Manager) ListSessions(args M) (M, error) {
+// ListConversations returns product facts. Model field selection belongs to modelContent.
+func (m *Manager) ListConversations(args M) (M, error) {
 	limit := 10
 	if !noUnknown(args, "limit") || args["limit"] != nil && !Integer(args["limit"], 1, 100) {
 		return nil, Problem(400, "invalid_arguments", "列表数量必须是 1–100 的整数")
@@ -462,7 +462,7 @@ func (m *Manager) ListSessions(args M) (M, error) {
 		return max(created.UnixMilli(), int64(N(timing["startedAt"])), int64(N(timing["endedAt"])))
 	}
 	sort.SliceStable(tasks, func(i, j int) bool { return activity(tasks[i]) > activity(tasks[j]) })
-	sessions := []any{}
+	conversations := []any{}
 	catalog := A(m.AssistantCatalog()["items"])
 	for _, task := range tasks {
 		if B(task["archived"]) || S(task["parentTaskId"]) != "" {
@@ -474,18 +474,18 @@ func (m *Manager) ListSessions(args M) (M, error) {
 				name = S(O(v)["displayName"])
 			}
 		}
-		sessions = append(sessions, M{"task_id": task["id"], "title": task["title"], "assistant_name": name, "status": task["status"], "pending_interaction": O(task["pendingInteraction"])["kind"]})
-		if len(sessions) == limit {
+		conversations = append(conversations, M{"conversation_id": task["id"], "title": task["title"], "assistant_name": name, "status": task["status"], "pending_interaction": O(task["pendingInteraction"])["kind"]})
+		if len(conversations) == limit {
 			break
 		}
 	}
-	return M{"status": "completed", "sessions": sessions}, nil
+	return M{"status": "completed", "conversations": conversations}, nil
 }
-func (m *Manager) SendSessionMessage(ctx context.Context, args M) (M, error) {
-	if !noUnknown(args, "target_task_id", "message") || !stringField(args["target_task_id"], 1, 1024) || !stringField(args["message"], 1, 100000) || strings.TrimSpace(S(args["message"])) == "" {
+func (m *Manager) SendConversationMessage(ctx context.Context, args M) (M, error) {
+	if !noUnknown(args, "target_conversation_id", "message") || !stringField(args["target_conversation_id"], 1, 1024) || !stringField(args["message"], 1, 100000) || strings.TrimSpace(S(args["message"])) == "" {
 		return nil, Problem(400, "invalid_message", "目标及消息无效")
 	}
-	task, e := m.Get(strings.TrimSpace(S(args["target_task_id"])))
+	task, e := m.Get(strings.TrimSpace(S(args["target_conversation_id"])))
 	if e != nil {
 		return nil, e
 	}

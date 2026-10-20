@@ -83,7 +83,7 @@ func officialFixture(t *testing.T, iterations int) *nativeFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	definitions := modelContent.Tools([]string{"list_sessions", "send_session_message"}, nil)
+	definitions := modelContent.Tools([]string{"list_conversations", "send_conversation_message"}, nil)
 	server := mcp.NewServer(&mcp.Implementation{Name: "native-fixture", Version: "1"}, &mcp.ServerOptions{Instructions: modelContent.Instructions(definitions)})
 	for _, definition := range definitions {
 		name := S(definition["name"])
@@ -94,10 +94,10 @@ func officialFixture(t *testing.T, iterations int) *nativeFixture {
 			}
 			var result M
 			var err error
-			if name == "list_sessions" {
-				result, err = f.manager.ListSessions(args)
+			if name == "list_conversations" {
+				result, err = f.manager.ListConversations(args)
 			} else {
-				result, err = f.manager.SendSessionMessage(ctx, args)
+				result, err = f.manager.SendConversationMessage(ctx, args)
 			}
 			if err != nil {
 				return modelContent.MCPResult(modelContent.Error(err)), nil
@@ -109,7 +109,7 @@ func officialFixture(t *testing.T, iterations int) *nativeFixture {
 	t.Cleanup(tools.Close)
 	toolsList := []any{M{"type": "filesystem", "allow_list": []any{"."}}, M{"type": "todo"}, M{"type": "shell"}, M{"type": "user_prompt"}, M{"type": "background_agents"}, M{"type": "mcp", "allow_private_ips": true, "remote": M{"url": tools.URL, "transport_type": "streamable-http"}}}
 
-	config := M{"version": 15, "providers": M{"fixture": M{"api_type": "openai_chatcompletions", "base_url": provider.URL + "/v1", "token_key": "TUCK_NATIVE_TEST_TOKEN"}}, "models": M{"test": M{"provider": "fixture", "model": "gpt-4o-mini", "capabilities": M{"image": true}}}, "agents": M{"root": M{"model": "test", "instruction": "Follow the requested fixture task.", "max_iterations": iterations, "sub_agents": []any{"worker"}, "toolsets": toolsList}, "worker": M{"model": "test", "instruction": "CHILD_ONLY independent reviewer.", "toolsets": []any{M{"type": "user_prompt"}}}}, "permissions": M{"allow": []any{"create_todos", "update_todos", "user_prompt", "transfer_task", "*_background_agent*", "list_sessions", "send_session_message"}, "ask": []any{"write_file", "shell"}}}
+	config := M{"version": 16, "providers": M{"fixture": M{"api_type": "openai_chatcompletions", "base_url": provider.URL + "/v1", "token_key": "TUCK_NATIVE_TEST_TOKEN"}}, "models": M{"test": M{"provider": "fixture", "model": "gpt-4o-mini", "capabilities": M{"image": true}}}, "agents": M{"root": M{"model": "test", "instruction": "Follow the requested fixture task.", "max_iterations": iterations, "sub_agents": []any{"worker"}, "toolsets": toolsList}, "worker": M{"model": "test", "instruction": "CHILD_ONLY independent reviewer.", "toolsets": []any{M{"type": "user_prompt"}}}}, "permissions": M{"allow": []any{"create_todos", "update_todos", "user_prompt", "transfer_task", "*_background_agent*", "list_conversations", "send_conversation_message"}, "ask": []any{"write_file", "shell"}}}
 	raw, err := yaml.Marshal(config)
 	if err != nil {
 		t.Fatal(err)
@@ -288,14 +288,14 @@ func (f *nativeFixture) respond(w http.ResponseWriter, r *http.Request) {
 			calls = append(calls, tool("wait_background_agents", M{"task_ids": []any{id}, "timeout": 5}))
 		}
 	case strings.Contains(prompt, "CROSS_SESSION_"):
-		if !done["list_sessions"] {
-			calls = append(calls, tool("list_sessions", M{}))
-		} else if !done["send_session_message"] {
+		if !done["list_conversations"] {
+			calls = append(calls, tool("list_conversations", M{}))
+		} else if !done["send_conversation_message"] {
 			id := ""
 			for _, o := range outputs {
-				for _, v := range A(O(parseValue(o["content"]))["sessions"]) {
+				for _, v := range A(O(parseValue(o["content"]))["conversations"]) {
 					if S(O(v)["title"]) == "消息接收方" {
-						id = S(O(v)["task_id"])
+						id = S(O(v)["conversation_id"])
 					}
 				}
 			}
@@ -303,7 +303,7 @@ func (f *nativeFixture) respond(w http.ResponseWriter, r *http.Request) {
 			if strings.Contains(prompt, "IDLE") {
 				text = "空闲协作测试消息"
 			}
-			calls = append(calls, tool("send_session_message", M{"target_task_id": id, "message": text}))
+			calls = append(calls, tool("send_conversation_message", M{"target_conversation_id": id, "message": text}))
 		}
 	case strings.Contains(prompt, "FULL_LOOP"):
 		switch {

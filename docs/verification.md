@@ -101,7 +101,7 @@ UI 变更按影响核对：
 | `TestTuckToolNamesOfficial`、`TestUnifiedMCPInstructionsAfterApply` | Chat/Responses 实际名称、空/单/部分/全工具组合、配置应用及续聊后的说明 |
 | `TestUnifiedMCPActorPermissions`、`TestLocalMCPTaskTurnOwnership` | 主/子代理、只读、任务及轮次许可 |
 | `TestLocalMCPCatalogCookieTurnAndPeerLifecycle`、`TestLocalMCPReconnectInventory`、`TestLocalMCPSecondCatalogClientAcrossTurns` | 多客户端、跨轮次目录、过期/缺失/其他任务凭据、共享连接释放 |
-| `TestSessionToolResultMCP`、`TestSessionToolUnavailableTargetModelMCP`、`TestCollaborationSubmissionUnconfirmed`、`TestSessionMessageUnicodeLength` | 接收与目标完成的区别、失效目标、未知提交、Unicode 长度及单次发送 |
+| `TestConversationToolResultMCP`、`TestConversationToolUnavailableTargetModelMCP`、`TestCollaborationSubmissionUnconfirmed`、`TestSessionMessageUnicodeLength` | 列表到发送的 conversation_id 合同、旧参数拒绝、接收与目标完成的区别、失效目标、未知提交、Unicode 长度及单次发送 |
 | `TestModelContentMCPResult`、`TestToolTextResources`、`TestOfficialNativeFullLoop` | 内容组合、资源解析、参数说明、模型图片、审批拒绝原因进入实际结果 |
 | `TestDeliveryRequiresExplicitRootCompletion`、`TestParityNativeDeliveryContinuation` | 正常根终止及反例、开关变化、每轮一次且不自触发 |
 

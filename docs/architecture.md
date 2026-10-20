@@ -52,11 +52,13 @@ Tuck 自组织的模型内容统一经 `model_content.go`，业务和协议代�
 
 ## 上下文披露与编排
 
+代理分类、入口、持久化定时任务及进一步上下文编排的待评审方案见[代理与编排设计](agent-orchestration-design.md)，其中规划不代表当前已实现能力。
+
 `orchestration.go` 根据已取得的运行事实决定是否补充内容；Manager 提供事实、管理队列并在提交前核对目标、轮次、配置及许可；`model_content` 构造正文及来源包装；Docker Agent 执行和消费消息。策略不能直接修改任务、操作队列或拼接消息，Manager 不持有不断增长的业务策略。以上为职责划分，不各建服务或执行循环。
 
 当前自动补交付只在执行流正常返回且取得明确匹配根会话 ID 的 `stream_stopped` 后判断。基线正常事件为 `reason=normal, finish_reason=stop`，只有 normal 映射为 completed。EOF、工具结果、子代理结束、缺失/未知身份、空原因、错误、取消和执行上限均不能代替正常根终止事实。未知身份只保留原始事件，子会话只更新自身。
 
-正常结束后读取当前编排开关、工具许可及本轮交付事实；需要补交付时进入既有队列，发送前再次核对。每个真实用户根轮次最多补充一次，自动轮次不能触发自身；运行中关闭开关须移除未执行自动项，保留用户队列。跨会话消息的目标与接收规则见 [工具参考](tools-reference.md#send_session_message)，accepted、进入原生上下文和完成分别记录。
+正常结束后读取当前编排开关、工具许可及本轮交付事实；需要补交付时进入既有队列，发送前再次核对。每个真实用户根轮次最多补充一次，自动轮次不能触发自身；运行中关闭开关须移除未执行自动项，保留用户队列。跨会话消息的目标与接收规则见 [工具参考](tools-reference.md#send_conversation_message)，accepted、进入原生上下文和完成分别记录。
 
 未来首次准备、背景生成、模型审查和工具描述优化尚未实现。接入时优先验证原生 hooks、Agent 路由和消息接口，不增加第二套执行器。首次准备指新会话首次执行目标 Agent 前，不能以模型级 `turn_start` 代替；指导按实际工具集合生成，续聊、恢复和分支不重复已有背景。新事实以明确来源和更新意图提交，异步决定提交前重新核对轮次与许可，失败不能解释成业务结论。
 
@@ -75,6 +77,8 @@ Tuck 自组织的模型内容统一经 `model_content.go`，业务和协议代�
 ## Docker Agent 合同
 
 兼容基线为官方 [v1.150.0](https://github.com/docker/docker-agent/releases/tag/v1.150.0)，提交 `5277e7842058fc3fbb9943a6e88bc05a1c8e6fe2`；安装校验以 [嵌入发行清单](../internal/tuck/contract/engine-release.json) 为准。[上游文档](https://docker.github.io/docker-agent/)及较新源码不扩大已验收范围。
+
+生成的原生代理 YAML 和内置工具发现临时配置使用格式版本 16，由同一官方基线解析；该数字独立于引擎版本、Tuck 配置版本和数据库版本。声明新格式不自动启用路由、hooks 或其他可选能力。
 
 默认使用官方发行，只通过公开配置、CLI、HTTP/SSE 使用引擎，不导入内部 runtime/store/session 包，不读取或修改原生 SQLite。对接 `serve api --session-db`、Agent 加载与目录、会话创建/读取/恢复、执行流、title、permissions、safety-policy、fork、resume、elicitation 和 steer。已复现且尚无可用官方修复的缺陷，须先取得用户明确同意，再按 [临时补丁约定](../patches/docker-agent/README.md) 处理；当前补丁及验收证据只在该文档维护。
 

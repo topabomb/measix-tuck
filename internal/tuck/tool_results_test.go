@@ -103,11 +103,11 @@ func TestToolResultBusinessProjection(t *testing.T) {
 		want  string
 	}{
 		{"inspect_attachments", M{"status": "completed", "text": "中文识别正文", "modelId": "internal", "attachments": []any{"input.png"}, "workspace": M{"subject": "internal"}}, `{"status":"completed","text":"中文识别正文"}`},
-		{"send_session_message", M{"status": "accepted", "target_task_id": "internal", "delivery": "steer"}, `{"status":"accepted"}`},
+		{"send_conversation_message", M{"status": "accepted", "target_conversation_id": "internal", "delivery": "steer"}, `{"status":"accepted"}`},
 		{"upload_runcove_file", M{"status": "completed", "remote_path": "input.txt", "bytes": 20, "overwritten": false}, `{"overwritten":false,"status":"completed"}`},
 		{"deliver_result", M{"status": "completed", "delivery_id": "internal", "turn_id": "internal", "total_bytes": 20, "cleanup_pending": true, "version": 2, "file_count": 0, "view_url": "#/delivery"}, `{"file_count":0,"status":"completed","version":2,"view_url":"#/delivery"}`},
 		{"generate_images", M{"status": "completed", "resource": "internal", "providerUsage": M{"tokens": 30}, "files": []any{M{"path": "artifacts/images/img_x.png", "promptPath": "artifacts/images/img_x.prompt.txt", "mime": "image/png", "sha256": "internal", "size": 100}}}, `{"files":[{"path":"artifacts/images/img_x.png","prompt_path":"artifacts/images/img_x.prompt.txt"}],"status":"completed"}`},
-		{"list_sessions", M{"status": "completed", "sessions": []any{M{"task_id": "task", "title": "title", "assistant_name": "assistant", "status": "idle", "queued_prompts": 0, "agent": "root", "pending_interaction": nil}}}, `{"sessions":[{"assistant_name":"assistant","status":"idle","task_id":"task","title":"title"}],"status":"completed"}`},
+		{"list_conversations", M{"status": "completed", "conversations": []any{M{"conversation_id": "conversation", "title": "title", "assistant_name": "assistant", "status": "idle", "queued_prompts": 0, "agent": "root", "pending_interaction": nil}}}, `{"conversations":[{"assistant_name":"assistant","conversation_id":"conversation","status":"idle","title":"title"}],"status":"completed"}`},
 	} {
 		if got := string(JSON(modelContent.ToolResult(tt.name, tt.value))); got != tt.want {
 			t.Fatal(tt.name, got)
@@ -129,26 +129,46 @@ func TestToolResultBusinessProjection(t *testing.T) {
 	}
 }
 
-func TestSessionToolResultMCP(t *testing.T) {
+func TestConversationToolResultMCP(t *testing.T) {
 	f := newPlatformFixture(t, 5)
 	f.save(inspectionConfig(f, "OPENAI_CHAT_COMPLETIONS", "OPENAI_CHAT_COMPLETIONS"))
 	app := f.startApp()
 	sender := newParityTask(t, app, nil)
 	target := newParityTask(t, app, nil)
 	session := connectTuckTools(t, app, sender, "root")
-	value := callTuckTool(t, session, "list_sessions", M{"limit": 1}, false)
-	if len(A(value["sessions"])) != 1 || Has(O(A(value["sessions"])[0]), "pending_interaction") {
+	value := callTuckTool(t, session, "list_conversations", M{"limit": 1}, false)
+	if len(A(value["conversations"])) != 1 || Has(O(A(value["conversations"])[0]), "pending_interaction") {
 		t.Fatal(value)
 	}
-	callTuckTool(t, session, "list_sessions", M{"limit": 101}, true)
-	value = callTuckTool(t, session, "send_session_message", M{"target_task_id": target["id"], "message": "Message result contract"}, false)
+	callTuckTool(t, session, "list_conversations", M{"limit": 101}, true)
+	value = callTuckTool(t, session, "list_conversations", M{}, false)
+	if Has(value, "sessions") {
+		t.Fatal("obsolete result field", value)
+	}
+	conversationID := ""
+	for _, v := range A(value["conversations"]) {
+		item := O(v)
+		if Has(item, "task_id") {
+			t.Fatal("internal task field exposed", item)
+		}
+		if item["conversation_id"] == target["id"] {
+			conversationID = S(item["conversation_id"])
+		}
+	}
+	if conversationID == "" {
+		t.Fatal("target missing from conversation list", value)
+	}
+	callTuckTool(t, session, "send_conversation_message", M{"target_task_id": conversationID, "message": "Reject the old parameter"}, true)
+	value = callTuckTool(t, session, "send_conversation_message", M{"target_conversation_id": "missing-conversation", "message": "Check missing target"}, true)
+	assertToolError(t, value, "conversation_not_found")
+	value = callTuckTool(t, session, "send_conversation_message", M{"target_conversation_id": conversationID, "message": "Message result contract"}, false)
 	if string(JSON(value)) != `{"status":"accepted"}` {
 		t.Fatal(value)
 	}
 	waitIdle(t, app.Manager, S(target["id"]))
 }
 
-func TestSessionToolUnavailableTargetModelMCP(t *testing.T) {
+func TestConversationToolUnavailableTargetModelMCP(t *testing.T) {
 	f := newPlatformFixture(t, 5)
 	f.save(inspectionConfig(f, "OPENAI_CHAT_COMPLETIONS", "OPENAI_CHAT_COMPLETIONS"))
 	app := f.startApp()
@@ -157,7 +177,7 @@ func TestSessionToolUnavailableTargetModelMCP(t *testing.T) {
 	session := connectTuckTools(t, app, sender, "root")
 	// Historical conversations can retain a model removed from the catalog.
 	target = mustUpdate(t, app.Manager, S(target["id"]), M{"modelId": "removed-model", "modelSource": "local"})
-	value := callTuckTool(t, session, "send_session_message", M{"target_task_id": target["id"], "message": "Do not queue an unavailable target"}, true)
+	value := callTuckTool(t, session, "send_conversation_message", M{"target_conversation_id": target["id"], "message": "Do not queue an unavailable target"}, true)
 	assertToolError(t, value, "model_unavailable")
 	current, e := app.Manager.Get(S(target["id"]))
 	if e != nil || len(A(current["queue"])) != 0 || I(current["turnCount"]) != 0 {

@@ -4,6 +4,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -12,11 +13,18 @@ import (
 func TestTuckToolNamesOfficial(t *testing.T) {
 	all := modelContent.ToolNames()
 	for _, protocol := range []string{"OPENAI_CHAT_COMPLETIONS", "OPENAI_RESPONSES"} {
-		for _, names := range [][]string{all, {"list_sessions", "send_session_message", "deliver_result"}, {"inspect_attachments"}, {}} {
+		for _, names := range [][]string{all, {"list_conversations", "send_conversation_message", "deliver_result"}, {"inspect_attachments"}, {}} {
 			t.Run(protocol+"/"+strings.Join(names, "+"), func(t *testing.T) {
 				f := newWorkspaceFixture(t).p
 				workspaceHook := f.hook
 				c := inspectionConfig(f, protocol, "OPENAI_CHAT_COMPLETIONS")
+				withNativeDiscovery := len(names) == len(all)
+				if withNativeDiscovery {
+					agent := O(O(c["agents"])["root"])
+					agent["toolsets"] = append(A(agent["toolsets"]),
+						M{"type": "session_context"},
+						M{"type": "tasks", "path": filepath.Join(t.TempDir(), "native-tasks.json")})
+				}
 				localImageConfig(c)
 				O(A(c["imageGenerators"])[0])["providerId"] = "configured"
 				disabled := []string{}
@@ -57,6 +65,18 @@ func TestTuckToolNamesOfficial(t *testing.T) {
 								t.Errorf("tool %s count %d, want %d", name, counts[name], want)
 							}
 						}
+						if counts["send_session_message"] != 0 {
+							t.Error("obsolete Tuck message tool exposed")
+						}
+						for _, name := range []string{"list_sessions", "list_tasks"} {
+							want := 0
+							if withNativeDiscovery {
+								want = 1
+							}
+							if counts[name] != want {
+								t.Errorf("native tool %s count %d, want %d", name, counts[name], want)
+							}
+						}
 						// Only model instructions, not descriptions or user content, may carry
 						// the inventory. Verify both provider protocols and ordinary continuation.
 						system := S(body["instructions"])
@@ -92,6 +112,9 @@ func TestTuckToolNamesOfficial(t *testing.T) {
 				var projection M
 				if e = yaml.Unmarshal(raw, &projection); e != nil {
 					t.Fatal(e)
+				}
+				if S(projection["version"]) != "16" {
+					t.Fatal("wrong native configuration version", projection["version"])
 				}
 				count := 0
 				for _, v := range A(O(O(projection["agents"])["root"])["toolsets"]) {
@@ -130,7 +153,7 @@ func TestUnifiedMCPInstructionsAfterApply(t *testing.T) {
 	c["defaultModelId"] = "proof-model"
 	f.save(c)
 	var want atomic.Value
-	want.Store([]string{"list_sessions", "send_session_message", "deliver_result", "inspect_attachments"})
+	want.Store([]string{"list_conversations", "send_conversation_message", "deliver_result", "inspect_attachments"})
 	var checked atomic.Int32
 	f.change(func() {
 		f.hook = func(w http.ResponseWriter, r *http.Request, body M) bool {
@@ -168,7 +191,7 @@ func TestUnifiedMCPInstructionsAfterApply(t *testing.T) {
 	if status != 200 {
 		t.Fatal(status, data)
 	}
-	O(O(O(data["config"])["agents"])["root"])["disabledTuckTools"] = []string{"list_sessions", "send_session_message"}
+	O(O(O(data["config"])["agents"])["root"])["disabledTuckTools"] = []string{"list_conversations", "send_conversation_message"}
 	want.Store([]string{"deliver_result", "inspect_attachments"})
 	status, data = appRequest(t, app, "PUT", "/api/settings/runtime", data)
 	if status != 200 {

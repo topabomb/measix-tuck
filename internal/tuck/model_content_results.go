@@ -37,7 +37,20 @@ func buildToolOutput(name string, value M) M {
 		return result
 	}
 	if status != "completed" && status != "accepted" {
-		result := buildToolFailure(S(value["code"]))
+		code := S(value["code"])
+		if name == "list_conversations" || name == "send_conversation_message" {
+			switch code {
+			case "task_not_found":
+				code = "conversation_not_found"
+			case "task_readonly":
+				code = "conversation_readonly"
+			case "task_stopping":
+				code = "conversation_stopping"
+			case "task_capacity":
+				code = "conversation_capacity"
+			}
+		}
+		result := buildToolFailure(code)
 		if status == "unknown" {
 			result["status"] = "unknown"
 		}
@@ -49,18 +62,18 @@ func buildToolOutput(name string, value M) M {
 		return result
 	}
 	switch name {
-	case "list_sessions":
-		sessions := []any{}
-		for _, v := range A(value["sessions"]) {
+	case "list_conversations":
+		conversations := []any{}
+		for _, v := range A(value["conversations"]) {
 			s := O(v)
-			item := M{"task_id": s["task_id"], "title": s["title"], "assistant_name": s["assistant_name"], "status": s["status"]}
+			item := M{"conversation_id": s["conversation_id"], "title": s["title"], "assistant_name": s["assistant_name"], "status": s["status"]}
 			if S(s["pending_interaction"]) != "" {
 				item["pending_interaction"] = s["pending_interaction"]
 			}
-			sessions = append(sessions, item)
+			conversations = append(conversations, item)
 		}
-		return M{"status": "completed", "sessions": sessions}
-	case "send_session_message":
+		return M{"status": "completed", "conversations": conversations}
+	case "send_conversation_message":
 		return M{"status": "accepted"}
 	case "deliver_result":
 		return M{"status": "completed", "version": value["version"], "file_count": value["file_count"], "view_url": value["view_url"]}
@@ -87,113 +100,117 @@ func buildToolOutput(name string, value M) M {
 }
 
 var modelErrorMessages = map[string]string{
-	"session_message_unconfirmed":    "Message submission could not be confirmed. Check the target conversation before sending it again.",
-	"file_version_unavailable":       "The remote file has no verifiable version.",
-	"remote_file_unavailable":        "The remote file changed or could not be read.",
-	"mcp_scope_changed":              "The MCP configuration or account changed. Apply the current configuration before continuing.",
-	"mcp_tool_unavailable":           "This MCP tool is unavailable or no longer permitted by the current contract.",
-	"mcp_request":                    "The MCP request does not match the supported protocol.",
-	"mcp_method":                     "This MCP resource only supports permitted tool operations.",
-	"mcp_response_size":              "The MCP response exceeds the size limit.",
-	"mcp_catalog":                    "The MCP tool catalog is invalid or incomplete.",
-	"mcp_unavailable":                "The MCP resource is unavailable.",
-	"mcp_error":                      "The MCP request failed.",
-	"mcp_protocol":                   "The MCP protocol or tool capability is unsupported.",
-	"delivery_file_limit":            "A delivery accepts at most 10 files. Select key files or create an archive first.",
-	"download_failed":                "No files were downloaded.",
-	"partial_download":               "Some files could not be downloaded. Completed files were kept.",
-	"webdav_path_not_permitted":      "Enterprise WebDAV cannot access reserved .agent-space* directories. Copy the selected artifact into an ordinary project directory first.",
-	"webdav_read_only":               "The current enterprise WebDAV permits reading only.",
-	"webdav_parent_not_directory":    "The remote parent path is not a directory.",
-	"webdav_not_file":                "The remote path is not a regular file. Specify individual files.",
-	"webdav_file_exists":             "The remote file already exists. Set overwrite=true only if replacement is intended.",
-	"webdav_version_unavailable":     "The remote file has no strong ETag required for safe replacement.",
-	"webdav_upload_failed":           "Upload success was not confirmed. Check the remote file before sending it again.",
-	"not_attempted":                  "The batch stopped after cancellation or authorization changed.",
-	"webdav_file_not_found":          "The remote file does not exist.",
-	"webdav_unavailable":             "The remote file service or metadata is unavailable.",
-	"webdav_version_changed":         "The remote file changed during download. The local destination was not replaced.",
-	"outcome_unknown":                "The remote write may have completed. Check the remote file before sending it again.",
-	"webdav_download_failed":         "The remote download failed. Completed files were kept.",
-	"turn_changed":                   "The target turn changed. Check the conversation before sending again.",
-	"message_too_large":              "The message exceeds the size limit.",
-	"snapshot_failed":                "The delivery snapshot could not be saved. Check the delivery storage.",
-	"persistence_failed":             "The delivery could not be committed. Check the delivery storage.",
-	"file_not_found":                 "The source file does not exist.",
-	"file_changed":                   "The source file changed while it was being read.",
-	"delivery_too_large":             "The delivery exceeds the total size limit of 2 GiB.",
-	"delivery_canceled":              "The delivery was canceled before it was committed.",
-	"insufficient_storage":           "There is not enough free space to preserve this delivery.",
-	"invalid_message":                "Provide a target conversation ID and a nonempty message within the length limit.",
-	"invalid_target":                 "Choose an available main conversation.",
-	"interaction_pending":            "The target conversation is waiting for user input or approval.",
-	"configuration_changing":         "The configuration is being updated. Try again after it is applied.",
-	"task_readonly":                  "Choose an available, unarchived main conversation.",
-	"task_stopping":                  "The target conversation is stopping. Wait for it to stop before sending again.",
-	"task_capacity":                  "The target assistant has reached its task concurrency limit. Wait for an active task to finish.",
-	"agent_missing":                  "The target conversation's agent was removed. Restore its configuration before sending again.",
-	"model_required":                 "Select a model for the target conversation before sending again.",
-	"model_source_required":          "Select the model and its source for the target conversation before sending again.",
-	"model_source_changed":           "The target conversation's model source changed. Select its model again before sending.",
-	"model_unavailable":              "The target conversation's model is unavailable. Restore it or select an available model before sending again.",
-	"platform_pending":               "The enterprise configuration is not ready. Synchronize it before sending again.",
-	"reasoning_unavailable":          "The target model does not support the selected reasoning setting. Update the conversation's model settings.",
-	"invalid_prompt":                 "Provide a nonempty message within the length limit.",
-	"internal_error":                 "The operation failed because of an internal error.",
-	"invalid_arguments":              "Check the parameter types, paths and limits in the tool definition.",
-	"invalid_json":                   "Provide a valid JSON object matching the tool parameters.",
-	"tool_not_permitted":             "This tool is not permitted for the active task or workspace.",
-	"operation_canceled":             "The operation was canceled.",
-	"workspace_required":             "Choose a writable task working directory before using this tool.",
-	"workspace_unavailable":          "The working directory is unavailable.",
-	"invalid_workspace":              "The working directory is invalid or unknown.",
-	"workspace_changed":              "The task working directory changed. The operation was stopped.",
-	"artifact_directory_changed":     "The artifact directory changed. The operation was stopped.",
-	"path_outside_workspace":         "The path must stay inside the task working directory.",
-	"task_changed":                   "The task changed. The operation was stopped.",
-	"task_not_found":                 "The target task does not exist.",
-	"not_found":                      "The requested resource does not exist.",
-	"readonly_task":                  "This task does not permit writes.",
-	"local_file_not_found":           "The local source file does not exist or is not a readable regular file.",
-	"file_not_readable":              "The source file could not be read.",
-	"file_too_large":                 "The file exceeds the allowed size.",
-	"local_file_exists":              "The destination file already exists. Choose another path or explicitly allow replacement.",
-	"local_name_conflict":            "Multiple source files have the same destination filename.",
-	"attachment_unavailable":         "The attachment is unavailable.",
-	"attachment_changed":             "The attachment changed. Read the intended file again.",
-	"attachment_limit":               "The attachments exceed the size or image limits.",
-	"attachment_type_unsupported":    "Only PNG, JPEG, GIF and WebP images are supported.",
-	"attachment_invalid_image":       "The image cannot be decoded or exceeds the 40-million-pixel limit.",
-	"image_resource_unavailable":     "Select an available image generation resource.",
-	"image_references_unsupported":   "This platform image resource does not support references. Omit reference_images or select a compatible local resource.",
-	"invalid_image_reference":        "Provide valid PNG, JPEG or WebP reference files inside the task working directory.",
-	"image_reference_limit":          "Reference images exceed the allowed size or count.",
-	"image_reference_changed":        "A reference image changed. Check the file before generating again.",
-	"image_unreachable":              "The image service could not be reached. Check the connection.",
-	"invalid_image_response":         "The image service returned an invalid or incomplete result.",
-	"invalid_image":                  "The image service returned an invalid or unsupported image.",
-	"image_limit":                    "Generated images exceed the allowed file, pixel or model-input size.",
-	"inspection_model_required":      "Configure an attachment inspection model with TEXT and IMAGE input.",
-	"inspection_model_unavailable":   "The selected attachment inspection model is unavailable. Check its configuration.",
-	"inspection_request_invalid":     "The attachment inspection endpoint is invalid.",
-	"inspection_unreachable":         "The attachment inspection service could not be reached. Check the connection.",
-	"inspection_response_invalid":    "The attachment inspection service returned invalid or oversized text.",
-	"inspection_incomplete":          "The attachment inspection did not finish normally. Check the model output limit or service status.",
-	"resource_changed":               "The platform identity or resource configuration changed. Check the current configuration.",
-	"resource_unavailable":           "The selected resource connection is unavailable.",
-	"not_enrolled":                   "Connect an enterprise account before using this resource.",
-	"managed_snapshot_required":      "Synchronize the enterprise configuration before continuing.",
-	"invalid_platform_data":          "The platform returned invalid configuration data.",
-	"platform_unreachable":           "The platform could not be reached. Check the connection.",
-	"refresh_conflict":               "The enterprise session could not be renewed. Reconnect the account.",
-	"invalid_workspace_path":         "Provide a relative path inside the selected workspace.",
-	"workspace_identity_changed":     "The original workspace identity or binding changed.",
-	"upstream_timeout":               "The model service timed out. Try again later.",
-	"upstream_authentication_failed": "The model service rejected the credentials. Check the provider or platform connection.",
-	"upstream_forbidden":             "The model service denied access to this resource.",
-	"upstream_rate_limited":          "The model service rate limit was reached. Try again later.",
-	"upstream_rejected":              "The model service rejected the request. Check the model capabilities and request limits.",
-	"upstream_unavailable":           "The model service is unavailable. Try again later.",
+	"conversation_message_unconfirmed": "Message submission could not be confirmed. Check the target conversation before sending it again.",
+	"file_version_unavailable":         "The remote file has no verifiable version.",
+	"remote_file_unavailable":          "The remote file changed or could not be read.",
+	"mcp_scope_changed":                "The MCP configuration or account changed. Apply the current configuration before continuing.",
+	"mcp_tool_unavailable":             "This MCP tool is unavailable or no longer permitted by the current contract.",
+	"mcp_request":                      "The MCP request does not match the supported protocol.",
+	"mcp_method":                       "This MCP resource only supports permitted tool operations.",
+	"mcp_response_size":                "The MCP response exceeds the size limit.",
+	"mcp_catalog":                      "The MCP tool catalog is invalid or incomplete.",
+	"mcp_unavailable":                  "The MCP resource is unavailable.",
+	"mcp_error":                        "The MCP request failed.",
+	"mcp_protocol":                     "The MCP protocol or tool capability is unsupported.",
+	"delivery_file_limit":              "A delivery accepts at most 10 files. Select key files or create an archive first.",
+	"download_failed":                  "No files were downloaded.",
+	"partial_download":                 "Some files could not be downloaded. Completed files were kept.",
+	"webdav_path_not_permitted":        "Enterprise WebDAV cannot access reserved .agent-space* directories. Copy the selected artifact into an ordinary project directory first.",
+	"webdav_read_only":                 "The current enterprise WebDAV permits reading only.",
+	"webdav_parent_not_directory":      "The remote parent path is not a directory.",
+	"webdav_not_file":                  "The remote path is not a regular file. Specify individual files.",
+	"webdav_file_exists":               "The remote file already exists. Set overwrite=true only if replacement is intended.",
+	"webdav_version_unavailable":       "The remote file has no strong ETag required for safe replacement.",
+	"webdav_upload_failed":             "Upload success was not confirmed. Check the remote file before sending it again.",
+	"not_attempted":                    "The batch stopped after cancellation or authorization changed.",
+	"webdav_file_not_found":            "The remote file does not exist.",
+	"webdav_unavailable":               "The remote file service or metadata is unavailable.",
+	"webdav_version_changed":           "The remote file changed during download. The local destination was not replaced.",
+	"outcome_unknown":                  "The remote write may have completed. Check the remote file before sending it again.",
+	"webdav_download_failed":           "The remote download failed. Completed files were kept.",
+	"turn_changed":                     "The target turn changed. Check the conversation before sending again.",
+	"message_too_large":                "The message exceeds the size limit.",
+	"snapshot_failed":                  "The delivery snapshot could not be saved. Check the delivery storage.",
+	"persistence_failed":               "The delivery could not be committed. Check the delivery storage.",
+	"file_not_found":                   "The source file does not exist.",
+	"file_changed":                     "The source file changed while it was being read.",
+	"delivery_too_large":               "The delivery exceeds the total size limit of 2 GiB.",
+	"delivery_canceled":                "The delivery was canceled before it was committed.",
+	"insufficient_storage":             "There is not enough free space to preserve this delivery.",
+	"invalid_message":                  "Provide a target conversation ID and a nonempty message within the length limit.",
+	"invalid_target":                   "Choose an available main conversation.",
+	"conversation_not_found":           "The target conversation does not exist.",
+	"conversation_readonly":            "Choose an available, unarchived main conversation.",
+	"conversation_stopping":            "The target conversation is stopping. Wait for it to stop before sending again.",
+	"conversation_capacity":            "The target assistant has reached its conversation concurrency limit. Wait for an active conversation to finish.",
+	"interaction_pending":              "The target conversation is waiting for user input or approval.",
+	"configuration_changing":           "The configuration is being updated. Try again after it is applied.",
+	"task_readonly":                    "Choose an available, unarchived main conversation.",
+	"task_stopping":                    "The target conversation is stopping. Wait for it to stop before sending again.",
+	"task_capacity":                    "The target assistant has reached its task concurrency limit. Wait for an active task to finish.",
+	"agent_missing":                    "The target conversation's agent was removed. Restore its configuration before sending again.",
+	"model_required":                   "Select a model for the target conversation before sending again.",
+	"model_source_required":            "Select the model and its source for the target conversation before sending again.",
+	"model_source_changed":             "The target conversation's model source changed. Select its model again before sending.",
+	"model_unavailable":                "The target conversation's model is unavailable. Restore it or select an available model before sending again.",
+	"platform_pending":                 "The enterprise configuration is not ready. Synchronize it before sending again.",
+	"reasoning_unavailable":            "The target model does not support the selected reasoning setting. Update the conversation's model settings.",
+	"invalid_prompt":                   "Provide a nonempty message within the length limit.",
+	"internal_error":                   "The operation failed because of an internal error.",
+	"invalid_arguments":                "Check the parameter types, paths and limits in the tool definition.",
+	"invalid_json":                     "Provide a valid JSON object matching the tool parameters.",
+	"tool_not_permitted":               "This tool is not permitted for the active task or workspace.",
+	"operation_canceled":               "The operation was canceled.",
+	"workspace_required":               "Choose a writable task working directory before using this tool.",
+	"workspace_unavailable":            "The working directory is unavailable.",
+	"invalid_workspace":                "The working directory is invalid or unknown.",
+	"workspace_changed":                "The task working directory changed. The operation was stopped.",
+	"artifact_directory_changed":       "The artifact directory changed. The operation was stopped.",
+	"path_outside_workspace":           "The path must stay inside the task working directory.",
+	"task_changed":                     "The task changed. The operation was stopped.",
+	"task_not_found":                   "The target task does not exist.",
+	"not_found":                        "The requested resource does not exist.",
+	"readonly_task":                    "This task does not permit writes.",
+	"local_file_not_found":             "The local source file does not exist or is not a readable regular file.",
+	"file_not_readable":                "The source file could not be read.",
+	"file_too_large":                   "The file exceeds the allowed size.",
+	"local_file_exists":                "The destination file already exists. Choose another path or explicitly allow replacement.",
+	"local_name_conflict":              "Multiple source files have the same destination filename.",
+	"attachment_unavailable":           "The attachment is unavailable.",
+	"attachment_changed":               "The attachment changed. Read the intended file again.",
+	"attachment_limit":                 "The attachments exceed the size or image limits.",
+	"attachment_type_unsupported":      "Only PNG, JPEG, GIF and WebP images are supported.",
+	"attachment_invalid_image":         "The image cannot be decoded or exceeds the 40-million-pixel limit.",
+	"image_resource_unavailable":       "Select an available image generation resource.",
+	"image_references_unsupported":     "This platform image resource does not support references. Omit reference_images or select a compatible local resource.",
+	"invalid_image_reference":          "Provide valid PNG, JPEG or WebP reference files inside the task working directory.",
+	"image_reference_limit":            "Reference images exceed the allowed size or count.",
+	"image_reference_changed":          "A reference image changed. Check the file before generating again.",
+	"image_unreachable":                "The image service could not be reached. Check the connection.",
+	"invalid_image_response":           "The image service returned an invalid or incomplete result.",
+	"invalid_image":                    "The image service returned an invalid or unsupported image.",
+	"image_limit":                      "Generated images exceed the allowed file, pixel or model-input size.",
+	"inspection_model_required":        "Configure an attachment inspection model with TEXT and IMAGE input.",
+	"inspection_model_unavailable":     "The selected attachment inspection model is unavailable. Check its configuration.",
+	"inspection_request_invalid":       "The attachment inspection endpoint is invalid.",
+	"inspection_unreachable":           "The attachment inspection service could not be reached. Check the connection.",
+	"inspection_response_invalid":      "The attachment inspection service returned invalid or oversized text.",
+	"inspection_incomplete":            "The attachment inspection did not finish normally. Check the model output limit or service status.",
+	"resource_changed":                 "The platform identity or resource configuration changed. Check the current configuration.",
+	"resource_unavailable":             "The selected resource connection is unavailable.",
+	"not_enrolled":                     "Connect an enterprise account before using this resource.",
+	"managed_snapshot_required":        "Synchronize the enterprise configuration before continuing.",
+	"invalid_platform_data":            "The platform returned invalid configuration data.",
+	"platform_unreachable":             "The platform could not be reached. Check the connection.",
+	"refresh_conflict":                 "The enterprise session could not be renewed. Reconnect the account.",
+	"invalid_workspace_path":           "Provide a relative path inside the selected workspace.",
+	"workspace_identity_changed":       "The original workspace identity or binding changed.",
+	"upstream_timeout":                 "The model service timed out. Try again later.",
+	"upstream_authentication_failed":   "The model service rejected the credentials. Check the provider or platform connection.",
+	"upstream_forbidden":               "The model service denied access to this resource.",
+	"upstream_rate_limited":            "The model service rate limit was reached. Try again later.",
+	"upstream_rejected":                "The model service rejected the request. Check the model capabilities and request limits.",
+	"upstream_unavailable":             "The model service is unavailable. Try again later.",
 }
 
 func buildToolFailure(code string) M {
@@ -207,7 +224,7 @@ func buildToolFailure(code string) M {
 		}
 	}
 	status := "failed"
-	if code == "session_message_unconfirmed" {
+	if code == "conversation_message_unconfirmed" {
 		status = "unknown"
 	}
 	return M{"status": status, "code": code, "message": message}

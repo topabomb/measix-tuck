@@ -262,7 +262,7 @@ func TestLocalMCPReconnectInventory(t *testing.T) {
 	if e != nil || len(tools.Tools) != 5 {
 		t.Fatal(tools, e)
 	}
-	names := []string{"list_sessions", "send_session_message", "deliver_result", "generate_images", "inspect_attachments"}
+	names := []string{"list_conversations", "send_conversation_message", "deliver_result", "generate_images", "inspect_attachments"}
 	expected := modelContent.Instructions(modelContent.Tools(names, nil))
 	if reconnected.InitializeResult().Instructions != expected {
 		t.Fatal("new discovery retained the previous inventory", reconnected.InitializeResult().Instructions, expected)
@@ -335,7 +335,7 @@ func TestLocalMCPSecondCatalogClientAcrossTurns(t *testing.T) {
 	thirdTurnKey, _ := advance()
 	firstKey.Store(thirdTurnKey)
 	secondKey.Store(thirdTurnKey)
-	params := &mcp.CallToolParams{Name: "list_sessions", Arguments: M{}}
+	params := &mcp.CallToolParams{Name: "list_conversations", Arguments: M{}}
 	firstResult, firstErr := firstClient.CallTool(ctx, params)
 	if firstErr != nil || firstResult.IsError {
 		t.Fatal("first client failed with live third-turn header", firstResult, firstErr)

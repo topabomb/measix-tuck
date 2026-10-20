@@ -62,7 +62,7 @@ func (m *Models) WriteConfig() (string, error) {
 		}
 		a["toolsets"] = toolsets
 	}
-	raw, e := yaml.Marshal(M{"version": "15", "providers": providers, "models": models, "agents": agents, "permissions": c["permissions"]})
+	raw, e := yaml.Marshal(M{"version": "16", "providers": providers, "models": models, "agents": agents, "permissions": c["permissions"]})
 	if e != nil {
 		return "", e
 	}

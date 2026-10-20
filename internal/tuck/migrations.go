@@ -8,20 +8,55 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Configuration and database versions evolve independently. No step guesses a
 // legacy format or regenerates a missing encryption key. Database version owns
 // SQL, product JSON and referenced file layout; platform format owns its cipher.
 func migrateConfiguration(v M) (M, error) {
-	if !Integer(v["schemaVersion"], 1, 2) {
-		return nil, Problem(409, "config_version", "只支持正式 Go v1/v2 配置；未知或封存格式不能迁移")
+	if !Integer(v["schemaVersion"], 1, configVersion) {
+		return nil, Problem(409, "config_version", "只支持正式 Go v1/v2/v3 配置；未知或封存格式不能迁移")
 	}
 	next := Clone(v)
 	if I(next["schemaVersion"]) == 1 {
 		// Released 1 -> 2 step: retain the key and every setting, and enforce
 		// the key requirement below. Future steps must be explicit here.
 		next["schemaVersion"] = 2
+	}
+	if I(next["schemaVersion"]) == 2 {
+		renames := [][2]string{{"list_sessions", "list_conversations"}, {"send_session_message", "send_conversation_message"}}
+		for _, value := range O(next["agents"]) {
+			agent := O(value)
+			for i, name := range A(agent["disabledTuckTools"]) {
+				for _, rename := range renames {
+					if name == rename[0] {
+						A(agent["disabledTuckTools"])[i] = rename[1]
+					}
+				}
+			}
+		}
+		// Retain the original patterns for native/external tools, and carry
+		// their policy to the renamed Tuck tools without widening the glob.
+		permissions := O(next["permissions"])
+		for _, level := range []string{"allow", "ask", "deny"} {
+			for _, value := range A(permissions[level]) {
+				pattern := S(value)
+				name, _, _ := strings.Cut(pattern, ":")
+				for _, rename := range renames {
+					matchesOld, _ := filepath.Match(strings.ToLower(name), rename[0])
+					matchesNew, _ := filepath.Match(strings.ToLower(name), rename[1])
+					replacement := rename[1] + pattern[len(name):]
+					if rename[0] == "send_session_message" {
+						replacement = strings.ReplaceAll(replacement, ":target_task_id=", ":target_conversation_id=")
+					}
+					if matchesOld && (!matchesNew || replacement != rename[1]+pattern[len(name):]) && !Contains(permissions[level], replacement) {
+						permissions[level] = append(A(permissions[level]), replacement)
+					}
+				}
+			}
+		}
+		next["schemaVersion"] = 3
 	}
 	if err := ValidateConfig(next, false); err != nil {
 		return nil, err

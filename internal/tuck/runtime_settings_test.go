@@ -1456,10 +1456,10 @@ func TestOfficialEnterpriseSelectionsAndCoexistence(t *testing.T) {
 		t.Fatal("unrelated delivery removed", names, len(app.Local.peers), app.Engine.State())
 	}
 	saveApp(t, app, func(c M) {
-		O(O(c["agents"])["root"])["disabledTuckTools"] = []any{"upload_runcove_file", "send_session_message"}
+		O(O(c["agents"])["root"])["disabledTuckTools"] = []any{"upload_runcove_file", "send_conversation_message"}
 	})
 	names = visible()
-	if !Contains(names, "list_sessions") || Contains(names, "send_session_message") || !Contains(names, "download_runcove_files") || Contains(names, "upload_runcove_file") {
+	if !Contains(names, "list_conversations") || Contains(names, "send_conversation_message") || !Contains(names, "download_runcove_files") || Contains(names, "upload_runcove_file") {
 		t.Fatal(names)
 	}
 	f.change(func() { O(f.controls["state"])["runtimeBlocked"] = true })

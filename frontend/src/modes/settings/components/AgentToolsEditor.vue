@@ -33,8 +33,8 @@ const imageResource=computed({get:()=>{const r=agent.value?.imageGenerator;retur
 const tuckTools=[
   {id:'inspect_attachments',label:'识别附件',description:'读取任务目录或已连接的 Runcove 工作区中的附件并返回文字；目前支持图片，暂不支持 PDF。',readonlyAllowed:true},
   {id:'generate_images',label:'生成图片',description:'使用已配置的生图资源，保存原图并将图片返回模型上下文；需可写的本地主任务目录。',main:true},
-  {id:'list_sessions',label:'查看会话',description:'列出主会话及其任务 ID、助手和当前状态。',main:true},
-  {id:'send_session_message',label:'发送会话消息',description:'按用户要求向指定主会话发送消息。',main:true},
+  {id:'list_conversations',label:'查看会话',description:'列出未归档主会话及其会话 ID、标题、助手和当前状态。',main:true},
+  {id:'send_conversation_message',label:'发送会话消息',description:'按用户要求向指定主会话发送消息。',main:true},
   {id:'upload_runcove_file',label:'上传工作区文件',description:'将本地工作目录中的文件上传到 Runcove 工作区。'},
   {id:'download_runcove_files',label:'批量下载工作区文件',description:'下载 1–20 个文件到指定本地目录，保留文件名，默认不覆盖已有文件。'},
 ]

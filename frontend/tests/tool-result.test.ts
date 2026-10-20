@@ -2,6 +2,13 @@ import {describe,it,expect} from 'vitest'
 import {readTuckToolResult} from '../src/modes/chat/components/tool-result'
 
 describe('Tuck tool result presentation',()=>{
+ it('recognizes conversation tools while leaving native tools raw',()=>{
+  const result={status:'completed',conversations:[{conversation_id:'task',title:'Review'}]}
+  expect(readTuckToolResult('list_conversations',result)).toEqual(result)
+  expect(readTuckToolResult('send_conversation_message',{status:'accepted'})).toEqual({status:'accepted'})
+  expect(readTuckToolResult('list_sessions',result)).toBeNull()
+  expect(readTuckToolResult('list_tasks',result)).toBeNull()
+ })
  it('reads direct and official MCP envelopes without changing the result',()=>{
   const result={status:'completed',text:'First line\n\n**Second line**'}
   for(const value of [result,JSON.stringify(result),{structuredContent:result},{content:[{type:'text',text:JSON.stringify(result)}]}])expect(readTuckToolResult('inspect_attachments',value)).toEqual(result)

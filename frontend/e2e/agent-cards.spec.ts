@@ -147,6 +147,10 @@ test('Tuck switches persist and theme menu applies immediately without saving th
   for(const name of ['启用查看会话','启用发送会话消息','启用上传工作区文件','启用批量下载工作区文件'])await page.getByRole('checkbox',{name,exact:true}).uncheck()
   await page.getByRole('button',{name:'保存并生效',exact:true}).click();await expect(page.getByRole('status')).toHaveText('已保存并生效')
   await page.reload();await expect(page.getByRole('checkbox',{name:'启用上传工作区文件',exact:true})).not.toBeChecked()
+  for(const name of ['启用查看会话','启用发送会话消息'])await expect(page.getByRole('checkbox',{name,exact:true})).not.toBeChecked()
+  const disabled=(await f.read()).config.agents.root.disabledTuckTools
+  expect(disabled).toEqual(expect.arrayContaining(['list_conversations','send_conversation_message']))
+  expect(disabled).not.toContain('list_sessions');expect(disabled).not.toContain('send_session_message')
   await page.getByRole('checkbox',{name:'启用上传工作区文件',exact:true}).check()
   const before=(await f.read()).revision,url=page.url()
   await page.getByTestId('mode-settings').click()

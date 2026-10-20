@@ -1,12 +1,12 @@
 # 持久化版本与迁移
 
-本文描述已实现的正式 Go v1 → v2 迁移及后续维护约定。实现入口为 [migrations.go](../internal/tuck/migrations.go)，结构识别在 [storage_schema.go](../internal/tuck/storage_schema.go)，离线数据检查在 [persistence_check.go](../internal/tuck/persistence_check.go)。正常启动只接受当前版本或初始化空库，不在启动过程中升级已有数据。
+本文描述正式 Go 配置 v1 → v2 → v3、数据库 v1 → v2 迁移及后续维护约定。实现入口为 [migrations.go](../internal/tuck/migrations.go)，结构识别在 [storage_schema.go](../internal/tuck/storage_schema.go)，离线数据检查在 [persistence_check.go](../internal/tuck/persistence_check.go)。正常启动只接受当前版本或初始化空库，不在启动过程中升级已有数据。
 
 ## 所有权与版本
 
 | 持久内容 | 版本及事实来源 | 迁移与保留规则 |
 | --- | --- | --- |
-| 唯一配置 `tuck.config.json` | 顶层 `schemaVersion=2`，独立于数据库和程序版本 | 配置 owner 校验后原子替换；保留密码哈希、credentialKey、身份、路径、用户参数及合法原生扩展 |
+| 唯一配置 `tuck.config.json` | 顶层 `schemaVersion=3`，独立于数据库和程序版本 | 配置 owner 校验后原子替换；保留密码哈希、credentialKey、身份、路径、用户参数及合法原生扩展 |
 | Tuck `tuck.db` | `application_id=0x5455434b`、`user_version=2`，并核对完整实际 DDL | 编号 SQL 和必要的数据变换在一个事务内提交；不根据表名或版本数字猜来源 |
 | tasks / messages / events 的 JSON | 由数据库版本统一管理；不在每个 DTO 再加一套版本 | 结构或语义变更必须写数据库迁移；原生事件正文属于外部公开合同，保留原值 |
 | `task_deliveries.files_json` 与 `deliveries/snapshots/<task>/<delivery>/files/<file>` | 当前文件布局 v1；其解释由数据库版本管理 | 当前迁移不搬移或重写文件；保留交付 ID、版本、摘要、路径、大小和 SHA256 |
@@ -26,6 +26,10 @@
 
 配置 1 → 2 保留所有设置，只提升版本并要求有效的 32 字节 `security.credentialKey`。v1 初始化生成的原密钥继续使用；缺失密钥的旧文件需先从匹配备份恢复，不自动补随机值。新建安装仍由 `tuck init` 生成独立密钥。所有写入在保存前限制为自身可读取的 4 MiB，包括格式化后的配置和加密前的平台状态。
 
+配置 2 → 3 将 Tuck 工具 `list_sessions` / `send_session_message` 改为 `list_conversations` / `send_conversation_message`，列表字段改为 `conversations[].conversation_id`，发送参数改为 `target_conversation_id`。迁移替换 `agents.*.disabledTuckTools` 中的旧名称；顶层 `permissions` 保留原规则，对匹配旧工具而需要调整名称或参数的规则，追加新工具的精确名称及相同参数条件，将发送规则中的 `target_task_id` 改为 `target_conversation_id`。涵盖 allow、ask、deny，不扩大通配符范围。保留旧规则是为了不改变原生或外部同名工具的许可，不继续暴露旧 Tuck 工具别名。
+
+自定义 Agent 指令、hooks、外接引擎全局配置和原生会话级权限不属于上述名称迁移，升级前需核对其中的旧工具引用及授权。历史工具调用保留原名称和原始结果，不重写原生历史。数据库保持 v2；生成的原生 YAML 升到格式 16 与本次工具名称迁移是独立变化。
+
 完整校验也覆盖本机工具数量、引擎路径类型，以及平台模型参数/工具选择的对象类型。错误的数组、null 或标量不能静默转成空对象，尤其不能因此把明确的工具选择解释为默认全部授权范围。格式正确的值原样保留；不符合合同的旧文件先明确修正，再执行迁移。
 
 数据库 1 → 2 使用 [001.sql](../internal/tuck/contract/storage/001.sql) 和 [002.sql](../internal/tuck/contract/storage/002.sql)。v1 是已发布基线，v2 增加平台密文 `format_version`，将 AES-GCM AAD 从固定字符串升级为包含格式版本与 installation_id 的认证内容，并将 MCP 缓存约束收紧为可读取的数组。原平台明文字节解密校验后直接重新加密，既不转换 Snapshot，也不刷新凭据或访问平台。没有平台行时不创建虚构绑定。
@@ -42,7 +46,7 @@
 
 ```text
 tuck migrate --check --config /path/to/tuck.config.json
-tuck migrate --backup /backup/tuck-before-v2 --config /path/to/tuck.config.json
+tuck migrate --backup /backup/tuck-before-upgrade --config /path/to/tuck.config.json
 tuck migrate --check --config /path/to/tuck.config.json
 tuck serve --config /path/to/tuck.config.json
 ```

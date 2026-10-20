@@ -124,7 +124,7 @@ func TestHTTPAuthenticationFilesSSEAndReverseProxy(t *testing.T) {
 		t.Fatal(status)
 	}
 	session := connectTuckTools(t, app, task, "root")
-	callTuckTool(t, session, "list_sessions", M{}, false)
+	callTuckTool(t, session, "list_conversations", M{}, false)
 	status, _, _ = requestApp(t, app, "POST", "/api/tools/list-sessions", M{}, http.Header{"Authorization": {"Bearer " + app.Models.Secret}})
 	if status != 401 {
 		t.Fatal("removed API tool bypassed browser authentication", status)

@@ -56,8 +56,8 @@ func TestModelContentToolInstructions(t *testing.T) {
 	}{
 		{nil, ""},
 		{[]string{"inspect_attachments"}, "The Tuck toolset provides the following tool: inspect_attachments."},
-		{[]string{"send_session_message", "list_sessions"}, "The Tuck toolset provides the following tools: list_sessions and send_session_message."},
-		{modelContent.ToolNames(), "The Tuck toolset provides the following tools: list_sessions, send_session_message, deliver_result, upload_runcove_file, download_runcove_files, generate_images, and inspect_attachments."},
+		{[]string{"send_conversation_message", "list_conversations"}, "The Tuck toolset provides the following tools: list_conversations and send_conversation_message."},
+		{modelContent.ToolNames(), "The Tuck toolset provides the following tools: list_conversations, send_conversation_message, deliver_result, upload_runcove_file, download_runcove_files, generate_images, and inspect_attachments."},
 	} {
 		if got := modelContent.Instructions(modelContent.Tools(tt.names, nil)); got != tt.want {
 			t.Fatalf("%q != %q", got, tt.want)
@@ -140,9 +140,9 @@ func TestUnifiedMCPActorPermissions(t *testing.T) {
 			} else {
 				// A cached definition is not authorization after its switch changes.
 				c := local.Models.Config()
-				O(O(c["agents"])["root"])["disabledTuckTools"] = []string{"list_sessions"}
+				O(O(c["agents"])["root"])["disabledTuckTools"] = []string{"list_conversations"}
 				f.p.save(c)
-				result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "list_sessions", Arguments: M{}})
+				result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "list_conversations", Arguments: M{}})
 				if err == nil && !result.IsError {
 					t.Fatal("disabled tool remained callable", result)
 				}

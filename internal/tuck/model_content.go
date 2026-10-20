@@ -21,7 +21,7 @@ func (modelContentBuilder) DefaultInstruction(agent string) string {
 	return modelText(modelTextID("tuck.agent." + agent + ".instruction"))
 }
 func (modelContentBuilder) ToolNames() []string {
-	return []string{"list_sessions", "send_session_message", "deliver_result", "upload_runcove_file", "download_runcove_files", "generate_images", "inspect_attachments"}
+	return []string{"list_conversations", "send_conversation_message", "deliver_result", "upload_runcove_file", "download_runcove_files", "generate_images", "inspect_attachments"}
 }
 func (modelContentBuilder) Tools(names []string, imageResource M) []M {
 	return buildToolDefinitions(names, imageResource)

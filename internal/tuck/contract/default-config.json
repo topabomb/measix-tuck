@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "server": {
     "listenHost": "127.0.0.1",
     "port": 8090,
@@ -177,8 +177,8 @@
       "user_prompt",
       "transfer_task",
       "*_background_agent*",
-      "list_sessions",
-      "send_session_message"
+      "list_conversations",
+      "send_conversation_message"
     ]
   },
   "localMcp": [],

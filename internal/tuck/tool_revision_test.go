@@ -78,7 +78,7 @@ func TestInspectionLocalRootReplacedAndRemoteDecode(t *testing.T) {
 	}
 }
 
-func TestListSessionsLimit(t *testing.T) {
+func TestListConversationsLimit(t *testing.T) {
 	f := newPlatformFixture(t, 5)
 	app := f.startApp()
 	sender := newParityTask(t, app, nil)
@@ -90,8 +90,8 @@ func TestListSessionsLimit(t *testing.T) {
 		args          M
 		count, status int
 	}{{M{}, 10, 200}, {M{"limit": 1}, 1, 200}, {M{"limit": 100}, 12, 200}, {M{"limit": 0}, 0, 400}, {M{"limit": 101}, 0, 400}, {M{"limit": 1.5}, 0, 400}} {
-		result := callTuckTool(t, session, "list_sessions", tt.args, tt.status != 200)
-		if tt.status == 200 && len(A(result["sessions"])) != tt.count {
+		result := callTuckTool(t, session, "list_conversations", tt.args, tt.status != 200)
+		if tt.status == 200 && len(A(result["conversations"])) != tt.count {
 			t.Fatal(tt, result)
 		}
 	}
@@ -227,7 +227,7 @@ func TestRuncoveInspectionNativeAndPreview(t *testing.T) {
 				if data["name"] != inspectionTool {
 					continue
 				}
-				decoy := newBlock("call:other", "tool-call", M{"name": "list_sessions", "callId": "other", "input": M{}})
+				decoy := newBlock("call:other", "tool-call", M{"name": "list_conversations", "callId": "other", "input": M{}})
 				m["blocks"] = append([]any{decoy}, A(m["blocks"])...)
 				if e := app.Store.SaveMessage(id, m); e != nil {
 					t.Fatal(e)

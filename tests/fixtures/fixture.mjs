@@ -62,11 +62,11 @@ export async function fixture(options={}) {
       else content = '后台检查已经返回实际结果。';
     }
     else if (prompt.includes('CROSS_SESSION_')) {
-      if (!done.includes('list_sessions')) calls = [tool('list_sessions', {include_archived:true})];
-      else if (!done.includes('send_session_message')) {
-        const listed = toolOutputs.map(item => { try { return JSON.parse(item.content); } catch { return {}; } }).find(item => item.sessions);
-        const target = listed?.sessions.find(item => item.title === '消息接收方');
-        calls = [tool('send_session_message', { target_task_id: ` ${target?.task_id} `, message: prompt.includes('IDLE') ? '空闲协作测试消息' : '执行中协作测试消息', timeout_secs:30 })];
+      if (!done.includes('list_conversations')) calls = [tool('list_conversations', {})];
+      else if (!done.includes('send_conversation_message')) {
+        const listed = toolOutputs.map(item => { try { return JSON.parse(item.content); } catch { return {}; } }).find(item => item.conversations);
+        const target = listed?.conversations.find(item => item.title === '消息接收方');
+        calls = [tool('send_conversation_message', { target_conversation_id: ` ${target?.conversation_id} `, message: prompt.includes('IDLE') ? '空闲协作测试消息' : '执行中协作测试消息' })];
       } else content = '已通过实际工具投递协作消息。';
     }
     else if (delivery && prompt.includes('TEXT_DELIVERY')) { if (!done.includes('deliver_result')) calls=[tool('deliver_result',{summary:'核对完成，请查看交付。',files:[]})]; }
@@ -100,7 +100,7 @@ export async function fixture(options={}) {
  config.agents.root.max_iterations=maxIterations;
  config.agents.root.sub_agents=['worker'];
  config.agents.worker={description:'Task specialist',instruction:'CHILD_ONLY independent reviewer.',max_iterations:16,toolsets:[{type:'user_prompt'}]};
- config.permissions={allow:['create_todos','update_todos','user_prompt','transfer_task','*_background_agent*','list_sessions','send_session_message'],ask:['write_file','shell']};
+ config.permissions={allow:['create_todos','update_todos','user_prompt','transfer_task','*_background_agent*','list_conversations','send_conversation_message'],ask:['write_file','shell']};
  config.workbench.defaultAgent='root';
  if(!localAssistants)config.workbench.assistants=config.workbench.assistants.filter(a=>a.agent==='root');
  for(const assistant of config.workbench.assistants){assistant.workspace={mode:'auto'};assistant.deliveryTool=delivery;}

@@ -6,7 +6,7 @@
 
 | 分组 | 内容 |
 | --- | --- |
-| schemaVersion | 当前 2；正式 Go v1 须显式离线迁移，拒绝未知格式与重复 JSON 键 |
+| schemaVersion | 当前 3；正式 Go v1/v2 须显式离线迁移，拒绝未知格式与重复 JSON 键 |
 | server | listenHost、port、frontendDir；默认 127.0.0.1:8090、frontend/dist |
 | storage | dataDir、workspaceRoot；默认 data、data/workspaces |
 | engine | mode=managed/external、version、binary、url、desktopProxy；默认官方 v1.150.0、回环 8091 |
@@ -60,7 +60,7 @@
 
 默认选择包含 `source=local/platform` 和 `imageId`；空对象或省略时采用平台 defaultImageGenerationId（如有）。明确选择失效时保留不可用事实，不换资源；工具不接受 resource 参数，无可用的有效选择时不提供生图工具。
 
-生图设置归入 providers 配置保护，使用相同保存/中断/延后应用流程。在编辑器内修改生图资源标识时，同步更新指向它的本地默认选择和 Agent 覆盖；Agent 配置受保护时需先解锁才能修改资源标识；修改尚未保存的提供商标识时，同步更新生图资源对该连接的引用。删除资源不会自动改选其他资源；删除仍被生图资源引用的连接时，须先调整或删除这些引用才能保存。新增字段可省略，缺省未配置；不改变旧聊天配置、数据库或文件布局的解释，配置版本仍为 2。使用这些新字段后，旧程序不能识别新能力；回退须恢复对应配置备份，不手改版本绕过校验。
+生图设置归入 providers 配置保护，使用相同保存/中断/延后应用流程。在编辑器内修改生图资源标识时，同步更新指向它的本地默认选择和 Agent 覆盖；Agent 配置受保护时需先解锁才能修改资源标识；修改尚未保存的提供商标识时，同步更新生图资源对该连接的引用。删除资源不会自动改选其他资源；删除仍被生图资源引用的连接时，须先调整或删除这些引用才能保存。新增字段可省略，缺省未配置；不改变旧聊天配置、数据库或文件布局的解释，无需单独提升配置版本。使用这些新字段后，旧程序不能识别新能力；回退须恢复对应配置备份，不手改版本绕过校验。
 
 聊天模型仍需独立配置；需要模型理解工具返回的图片时，选择声明 IMAGE 输入并实际支持视觉的聊天模型。生图工具许可在设置 → Agent → Tuck 工具中控制，详见 [工具参考](tools-reference.md#文生图1-个)。TTS、ASR 和其他线协议仅属于[目标架构规划](architecture.md#模型操作的目标架构与实施范围)。
 
@@ -74,7 +74,7 @@ Agent 可通过 `agents.<name>.imageGenerator` 覆盖生图资源，值与全局
 
 ## Tuck 原生工具集
 
-Tuck 工具不通过 `localMcp` 登记。`agents.<name>.disabledTuckTools` 可停用六个工具：`list_sessions`、`send_session_message`、`upload_runcove_file`、`download_runcove_files`、`generate_images`、`inspect_attachments`；缺省不额外禁用。交付由 `workbench.assistants[].deliveryTool` 控制。最终集合仍受主/子代理、只读及资源条件限制。
+Tuck 工具不通过 `localMcp` 登记。`agents.<name>.disabledTuckTools` 可停用六个工具：`list_conversations`、`send_conversation_message`、`upload_runcove_file`、`download_runcove_files`、`generate_images`、`inspect_attachments`；缺省不额外禁用。交付由 `workbench.assistants[].deliveryTool` 控制。最终集合仍受主/子代理、只读及资源条件限制。
 
 开关保存并应用后重新装配，不把保存当作已生效；`requireDelivery` 保留运行中更新语义。默认指令只供初始化，不静默改写已有用户指令。统一 MCP 和服务级说明见 [架构](architecture.md#tuck-原生工具集与-mcp)，工具用途见 [工具参考](tools-reference.md)。
 

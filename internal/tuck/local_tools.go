@@ -80,7 +80,7 @@ func configuredTuckTools(config M, agent string, main bool) []string {
 			continue
 		}
 		switch name {
-		case "list_sessions", "send_session_message", "generate_images":
+		case "list_conversations", "send_conversation_message", "generate_images":
 			if assistant == nil {
 				continue
 			}
@@ -89,7 +89,7 @@ func configuredTuckTools(config M, agent string, main bool) []string {
 				continue
 			}
 		}
-		if B(a["readonly"]) && name != "list_sessions" && name != inspectionTool {
+		if B(a["readonly"]) && name != "list_conversations" && name != inspectionTool {
 			continue
 		}
 		names = append(names, name)
@@ -277,10 +277,10 @@ func (l *LocalTools) installDefinitions(peer *toolPeer, defs []M) bool {
 			defer cancel()
 			var result M
 			switch name {
-			case "list_sessions":
-				result, e = l.Manager.ListSessions(O(args))
-			case "send_session_message":
-				result, e = l.Manager.SendSessionMessage(combined, O(args))
+			case "list_conversations":
+				result, e = l.Manager.ListConversations(O(args))
+			case "send_conversation_message":
+				result, e = l.Manager.SendConversationMessage(combined, O(args))
 			case "deliver_result":
 				result = l.Delivery.Submit(combined, turn, O(args))
 			case "inspect_attachments":
@@ -291,7 +291,7 @@ func (l *LocalTools) installDefinitions(peer *toolPeer, defs []M) bool {
 				result = l.Transfer(combined, turn, name, O(args))
 			}
 			if e != nil {
-				return modelContent.MCPResult(modelContent.Error(e)), nil
+				result = modelContent.Error(e)
 			}
 			return modelContent.MCPResult(modelContent.ToolResult(name, result)), nil
 		})

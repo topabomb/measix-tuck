@@ -722,7 +722,7 @@ func TestParityNativeWorkspaceModes(t *testing.T) {
 		b := O(req["body"])
 		prompt, _ := recentNative(b)
 		if prompt == "WORKSPACE_NATIVE_PROOF" {
-			for _, name := range []string{"read_file", "write_file", "deliver_result", "list_sessions", "send_session_message"} {
+			for _, name := range []string{"read_file", "write_file", "deliver_result", "list_conversations", "send_conversation_message"} {
 				if !Contains(nativeNames(b), name) {
 					t.Fatal("none mode removed tools", name)
 				}

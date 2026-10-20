@@ -438,7 +438,7 @@ func TestSessionMessageUnicodeLength(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m, _, _, id := taskFixture(t)
 			mustUpdate(t, m, id, M{"queuePaused": true})
-			value, err := m.SendSessionMessage(context.Background(), M{"target_task_id": id, "message": tc.message})
+			value, err := m.SendConversationMessage(context.Background(), M{"target_conversation_id": id, "message": tc.message})
 			queue := A(mustTask(t, m, id)["queue"])
 			if tc.accepted {
 				if err != nil || value["status"] != "accepted" || len(queue) != 1 {
@@ -473,8 +473,8 @@ func TestCollaborationSubmissionUnconfirmed(t *testing.T) {
 				}
 				return M{}, nil
 			}
-			_, err := m.SendSessionMessage(context.Background(), M{"target_task_id": id, "message": "Check the result"})
-			if err == nil || Code(err) != "session_message_unconfirmed" || calls != 1 {
+			_, err := m.SendConversationMessage(context.Background(), M{"target_conversation_id": id, "message": "Check the result"})
+			if err == nil || Code(err) != "conversation_message_unconfirmed" || calls != 1 {
 				t.Fatal("submission outcome or retry", err, calls)
 			}
 			value := modelContent.Error(err)
@@ -492,7 +492,7 @@ func TestCollaborationSubmissionUnconfirmed(t *testing.T) {
 			mustEvent(t, m, id, M{"type": "user_message", "session_id": task["nativeSessionId"], "message_id": "receipt", "message": modelContent.Collaboration("Confirmed message")})
 			return nil, context.DeadlineExceeded
 		}
-		value, err := m.SendSessionMessage(context.Background(), M{"target_task_id": id, "message": "Confirmed message"})
+		value, err := m.SendConversationMessage(context.Background(), M{"target_conversation_id": id, "message": "Confirmed message"})
 		if err != nil || value["status"] != "accepted" || calls != 1 {
 			t.Fatal("confirmed submission lost", value, err, calls)
 		}
@@ -503,7 +503,7 @@ func TestCollaborationSubmissionUnconfirmed(t *testing.T) {
 		t.Fatal("precondition failure submitted a message")
 		return nil, nil
 	}
-	_, err := m.SendSessionMessage(context.Background(), M{"target_task_id": id, "message": "Wait for approval"})
+	_, err := m.SendConversationMessage(context.Background(), M{"target_conversation_id": id, "message": "Wait for approval"})
 	if Code(err) != "interaction_pending" || modelContent.Error(err)["status"] != "failed" {
 		t.Fatal("precondition failure became uncertain", err)
 	}

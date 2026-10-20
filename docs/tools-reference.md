@@ -4,7 +4,7 @@
 
 下文 `?` 表示可采用默认值。原生工具经过模型协议转换后，部分可选字段会出现在 `required` 中并允许 `null`；此时应按模型收到的 schema 填写 `null`，不能照抄省略字段的示意调用。七个 Tuck 工具的成功字段、英文错误类型及可选字段遵守[工具返回合同](tool-results.md)，外部和原生工具保持原合同。
 
-Tuck 自实现工具统一不加来源或分组前缀：`list_sessions`、`send_session_message`、`deliver_result`、`upload_runcove_file`、`download_runcove_files`、`generate_images`、`inspect_attachments`。名称采用动词在前、对象在后，保留会话、Runcove 等必要限定。工具定义与全部 Tuck 自组织提示词遵守 [模型可见内容的唯一入口](architecture.md#模型可见内容的唯一入口)；实际文案资源维护在源码中。
+Tuck 自实现工具统一不加来源或分组前缀：`list_conversations`、`send_conversation_message`、`deliver_result`、`upload_runcove_file`、`download_runcove_files`、`generate_images`、`inspect_attachments`。名称采用动词在前、对象在后，保留任务、Runcove 等必要限定。工具定义与全部 Tuck 自组织提示词遵守 [模型可见内容的唯一入口](architecture.md#模型可见内容的唯一入口)；实际文案资源维护在源码中。
 
 装配方式、服务级说明及引擎边界见 [架构](architecture.md#tuck-原生工具集与-mcp)。本文维护工具输入和调用行为，输出字段及错误码统一见 [工具返回合同](tool-results.md)。
 
@@ -100,32 +100,34 @@ Tuck 自实现工具统一不加来源或分组前缀：`list_sessions`、`send_
 
 等待超时单位秒，默认 300，`0` 使用默认值，上限 3600。超时或取消等待不会停止后台任务；某个任务失败也不会提前结束对其余任务的等待。需要停止时使用 `stop_background_agent`。
 
-后台任务 ID、原生会话 ID 和 Tuck `task_id` 是不同身份。后台工具只使用 `run_background_agent` 返回的 ID；独立子会话及历史可能稍后才可用。启动成功或最近状态报告不能被描述为持续执行或已完成，详见 [生命周期边界](architecture.md#生命周期边界)。
+后台任务 ID、原生会话 ID 和 Tuck `conversation_id` 是不同身份。后台工具只使用 `run_background_agent` 返回的 ID；独立子会话及历史可能稍后才可用。启动成功或最近状态报告不能被描述为持续执行或已完成，详见 [生命周期边界](architecture.md#生命周期边界)。
 
 ## 会话协作：2 个
 
-### `list_sessions`
+### `list_conversations`
 
-可选整数 `limit` 默认 10、范围 1–100。按已有创建时间和最近一轮开始/结束时间中较新值排序，不新增持久化活动状态。只列出当前未归档主会话，不包含原生子会话。后续发送使用这里的精确 `task_id`，不能使用标题或后台任务 ID 代替。 Tuck 会话 ID 为服务端生成的 16 位随机 base62；原生工具调用、后台任务和问题的 `elicitation_id` 保持原生值，不能按 Tuck ID 格式改写或推断。
+列出 Tuck 产品主会话，区别于官方 `session_context` 的 `list_sessions`（原生历史会话）和 `tasks` 的 `list_tasks`（待办条目）。`conversation_id` 沿用内部 Tuck 任务 ID 的值，不建立另一套身份；名称变更的旧配置处理见 [迁移约定](persistence-migrations.md#当前迁移)。
+
+可选整数 `limit` 默认 10、范围 1–100。按已有创建时间和最近一轮开始/结束时间中较新值排序，不新增持久化活动状态。只列出当前未归档主会话，不包含原生子会话。后续发送使用这里的精确 `conversation_id`，不能使用标题或后台任务 ID 代替。Tuck 会话 ID 为服务端生成的 16 位随机 base62；原生工具调用、后台任务和问题的 `elicitation_id` 保持原生值，不能按 Tuck ID 格式改写或推断。
 
 通过统一 Tuck MCP 工具入口调用；`limit` 按 schema 接收整数，拒绝无效值和未知字段，不另装配 HTTP API 工具。
 
-### `send_session_message`
+### `send_conversation_message`
 
 | 参数 | 必填 | 含义 |
 | --- | --- | --- |
-| `target_task_id: string` | 是 | `list_sessions` 返回的目标主会话 ID |
+| `target_conversation_id: string` | 是 | `list_conversations` 返回的目标主会话 ID |
 | `message: string` | 是 | 去除首尾空白后非空的消息；输入长度最多 100,000 字符 |
 
 长度按 Unicode 字符计数。添加协作来源标记后的完整消息仍受 Tuck 单条消息的 100,000 字符上限约束，因此接近上限时还需为标记留出空间；中文和 emoji 不按 UTF-8 字节数重复扣减额度。
 
-目标必须是未归档主会话。执行中的会话经原生 `/steer` 提交补充；空闲会话经 Submit 排队，队列未暂停时启动新轮；等待审批或回答等交互的会话拒绝投递。消息经统一内容入口附带协作来源标记，提交不保证模型已立即消费。实际提交后响应或记录无法确认时返回 `unknown / session_message_unconfirmed`，须核查目标后再决定是否重发；提交前的错误保留对应业务类型。成功结果如下：
+目标必须是未归档主会话。执行中的会话经原生 `/steer` 提交补充；空闲会话经 Submit 排队，队列未暂停时启动新轮；等待审批或回答等交互的会话拒绝投递。消息经统一内容入口附带协作来源标记，提交不保证模型已立即消费。实际提交后响应或记录无法确认时返回 `unknown / conversation_message_unconfirmed`，须核查目标后再决定是否重发；提交前的错误保留对应业务类型。成功结果如下：
 
 ```json
 {"status":"accepted"}
 ```
 
-`accepted` 只表示已接收，不表示目标任务完成；不回显目标、消息或内部投递方式。仅在用户明确要求联系该会话时发送，可按任务需要在消息中要求回复并明确所需反馈。工具不负责跨会话复制文件。
+`accepted` 只表示已接收，不表示接收方已完成消息要求的工作；不回显目标、消息或内部投递方式。仅在用户明确要求联系该会话时发送，可按任务需要在消息中要求回复并明确所需反馈。工具不负责跨会话复制文件。
 
 目标 ID 去除首尾空白后查找；目标 ID 和消息仍必须是字符串。额外字段忽略，不改变目标、投递方式或等待交互时的拒绝规则。
 

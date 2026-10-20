@@ -58,10 +58,10 @@ func buildToolDefinitions(names []string, imageResource M) []M {
 		}
 		var d M
 		switch name {
-		case "list_sessions":
+		case "list_conversations":
 			d = M{"name": name, "description": modelText(textList), "inputSchema": M{"type": "object", "additionalProperties": false, "properties": M{"limit": M{"type": []string{"integer", "null"}, "minimum": 1, "maximum": 100, "default": 10, "description": modelText(textLimit)}}}}
-		case "send_session_message":
-			d = M{"name": name, "description": modelText(textSend), "inputSchema": M{"type": "object", "additionalProperties": false, "required": []string{"target_task_id", "message"}, "properties": M{"target_task_id": M{"type": "string", "minLength": 1, "description": modelText(textTarget)}, "message": M{"type": "string", "minLength": 1, "maxLength": 100000, "description": modelText(textMessage)}}}}
+		case "send_conversation_message":
+			d = M{"name": name, "description": modelText(textSend), "inputSchema": M{"type": "object", "additionalProperties": false, "required": []string{"target_conversation_id", "message"}, "properties": M{"target_conversation_id": M{"type": "string", "minLength": 1, "description": modelText(textTarget)}, "message": M{"type": "string", "minLength": 1, "maxLength": 100000, "description": modelText(textMessage)}}}}
 		case "deliver_result":
 			d = deliveryDefinition()
 		case "upload_runcove_file":
@@ -73,7 +73,7 @@ func buildToolDefinitions(names []string, imageResource M) []M {
 		case "inspect_attachments":
 			d = inspectionDefinition()
 		}
-		if name == "list_sessions" || name == inspectionTool {
+		if name == "list_conversations" || name == inspectionTool {
 			d["annotations"] = M{"readOnlyHint": true}
 		}
 		definitions = append(definitions, d)

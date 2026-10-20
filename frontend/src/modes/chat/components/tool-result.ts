@@ -1,5 +1,5 @@
 // Interpret only Tuck's documented result contract; external tool output stays raw.
-const tuckTools=new Set(['list_sessions','send_session_message','deliver_result','upload_runcove_file','download_runcove_files','generate_images','inspect_attachments'])
+const tuckTools=new Set(['list_conversations','send_conversation_message','deliver_result','upload_runcove_file','download_runcove_files','generate_images','inspect_attachments'])
 export function readTuckToolResult(name:string,value:unknown):Record<string,unknown>|null {
  if(!tuckTools.has(name))return null
  function read(value:unknown,depth:number):Record<string,unknown>|null {

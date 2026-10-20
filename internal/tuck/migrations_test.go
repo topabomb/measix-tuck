@@ -6,6 +6,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/base64"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -147,6 +148,7 @@ func TestMigrationV1PreservesAllOwnedData(t *testing.T) {
 	}
 	want := Clone(config)
 	want["schemaVersion"] = configVersion
+	O(want["permissions"])["allow"] = append(A(O(want["permissions"])["allow"]), "list_conversations", "send_conversation_message")
 	if !reflect.DeepEqual(current.Applied(), Clone(want)) {
 		t.Fatal("configuration values changed")
 	}
@@ -295,6 +297,51 @@ func TestMigrationIndependentVersionsAndRestart(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestMigrationTaskToolNamesPreservesPolicy(t *testing.T) {
+	for _, version := range []int{1, 2} {
+		t.Run(fmt.Sprint(version), func(t *testing.T) {
+			_, source, store := legacyMigrationFixture(t)
+			store.Close()
+			source["schemaVersion"] = version
+			agent := O(O(source["agents"])["root"])
+			agent["disabledTuckTools"] = []any{"list_sessions", "send_session_message", "generate_images"}
+			instruction := S(agent["instruction"])
+			source["permissions"] = M{
+				"allow": []any{"list_sessions", "read_*", "list_conversations"},
+				"ask":   []any{"SEND_SESSION_MESSAGE:target_task_id=chosen:message=https://example.test"},
+				"deny":  []any{"*_session_*:target_task_id=private*", "list_*", "send_*:target_task_id=restricted*"},
+			}
+			before := JSON(source)
+			next, err := migrateConfiguration(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(before, JSON(source)) {
+				t.Fatal("migration mutated source")
+			}
+			if I(next["schemaVersion"]) != 3 || S(O(O(next["agents"])["root"])["instruction"]) != instruction {
+				t.Fatal("wrong version or custom instruction changed")
+			}
+			wantDisabled := []any{"list_conversations", "send_conversation_message", "generate_images"}
+			if !reflect.DeepEqual(O(O(next["agents"])["root"])["disabledTuckTools"], wantDisabled) {
+				t.Fatal("disabled tool selection changed", next["agents"])
+			}
+			wantPermissions := M{
+				"allow": []any{"list_sessions", "read_*", "list_conversations"},
+				"ask":   []any{"SEND_SESSION_MESSAGE:target_task_id=chosen:message=https://example.test", "send_conversation_message:target_conversation_id=chosen:message=https://example.test"},
+				"deny":  []any{"*_session_*:target_task_id=private*", "list_*", "send_*:target_task_id=restricted*", "send_conversation_message:target_conversation_id=private*", "send_conversation_message:target_conversation_id=restricted*"},
+			}
+			if !reflect.DeepEqual(O(next["permissions"]), wantPermissions) {
+				t.Fatal("permission scope changed", next["permissions"])
+			}
+			again, err := migrateConfiguration(next)
+			if err != nil || !bytes.Equal(JSON(next), JSON(again)) {
+				t.Fatal("migration was not idempotent", err)
+			}
+		})
 	}
 }
 

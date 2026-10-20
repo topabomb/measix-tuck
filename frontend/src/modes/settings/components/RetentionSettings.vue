@@ -57,36 +57,35 @@ onMounted(load)
     <h3>归档与保留</h3>
     <form v-if="policy" @submit.prevent="review">
       <fieldset :disabled="busy || !!preview">
-        <legend>普通对话</legend>
-        <label><input v-model="policy.conversations.autoArchive" type="checkbox" />自动归档</label>
-        <label>无活动天数<input v-model.number="policy.conversations.inactiveDays" type="number" min="1" max="36500" required /></label>
-        <label><input v-model="policy.conversations.autoDelete" type="checkbox" />永久删除已过期归档</label>
+        <legend>对话记录</legend>
+        <label><input v-model="policy.conversations.autoArchive" type="checkbox" />长时间未使用时自动归档</label>
+        <label>多少天无活动后归档<input v-model.number="policy.conversations.inactiveDays" type="number" min="1" max="36500" required /></label>
+        <p>从最后一次消息或执行活动开始计时，仅打开查看不会延长时间。归档会保留历史和文件，可以恢复后继续对话。</p>
+        <label><input v-model="policy.conversations.autoDelete" type="checkbox" />归档到期后自动永久删除</label>
         <label>归档后保留天数<input v-model.number="policy.conversations.archivedDays" type="number" min="1" max="36500" required /></label>
+        <p>永久删除会移除聊天历史、继续对话所需的上下文、统计和交付副本，无法恢复。</p>
       </fieldset>
       <fieldset :disabled="busy || !!preview">
-        <legend>临时执行记录</legend>
-        <label><input v-model="policy.temporaryRuns.autoDelete" type="checkbox" />永久删除已过期临时记录</label>
-        <label>归档后保留天数<input v-model.number="policy.temporaryRuns.archivedDays" type="number" min="1" max="36500" required /></label>
-        <p>仅适用于明确登记为临时用途的执行，普通对话不受此项影响。</p>
+        <legend>工作文件夹</legend>
+        <label><input v-model="policy.managedWorkspaces.autoCleanup" type="checkbox" />删除对话时清理自动工作文件夹</label>
+        <p>只适用于开启后新建、由 Tuck 自动创建的工作文件夹。删除对话后，会删除整个文件夹及其中全部文件；其他对话或分支仍在共用时保留。</p>
+        <p>归档不会删除文件。此选项关闭时创建的文件夹、你自己指定的文件夹及远程工作区文件会保留。</p>
+        <p>关闭此项会暂停清理；再次开启后，会继续处理此前尚未清理的文件夹。</p>
       </fieldset>
-      <fieldset :disabled="busy || !!preview">
-        <legend>自动工作目录</legend>
-        <label><input v-model="policy.managedWorkspaces.autoCleanup" type="checkbox" />纳管新建自动目录并回收无引用目录</label>
-        <p>最后一个引用对话删除后，允许回收已纳管目录中的全部工作文件。历史未纳管目录、指定目录及远程文件保留。</p>
-      </fieldset>
-      <p>归档可以恢复；永久删除将移除历史、原生上下文、统计及交付。标记保留、执行中或等待交互的对话不会自动清理。</p>
-      <div class="actions"><button type="submit" :disabled="busy || !!preview">保存保留设置</button><button type="button" :disabled="busy" @click="load">重新读取</button></div>
+      <p>标记为“保留”的对话不会自动归档或删除；执行中、等待回复或审批、有排队消息时也会暂停自动处理。</p>
+      <div class="actions"><button type="submit" :disabled="busy || !!preview">保存设置</button><button type="button" :disabled="busy" @click="load">重新读取</button></div>
     </form>
-    <button v-else type="button" :disabled="busy" @click="load">读取保留设置</button>
-    <p v-if="saved" role="status">保留设置已保存并生效。</p>
+    <button v-else type="button" :disabled="busy" @click="load">读取设置</button>
+    <p v-if="saved" role="status">归档与清理设置已生效。</p>
     <p v-if="error" role="alert">{{ error }}</p>
-    <details v-if="pending.length"><summary>尚未完成回收的目录（{{ pending.length }}）</summary><p v-for="item in pending" :key="item.id">{{ item.path }}：{{ item.error || (item.state === 'allocating' ? '创建尚未确认，保留目录待核对' : '等待按当前策略清理') }}</p></details>
-    <WorkbenchDialog v-if="preview" label="确认自动清理" :busy="busy" :dismiss-on-backdrop="false" @close="preview = undefined">
-      <h2>确认自动清理策略？</h2>
-      <p>当前预览有 {{ preview.deleteCandidates }} 个对话符合删除时间条件。执行时会再次核对，后续到期对象也将自动处理。</p>
-      <p v-if="preview.pendingDirectories">已登记 {{ preview.pendingDirectories }} 个待回收目录；实际清理仍须通过引用、在途使用和目录身份检查。</p>
-      <p>永久删除无法撤销；开启目录回收后，已纳管且无引用的自动目录及全部内容也会清理。</p>
-      <div class="actions"><button type="button" :disabled="busy" @click="preview = undefined">取消</button><button type="button" :disabled="busy" @click="save(preview.confirmation)">确认保存策略</button></div>
+    <details v-if="pending.length"><summary>尚未清理的工作文件夹（{{ pending.length }}）</summary><p v-for="item in pending" :key="item.id">{{ item.path }}：{{ item.error || (item.state === 'allocating' ? '创建结果尚未确认，暂时保留，请核对' : '等待按当前设置清理') }}</p></details>
+    <WorkbenchDialog v-if="preview" label="确认自动删除" :busy="busy" :dismiss-on-backdrop="false" @close="preview = undefined">
+      <h2>允许按这些设置自动删除吗？</h2>
+      <p v-if="policy?.conversations.autoDelete">当前有 {{ preview.deleteCandidates }} 个对话符合自动永久删除条件。保存后，后续到期的归档对话也会自动删除。</p>
+      <p v-if="policy?.managedWorkspaces.autoCleanup">开启后新建的自动工作文件夹，会在最后一个共用对话删除后，连同其中全部文件一起删除。</p>
+      <p v-if="preview.pendingDirectories">此前还有 {{ preview.pendingDirectories }} 个工作文件夹等待清理；确认后也会检查它们是否可以删除。</p>
+      <p>永久删除无法撤销。执行前会再次检查保留标记、运行状态，以及文件夹是否仍被其他对话使用。</p>
+      <div class="actions"><button type="button" :disabled="busy" @click="preview = undefined">取消</button><button type="button" :disabled="busy" @click="save(preview.confirmation)">确认保存</button></div>
     </WorkbenchDialog>
   </section>
 </template>

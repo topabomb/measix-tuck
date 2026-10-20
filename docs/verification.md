@@ -44,6 +44,8 @@ node scripts/project.mjs e2e product-navigation.spec.ts mobile-chat.spec.ts comp
 
 生命周期使用 `resource_lifecycle_test.go` 验证可注入时间下的到期、主子活动/保留/队列阻止、未知时间观察、恢复重新计时、策略重验、配置热应用及 CAS、v3 事件不重裁、托管目录共享/替换/链接/在途使用、失败责任恢复和关闭等待。`retention.spec.ts` 用官方引擎及合成模型验证确认/取消、保留、归档恢复、续聊、多窗口和 1365/390px；与删除回归一起检查历史和共享文件。Windows 不支持链接时的跳过不能代替 Linux 上实际运行。
 
+保留设置的浏览器回归还核对：未使用的临时执行记录设置隐藏且保存时配置不变、文件夹清理范围的提示、取消确认后永久删除和文件夹清理开关不生效，以及宽窄屏下的实际布局。
+
 `TestMigrationV3OfficialHistoryResumeAndDelete` 用已发布 v3 DDL 和冻结配置构造旧业务库，经离线迁移后核对公开历史不变、同一原生会话恢复和续聊的实际模型输入，再验证统一删除及旧工作文件保留；只通过公开 API 操作官方引擎，不读取其 SQLite。
 
 空闲对象释放用 `TUCK_PERF=1 go test ./internal/tuck -run '^TestIdleTaskHeapRetention$' -count=1 -v -memprofile <本机临时路径>` 对比固定 64 条约 512 KiB payload 的按需读取和完整快照持有内存，并核对空闲缓存为空；列表快照和启动恢复的瞬时内存另计。race 与内存测量分开；还需通过增量计划、统计、审批、队列、原生停止及 MCP 生命周期回归，不能只用 map 长度证明资源已全部释放。

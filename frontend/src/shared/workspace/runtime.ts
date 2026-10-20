@@ -509,7 +509,7 @@ export class DockerWorkspaceRuntime {
   async deleteSession(id: string): Promise<void> {
     const result = await api<{deletedTaskIds:string[];cleanupPending?:boolean}>(`/api/tasks/${encodeURIComponent(id)}/delete`,{confirmed:true})
     this.#removeSessions(result.deletedTaskIds)
-    if (result.cleanupPending) this.error = '对话已删除，部分文件暂未回收。交付副本将在重启时复查，托管目录按当前回收策略继续处理。'
+    if (result.cleanupPending) this.error = '对话已删除，部分文件尚未清理。交付副本将在下次启动时重试；自动工作文件夹会按当前清理设置继续处理。'
     this.#notifier.notifyNow()
   }
   async command(id: string, action: string, body: unknown): Promise<boolean> {

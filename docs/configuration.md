@@ -18,7 +18,7 @@
 | agents | 原生提示、模型、工具集、allow_list、readonly、子代理、执行上限及 Tuck/企业工具选择 |
 | permissions | 官方工具 allow/ask/deny 规则，生成引擎输入时保留 |
 | workbench | 主助手目录、默认助手、每助手工作目录/任务并发、requireDelivery、deliveryRetentionCount |
-| retention | 普通对话、临时记录的归档保留策略，以及新建自动目录纳管/回收开关 |
+| retention | 对话归档和自动删除、自动工作文件夹清理，以及预留的临时执行记录策略 |
 | localMcp | 启用状态、HTTP(S) URL、直接凭据、助手范围、精确工具选择；不解析历史环境变量引用 |
 | platformModelSettings / platformMcpTools | 当前平台资源预算、temperature/topP 和工具选择；不能替换平台身份/许可 |
 
@@ -54,7 +54,11 @@
 }
 ```
 
-期限为 1–36500 的整数天，每天是连续 24 小时；开关只接受布尔值，0 不表示禁用。普通对话无活动到期后归档；三个删除/目录回收开关默认关闭。临时记录必须由业务明确登记用途，当前没有创建此类记录的调度 owner，不能据来源推断用途。`autoCleanup` 同时控制新自动目录纳管和已纳管目录回收；旧目录不追溯纳管，关闭后保留既有回收责任。目录没有独立过期时钟。
+期限为 1–36500 的整数天，每天是连续 24 小时；开关只接受布尔值，0 不表示禁用。界面的“长时间未使用时自动归档”从最后一次消息或执行活动计时，仅打开查看不会延长时间；归档保留历史和文件，可以恢复后继续对话。“归档到期后自动永久删除”默认关闭，开启后按归档日期加保留天数计算，删除无法恢复。
+
+“删除对话时清理自动工作文件夹”对应 `managedWorkspaces.autoCleanup`，默认关闭。开启后新建的自动工作文件夹会参与清理；最后一个共用对话删除后，允许删除整个文件夹及其中全部文件。此选项关闭时创建的文件夹不追溯加入清理；关闭只暂停已有清理责任，再次开启会继续检查此前尚未清理的文件夹。文件夹没有独立过期时钟，三种目录模式的边界见[任务文件](task-files.md#保留、交付与维护)。
+
+`temporaryRuns` 预留给明确登记为临时用途的系统执行记录，默认不自动删除。当前没有创建此类记录的业务功能，界面暂不展示；保存其他保留设置时原样保留这部分配置，不能据后台来源推断记录可以删除。
 
 30/90 天是 Tuck 的默认选择，不是行业统一期限。设计参考 [Coder 的休眠与删除分离](https://coder.com/docs/user-guides/workspace-scheduling#dormancy)、[Codespaces 的保留与到期提示](https://docs.github.com/en/codespaces/setting-your-user-preferences/configuring-automatic-deletion-of-your-codespaces)、[n8n 按执行用途裁剪](https://docs.n8n.io/hosting/scaling/execution-data/)及 [Docker 对持久卷的独立清理边界](https://docs.docker.com/reference/cli/docker/system/prune/)。
 

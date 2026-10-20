@@ -176,19 +176,44 @@ func (d *Deliveries) cleanup(task string) error {
 	if !publicID.MatchString(task) {
 		return nil
 	}
-	directory := filepath.Join(d.Root, "snapshots", task)
-	entries, e := os.ReadDir(directory)
-	if os.IsNotExist(e) {
-		return nil
-	}
-	if e != nil {
-		return e
-	}
 	root, e := os.OpenRoot(d.Root)
 	if e != nil {
 		return e
 	}
 	defer root.Close()
+	// Anchor each directory before traversing. A task/snapshots symlink must
+	// never redirect cleanup into another task or a shared workspace.
+	for _, name := range []string{"snapshots", task} {
+		info, err := root.Lstat(name)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return Problem(409, "snapshot_failed", "交付清理目录不能是符号链接")
+		}
+		next, err := root.OpenRoot(name)
+		if err != nil {
+			return err
+		}
+		defer next.Close()
+		actual, err := next.Stat(".")
+		if err != nil || !os.SameFile(info, actual) {
+			return Problem(409, "snapshot_failed", "交付清理目录已变化")
+		}
+		root = next
+	}
+	directory, e := root.Open(".")
+	if e != nil {
+		return e
+	}
+	entries, e := directory.ReadDir(-1)
+	directory.Close()
+	if e != nil {
+		return e
+	}
 	for _, entry := range entries {
 		if !publicID.MatchString(entry.Name()) || !entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
 			continue
@@ -202,7 +227,7 @@ func (d *Deliveries) cleanup(task string) error {
 			if remove == nil {
 				remove = (*os.Root).RemoveAll
 			}
-			if e = remove(root, filepath.Join("snapshots", task, entry.Name())); e != nil {
+			if e = remove(root, entry.Name()); e != nil {
 				return e
 			}
 		}
@@ -528,7 +553,7 @@ func (d *Deliveries) commit(ctx context.Context, turn *toolTurn, value M) (M, er
 		return nil, e
 	}
 	task := Clone(manager.tasks[turn.TaskID])
-	if task == nil || S(task["turnId"]) != turn.TurnID || turn.ctx.Err() != nil {
+	if task == nil || manager.deleting[turn.TaskID] || S(task["turnId"]) != turn.TurnID || turn.ctx.Err() != nil {
 		return nil, Problem(409, "delivery_canceled", "Delivery context expired")
 	}
 	keep := I(O(d.Models.Config()["workbench"])["deliveryRetentionCount"])

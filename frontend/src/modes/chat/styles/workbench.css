@@ -62,11 +62,14 @@
 .archived-sessions[open] > summary > svg { transform:rotate(90deg); }
 .archive-count { margin-left:auto; font-variant-numeric:tabular-nums; }
 .archive-list { max-height:22dvh; overflow:auto; overscroll-behavior:contain; padding:2px 0; }
-.archive-list > button { display:flex; align-items:center; gap:8px; width:100%; min-height:32px; padding:6px 8px; border:0; border-radius:6px; background:transparent; color:var(--tuck-text); font:inherit; text-align:left; cursor:pointer; }
+.archive-entry { display:flex; min-width:0; }
+.archive-entry > button { display:flex; align-items:center; gap:8px; min-width:0; min-height:32px; padding:6px 8px; border:0; border-radius:6px; background:transparent; color:var(--tuck-text); font:inherit; text-align:left; cursor:pointer; }
+.archive-entry > button:first-child { flex:1; }
+.archive-entry > button:last-child { flex-shrink:0; color:var(--tuck-muted); }
 .archive-title { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .archive-action { display:inline-flex; align-items:center; gap:3px; flex:none; color:var(--tuck-muted); }
-.archived-sessions > summary:hover, .archive-list > button:hover:not(:disabled) { background:var(--tuck-hover); }
-.archive-list > button:disabled { opacity:.5; cursor:wait; }
+.archived-sessions > summary:hover, .archive-entry > button:hover:not(:disabled) { background:var(--tuck-hover); }
+.archive-entry > button:disabled { opacity:.5; cursor:wait; }
 
 @media(max-width:480px) { .reference-header-action > span { display:none; } .reference-header-action { width:30px; padding:0; } }
 

@@ -538,30 +538,22 @@ func TestSteeringRestart(t *testing.T) {
 func TestSteeringRecoveryPersistedReceipt(t *testing.T) {
 	m, s, _, id := taskFixture(t)
 	task := mustUpdate(t, m, id, M{"status": "working", "turnId": "turn"})
-	if _, e := m.Steer(context.Background(), id, "confirmed", nil, nil); e != nil {
-		t.Fatal(e)
+	if _, err := m.Steer(context.Background(), id, "confirmed", nil, nil); err != nil {
+		t.Fatal(err)
 	}
-	if _, e := s.Publish(task, nil, M{"type": "native", "event": M{"type": "user_message", "session_id": task["nativeSessionId"], "message": "confirmed", "message_id": "one"}}); e != nil {
-		t.Fatal(e)
+	mustEvent(t, m, id, M{"type": "user_message", "session_id": task["nativeSessionId"], "message": "confirmed", "message_id": "one"})
+	if _, err := m.Steer(context.Background(), id, "unconfirmed", nil, nil); err != nil {
+		t.Fatal(err)
 	}
-	m.mu.Lock()
-	_, e := m.appendLocked(m.tasks[id], M{"role": "user", "blocks": []any{newBlock("steer:legacy", "markdown", M{"markdown": "> old marker\n\nlegacy"})}})
-	m.mu.Unlock()
-	if e != nil {
-		t.Fatal(e)
+	if err := s.pruneEvents(context.Background(), NowMS(), 0); err != nil {
+		t.Fatal(err)
 	}
-	task = mustTask(t, m, id)
-	if _, e = s.Publish(task, nil, M{"type": "native", "event": M{"type": "user_message", "session_id": task["nativeSessionId"], "message": "legacy", "message_id": "legacy-id"}}); e != nil {
-		t.Fatal(e)
-	}
-	if _, e = NewManager(m.options); e != nil {
-		t.Fatal(e)
+	if _, err := NewManager(m.options); err != nil {
+		t.Fatal(err)
 	}
 	msgs, _ := s.Messages(id, 0, 100)
-	for _, msg := range msgs {
-		if S(O(msg["steering"])["status"]) != "delivered" {
-			t.Fatal(msg)
-		}
+	if len(msgs) != 2 || S(O(msgs[0]["steering"])["status"]) != "delivered" || S(O(msgs[0]["steering"])["messageId"]) != "one" || S(O(msgs[1]["steering"])["status"]) != "unknown" {
+		t.Fatal(msgs)
 	}
 }
 func TestQuestionTypesAndInteractionQueue(t *testing.T) {
@@ -733,6 +725,7 @@ func TestTurnTimingsAndRecovery(t *testing.T) {
 	if N(O(task["turnTiming"])["waitingMs"]) != 400 || N(O(task["turnTiming"])["endedAt"]) != 800 {
 		t.Fatal(task)
 	}
+	task["turnId"] = "two"
 	StartTurnTiming(task, 1000)
 	ObserveTurnTiming(task, 1100)
 	FinishTurnTiming(task, false, 99999)
@@ -939,12 +932,14 @@ func TestTaskResultsAndStatistics(t *testing.T) {
 	task := mustTask(t, m, id)
 	task["logicalCount"] = index
 	task["turnCount"] = 2
-	task["turnTiming"] = M{"turnId": "two", "startedAt": 100000, "observedAt": 101000, "waitingMs": 0}
-	for _, timing := range []M{{"turnId": "one", "startedAt": 1000, "observedAt": 1500, "waitingMs": 0}, {"turnId": "one", "startedAt": 1000, "observedAt": 3000, "endedAt": 3000, "waitingMs": 500}, O(task["turnTiming"])} {
-		if _, e := s.Publish(task, nil, M{"type": "state", "task": Merge(task, M{"turnTiming": timing})}); e != nil {
-			t.Fatal(e)
-		}
-	}
+	task["turnId"] = "one"
+	StartTurnTiming(task, 1000)
+	ObserveTurnTiming(task, 1500)
+	FinishTurnTiming(task, true, 3000)
+	task["turnId"] = "two"
+	StartTurnTiming(task, 100000)
+	StartTurnTiming(task, 100000) // Same turn must not be counted twice.
+
 	stats, e := s.Statistics(task)
 	if e != nil || N(stats["previousMs"]) != 2000 || I(stats["toolCalls"]) != 1 || I(stats["previousTurns"]) != 1 || B(stats["incomplete"]) {
 		t.Fatal(stats, e)
@@ -953,7 +948,8 @@ func TestTaskResultsAndStatistics(t *testing.T) {
 	if _, e = s.Publish(task, nil, M{"type": "state", "task": task}); e != nil {
 		t.Fatal(e)
 	}
-	task["turnTiming"] = M{"turnId": "three", "startedAt": 200000, "observedAt": 200000}
+	task["turnId"] = "three"
+	StartTurnTiming(task, 200000)
 	stats, e = s.Statistics(task)
 	if e != nil || N(stats["previousMs"]) != 4000 || !B(stats["incomplete"]) {
 		t.Fatal(stats, e)

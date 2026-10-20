@@ -536,7 +536,7 @@ func (a *App) taskRoute(w http.ResponseWriter, r *http.Request) error {
 	if r.Method != "POST" {
 		return Problem(404, "not_found", "Route not found")
 	}
-	if a.changing.Load() && Contains([]string{"prompts", "steer", "queue", "approval-mode", "interaction", "model", "fork"}, action) {
+	if a.changing.Load() && Contains([]string{"prompts", "steer", "queue", "approval-mode", "interaction", "model", "fork", "delete"}, action) {
 		return Problem(409, "configuration_changing", "模型接入正在变更，请稍后执行")
 	}
 	v, e := ReadJSON(r.Body, 24<<20)
@@ -588,6 +588,20 @@ func (a *App) taskRoute(w http.ResponseWriter, r *http.Request) error {
 		out = M{"accepted": true}
 	case "archive":
 		out, e = a.Manager.Archive(id, B(v["archived"]))
+	case "delete":
+		if v["confirmed"] != true {
+			return Problem(400, "delete_confirmation_required", "请确认删除此对话及其子会话")
+		}
+		var deleted M
+		deleted, e = a.Manager.Delete(r.Context(), id)
+		if e == nil {
+			for _, key := range Strings(deleted["deletedTaskIds"]) {
+				if err := a.Delivery.cleanup(key); err != nil {
+					deleted["cleanupPending"] = true
+				}
+			}
+			out = deleted
+		}
 	case "clear-queue":
 		_, e = a.Manager.UpdateQueue(r.Context(), id, M{"action": "clear"})
 		out = M{"cleared": true}
@@ -647,6 +661,11 @@ func (a *App) events(w http.ResponseWriter, r *http.Request, session M) error {
 	for {
 		for {
 			events, e := a.Store.Events(cursor, 512)
+			if errors.Is(e, errEventCursorExpired) {
+				_, _ = fmt.Fprint(w, "event: reset\ndata: {\"reason\":\"cursor_expired\"}\n\n")
+				flusher.Flush()
+				return nil
+			}
 			if e != nil {
 				panic(http.ErrAbortHandler)
 			}

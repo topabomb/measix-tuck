@@ -22,6 +22,7 @@ export function useWorkspaceRuntime(owner: DockerWorkspaceRuntime) {
 
   const unsubscribeWorkspace = workspace.subscribe(() => {
     workspaceRevision.value += 1
+    if (!workspace.hasSession(workspace.activeSessionId)) return
     if (activeSession.value !== workspace.activeSession) bindActive()
     else activeUiState.value = workspace.activeSession.uiSnapshot
   })

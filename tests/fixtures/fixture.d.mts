@@ -4,6 +4,7 @@ import type { LlmFailure, TurnEndReasonKind } from '../../frontend/src/engine/co
 export function until(fn: () => unknown | Promise<unknown>, timeout?: number): Promise<unknown>
 export function fixture(options?: { imageGeneration?:string; attachmentInspection?:boolean; inspectionText?:string; inspectionAttachments?:{source?:string;path:string}[]; beforeResponse?: (prompt: string, body: { messages?: { role: string; tool_calls?: { function: { name: string } }[] }[]; tools?: { function?: { name?: string } }[] }) => void | Promise<void>; maxIterations?: number; attachmentModels?: boolean; localAssistants?: boolean; delivery?:boolean; enterprisePlatform?: unknown; security?: {listenHost?:string;auth:{enabled:boolean;username:string;passwordHash:string}} }): Promise<{
   url: string
+  directory: string
   request(data:Record<string,unknown>):any
   requests: Record<string, unknown>[]
   deliver(task: DockerTask, summary: string, paths?: string[]): Promise<void>

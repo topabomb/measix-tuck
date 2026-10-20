@@ -57,7 +57,7 @@ export interface AssistantSummaryInfo {
 export const defaultAssistants: AssistantCatalog = { defaultAgent: 'root', items: [{ agent: 'root', displayName: '通用助手' }] }
 export interface OrchestrationInfo { requireDelivery:boolean; updatedAt:number }
 export interface RuntimeInfo { deliveryToolAvailable?:boolean; orchestration?:OrchestrationInfo; state: string; version: string; workspaceRoot: string; error: string | null; connection?: ConnectionInfo; assistants?: AssistantCatalog }
-type WorkbenchEvent = { seq: number; taskId: string; type: 'created' | 'state' | 'message' | 'message-delta' | 'native' | 'connection' | 'orchestration'; orchestration?:OrchestrationInfo; task?: DockerTask; message?: LogicalMessage; delta?: MessageDelta; connection?: ConnectionInfo; assistants?: AssistantCatalog }
+type WorkbenchEvent = { seq: number; taskId: string; type: 'deleted' | 'created' | 'state' | 'message' | 'message-delta' | 'native' | 'connection' | 'orchestration'; deletedTaskIds?:string[]; orchestration?:OrchestrationInfo; task?: DockerTask; message?: LogicalMessage; delta?: MessageDelta; connection?: ConnectionInfo; assistants?: AssistantCatalog }
 
 export async function api<T>(path: string, body?: unknown, signal?:AbortSignal): Promise<T> {
   const response = await authFetch(path, { method: body === undefined ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),signal })
@@ -102,13 +102,14 @@ export class DockerWorkspaceRuntime {
   #defaultSession?: Promise<string>
   #cursor = 0
   #stateCursors = new Map<string, number>()
+  #deleted = new Set<string>()
   #eventError: string | null = null
   #descriptorCache = new Map<string, WorkSessionDescriptor>()
   #descriptorList: readonly WorkSessionDescriptor[] | null = null
   #registrations = new Map<string, Promise<void>>()
   #disposed = false
   #reconnect: ReturnType<typeof setTimeout> | undefined
-  #kernelSubscriptions: (() => void)[] = []
+  #kernelSubscriptions = new Map<string, () => void>()
 
   private constructor(info: RuntimeInfo) { this.runtimeInfo = info }
   static async connect(eager = true): Promise<DockerWorkspaceRuntime> {
@@ -131,6 +132,7 @@ export class DockerWorkspaceRuntime {
     return workspace
   }
   async #register(task: DockerTask): Promise<void> {
+    if (this.#deleted.has(task.id)) return
     if (this.#kernels.has(task.id)) return
     const pending = this.#registrations.get(task.id)
     if (pending) return pending
@@ -141,19 +143,68 @@ export class DockerWorkspaceRuntime {
   async #registerNew(task: DockerTask): Promise<void> {
     this.tasks.set(task.id, task)
     this.taskRevision++
-    const source = new CachedHistory(task.id, task.logicalCount, async (start, count) => {
-      const result = await api<{ messages: LogicalMessage[] }>(`/api/tasks/${task.id}/messages?start=${start}&count=${count}&view=workbench`)
-      return result.messages.map(messageUrls)
-    }, () => ({ range: this.#runtimes.get(task.id)?.range, activeIndex: this.tasks.get(task.id)?.activeAssistantIndex }))
+    const source = this.#historySource(task)
     if (task.activeAssistantIndex != null) await source.prepare(task.activeAssistantIndex, 1)
-    if (this.#disposed) return
+    if (this.#disposed || this.#deleted.has(task.id)) return
     const kernel = new ConversationSessionKernel(task, source)
     for (const entry of task.queue || []) kernel.enqueue(entry.prompt)
     this.#sources.set(task.id, source)
     this.#kernels.set(task.id, kernel)
     this.#executions.set(task.id, new DockerExecutionController(this, task.id))
     this.#refreshDescriptor(task.id)
-    this.#kernelSubscriptions.push(kernel.subscribe(() => { this.#refreshDescriptor(task.id); this.#notifier.markDirty() }))
+    this.#kernelSubscriptions.set(task.id,kernel.subscribe(() => { this.#refreshDescriptor(task.id); this.#notifier.markDirty() }))
+  }
+  #historySource(task: DockerTask): CachedHistory {
+    return new CachedHistory(task.id, task.logicalCount, async (start, count) => {
+      const result = await api<{ messages: LogicalMessage[] }>(`/api/tasks/${task.id}/messages?start=${start}&count=${count}&view=workbench`)
+      return result.messages.map(messageUrls)
+    }, () => ({ range: this.#runtimes.get(task.id)?.range, activeIndex: this.tasks.get(task.id)?.activeAssistantIndex }))
+  }
+  async #resetReplay(): Promise<void> {
+    const knownBefore = new Set(this.tasks.keys())
+    const snapshot = await api<{ tasks: DockerTask[]; cursor: number }>('/api/tasks')
+    const present = new Set(snapshot.tasks.map(task => task.id))
+    this.#removeSessions([...knownBefore].filter(id => !present.has(id) && (this.#stateCursors.get(id) || 0) <= snapshot.cursor))
+    for (const task of snapshot.tasks) {
+      if (this.#disposed) return
+      if (this.#deleted.has(task.id)) continue
+      await this.#register(task)
+      // A newer HTTP task response may have arrived during the snapshot read.
+      let state = (this.#stateCursors.get(task.id) || 0) > snapshot.cursor ? this.tasks.get(task.id)! : task
+      for (;;) {
+        if (this.#deleted.has(task.id)) break
+        const previous = this.tasks.get(task.id)
+        const source = this.#historySource(state)
+        const window = () => {
+          const runtime = this.#runtimes.get(task.id)
+          if (!runtime) return { start: 0, end: 0 }
+          if (runtime.followTail) return { start: Math.max(0, state.logicalCount - CHAT_HISTORY.windowMessages), end: state.logicalCount }
+          return { start: runtime.range.start, end: Math.min(state.logicalCount, runtime.range.end) }
+        }
+        // Navigation can change while a page is loading. Prepare the actual view
+        // before swapping sources; failed reads leave the existing view intact.
+        for (;;) {
+          const range = window()
+          await source.prepareView(range.start, range.end - range.start)
+          if (state.activeAssistantIndex != null) await source.prepare(state.activeAssistantIndex, 1)
+          if (this.#disposed) return
+          if (this.#deleted.has(task.id)) break
+          const current = window()
+          if (range.start === current.start && range.end === current.end) break
+        }
+        if (this.#deleted.has(task.id)) break
+        if (this.tasks.get(task.id) !== previous) { state = this.tasks.get(task.id)!; continue }
+        this.#sources.set(task.id, source)
+        this.kernelFor(task.id).replaceHistory(source, state)
+        this.#applyState(state, Math.max(snapshot.cursor, this.#stateCursors.get(task.id) || 0))
+        break
+      }
+    }
+    if (this.#disposed) return
+    this.#cursor = snapshot.cursor
+    if (this.error === this.#eventError) this.error = null
+    this.#eventError = null
+    this.#notifier.notifyNow()
   }
   #listen(): void {
     if (this.#disposed) return
@@ -172,11 +223,20 @@ export class DockerWorkspaceRuntime {
     }
     source.onopen = () => { this.connected = true; void this.refreshConnection().catch(error => { this.error = error.message; this.#notifier.notifyNow() }); this.#notifier.notifyNow() }
     source.onerror = () => { void loginSession().then(session => { if (!session.authenticated) { source.close(); expiredLogin() } else reconnect() }).catch(reconnect) }
+    source.addEventListener('reset', () => {
+      source.close()
+      chain = chain.then(() => this.#resetReplay()).catch(error => {
+        this.#eventError = this.error = error.message
+        this.#notifier.notifyNow()
+      })
+      reconnect()
+    })
     source.onmessage = event => {
       chain = chain.then(async () => {
         if (failed || this.#disposed) return
         const update = JSON.parse(event.data) as WorkbenchEvent
         if (update.seq <= this.#cursor) return
+        if (update.type === 'deleted') this.#removeSessions(update.deletedTaskIds || [])
         if (update.type === 'orchestration' && update.orchestration && (!this.runtimeInfo.orchestration || update.orchestration.updatedAt>=this.runtimeInfo.orchestration.updatedAt)) this.runtimeInfo.orchestration=update.orchestration
         if (update.type === 'connection' && update.connection) this.runtimeInfo.connection = update.connection
         if (update.type === 'connection' && update.assistants) this.runtimeInfo.assistants = update.assistants
@@ -229,10 +289,23 @@ export class DockerWorkspaceRuntime {
         if (this.#eventError && this.error === this.#eventError) this.error = null
         this.#eventError = null
         this.#notifier.markDirty()
-      }).catch(error => { failed = true; this.#eventError = this.error = error.message; this.#notifier.notifyNow(); reconnect() })
+      }).catch(async error => {
+        failed = true
+        // A queued event can outlive its deleted conversation. Refresh the
+        // authoritative list instead of retrying the same missing history.
+        try {
+          if (error.status !== 404) throw error
+          await this.#resetReplay()
+        } catch (cause) {
+          this.#eventError = this.error = (cause as Error).message
+          this.#notifier.notifyNow()
+        }
+        reconnect()
+      })
     }
   }
   #applyState(task: DockerTask, cursor?: number): void {
+    if (this.#deleted.has(task.id)) return
     // HTTP snapshots and SSE share server ordering. A late response must not
     // resurrect a resolved blocker; older replayed states must not undo a snapshot.
     if (cursor !== undefined) {
@@ -283,9 +356,15 @@ export class DockerWorkspaceRuntime {
     if (this.#activeSessionId) return Promise.resolve(this.#activeSessionId)
     if (!(this.runtimeInfo.assistants || defaultAssistants).defaultAgent) return Promise.resolve('')
     // Mode navigation may outlive its page; bootstrap belongs to this owner.
-    return this.#defaultSession ??= this.createSession().catch(error => {
+    const pending = this.#defaultSession ??= this.createSession().catch(error => {
       this.#defaultSession = undefined
       throw error
+    })
+    return pending.then(id => {
+      if (!this.#deleted.has(id)) return id
+      // Bootstrap may finish after navigation left chat, without activation.
+      if (this.#defaultSession === pending) this.#defaultSession = undefined
+      return this.ensureDefaultSession()
     })
   }
   get activeSession(): ConversationSessionRuntime { return this.ensureRuntime(this.#activeSessionId) }
@@ -306,8 +385,16 @@ export class DockerWorkspaceRuntime {
     if (saved && !saved.followTail) return saved
     return { logicalPosition:tail, anchorUnitId:null, anchorOffsetPx:0, followTail:true, atVisualBottom:true, draftText:saved?.draftText || '' }
   }
-  saveSnapshot(id: string, snapshot: SessionViewMemory): void { this.#snapshots.set(id, snapshot) }
-  async prepareHistory(id: string, start: number, count: number): Promise<void> { await this.#sources.get(id)?.prepareView(start, count) }
+  saveSnapshot(id: string, snapshot: SessionViewMemory): void { if (!this.#deleted.has(id)) this.#snapshots.set(id, snapshot) }
+  async prepareHistory(id: string, start: number, count: number): Promise<void> {
+    for (;;) {
+      const source = this.#sources.get(id)
+      await source?.prepareView(start, count)
+      if (this.#disposed || source === this.#sources.get(id)) return
+      // A reset may replace the cache while navigation is awaiting its page.
+      // Prepare that same destination in the current source before returning.
+    }
+  }
   async prepareSession(id: string): Promise<void> {
     // Restoring an evicted viewport uses the same centered window as its constructor.
     // A hot viewport may have shifted away from center; retain its exact range.
@@ -393,11 +480,34 @@ export class DockerWorkspaceRuntime {
     const { task, cursor } = await api<{task: DockerTask; cursor:number}>(`/api/tasks/${encodeURIComponent(id)}`)
     if (this.#disposed) throw new Error('工作台已关闭')
     await this.#register(task)
+    if (this.#deleted.has(id)) throw Object.assign(new Error('此对话已删除'), {status:404})
     this.#applyState(task,cursor); this.#notifier.notifyNow()
     return this.tasks.get(id)!
   }
   async renameSession(id: string, title: string): Promise<void> { this.#applyState(await api<DockerTask>(`/api/tasks/${id}/rename`, { title })); this.#notifier.notifyNow() }
   async archiveSession(id: string): Promise<string> { const task = await api<DockerTask>(`/api/tasks/${id}/archive`, { archived: true }); this.#applyState(task); return [...this.tasks.values()].find(value => !value.parentTaskId && !value.archived)?.id || ((this.runtimeInfo.assistants || defaultAssistants).defaultAgent ? await this.createSession() : (this.#activeSessionId = '')) }
+  #removeSessions(ids: readonly string[]): void {
+    for (const id of ids) {
+      this.#deleted.add(id)
+      this.#kernelSubscriptions.get(id)?.()
+      this.#kernelSubscriptions.delete(id)
+      this.#runtimes.get(id)?.dispose()
+      this.#sources.get(id)?.release()
+      for (const item of this.attachmentDrafts.list(id)) this.attachmentDrafts.remove(id,item.id)
+      this.tasks.delete(id); this.#kernels.delete(id); this.#executions.delete(id)
+      this.#runtimes.delete(id); this.#sources.delete(id); this.#snapshots.delete(id)
+      this.#descriptorCache.delete(id); this.#stateCursors.delete(id)
+      if (this.#activeSessionId === id) { this.#activeSessionId = ''; this.#defaultSession = undefined }
+      if (this.#preparingSessionId === id) this.#preparingSessionId = ''
+    }
+    if (ids.length) { this.taskRevision++; this.#descriptorList = null }
+  }
+  async deleteSession(id: string): Promise<void> {
+    const result = await api<{deletedTaskIds:string[];cleanupPending?:boolean}>(`/api/tasks/${encodeURIComponent(id)}/delete`,{confirmed:true})
+    this.#removeSessions(result.deletedTaskIds)
+    if (result.cleanupPending) this.error = '对话已删除，部分交付副本暂未清理，服务下次启动时会继续清理。'
+    this.#notifier.notifyNow()
+  }
   async command(id: string, action: string, body: unknown): Promise<boolean> {
     try { this.error = null; await api(`/api/tasks/${id}/${action}`, body); return true }
     catch (error) { this.error = (error as Error).message; return false }
@@ -408,8 +518,8 @@ export class DockerWorkspaceRuntime {
     this.attachmentDrafts.dispose()
     clearTimeout(this.#reconnect)
     this.#events?.close()
-    for (const off of this.#kernelSubscriptions) off()
-    this.#kernelSubscriptions = []
+    for (const off of this.#kernelSubscriptions.values()) off()
+    this.#kernelSubscriptions.clear()
     this.suspendView()
   }
 }

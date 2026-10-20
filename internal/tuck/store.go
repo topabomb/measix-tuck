@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -18,9 +19,11 @@ import (
 
 // Store owns all Tuck DDL and short write transactions. Network/file IO stays outside.
 type Store struct {
-	DB      *sql.DB
-	Path    string
-	writeMu sync.Mutex
+	DB                *sql.DB
+	Path              string
+	writeMu           sync.Mutex
+	cancelMaintenance context.CancelFunc
+	maintenanceDone   chan struct{}
 }
 
 func NewStore(path string) (*Store, error) {
@@ -51,7 +54,10 @@ func NewStore(path string) (*Store, error) {
 			if _, e := tx.Exec(schemaV1); e != nil {
 				return e
 			}
-			_, e := tx.Exec(schemaV2)
+			if _, e := tx.Exec(schemaV2); e != nil {
+				return e
+			}
+			_, e := tx.Exec(schemaV3)
 			return e
 		}); err != nil {
 			return nil, err
@@ -68,6 +74,23 @@ func NewStore(path string) (*Store, error) {
 		}
 	}
 	failed = false
+	ctx, cancel := context.WithCancel(context.Background())
+	s.cancelMaintenance, s.maintenanceDone = cancel, make(chan struct{})
+	go func() {
+		defer close(s.maintenanceDone)
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			if err := s.pruneEvents(ctx, NowMS(), 128<<20); err != nil && ctx.Err() == nil {
+				slog.Error("event retention", "error", err)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
 	return s, nil
 }
 func (s *Store) Write(fn func(*sql.Tx) error) error {
@@ -92,7 +115,13 @@ func (s *Store) WriteContext(ctx context.Context, fn func(*sql.Tx) error) error 
 	}
 	return tx.Commit()
 }
-func (s *Store) Close() error { return s.DB.Close() }
+func (s *Store) Close() error {
+	if s.cancelMaintenance != nil {
+		s.cancelMaintenance()
+		<-s.maintenanceDone
+	}
+	return s.DB.Close()
+}
 
 type executor interface {
 	Exec(string, ...any) (sql.Result, error)
@@ -291,7 +320,10 @@ func (s *Store) LiveMessages(id string) ([]M, error) {
 	return readObjects(rows)
 }
 func (s *Store) SteeringMessages(id string, start, count int) ([]M, error) {
-	rows, err := s.DB.Query("SELECT payload_json FROM messages WHERE task_id=? AND position>=? AND EXISTS(SELECT 1 FROM json_each(payload_json,'$.blocks') b WHERE json_extract(b.value,'$.id') LIKE 'steer:%') ORDER BY position LIMIT ?", id, start, count)
+	return steeringMessages(s.DB, id, start, count)
+}
+func steeringMessages(q schemaReader, id string, start, count int) ([]M, error) {
+	rows, err := q.Query("SELECT payload_json FROM messages WHERE task_id=? AND position>=? AND EXISTS(SELECT 1 FROM json_each(payload_json,'$.blocks') b WHERE json_extract(b.value,'$.id') LIKE 'steer:%') ORDER BY position LIMIT ?", id, start, count)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +331,7 @@ func (s *Store) SteeringMessages(id string, start, count int) ([]M, error) {
 }
 func (s *Store) Cursor() (int64, error) {
 	var n int64
-	err := s.DB.QueryRow("SELECT COALESCE(MAX(seq),0) FROM events").Scan(&n)
+	err := s.DB.QueryRow("SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='events'),0)").Scan(&n)
 	return n, err
 }
 func eventsRows(rows *sql.Rows) ([]M, error) {
@@ -329,7 +361,22 @@ func eventsRowsLimit(rows *sql.Rows, budget int) ([]M, error) {
 	return r, rows.Err()
 }
 func (s *Store) Events(after int64, count int) ([]M, error) {
-	r, e := s.DB.Query("SELECT seq,task_id,payload_json FROM events WHERE seq>? ORDER BY seq LIMIT ?", after, count)
+	// Boundary and page share one read snapshot, so pruning cannot silently
+	// remove a gap between checking the cursor and reading the page.
+	tx, e := s.DB.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
+	if e != nil {
+		return nil, e
+	}
+	defer tx.Rollback()
+	var floor int64
+	e = tx.QueryRow("SELECT COALESCE((SELECT MIN(seq)-1 FROM events),(SELECT seq FROM sqlite_sequence WHERE name='events'),0)").Scan(&floor)
+	if e != nil {
+		return nil, e
+	}
+	if after < floor {
+		return nil, errEventCursorExpired
+	}
+	r, e := tx.Query("SELECT seq,task_id,payload_json FROM events WHERE seq>? ORDER BY seq LIMIT ?", after, count)
 	if e != nil {
 		return nil, e
 	}
@@ -352,13 +399,6 @@ func (s *Store) TaskEvents(id string, types []string) ([]M, error) {
 		return nil, e
 	}
 	return eventsRows(r)
-}
-func (s *Store) SteeringReceipts(id string, after int64) ([]M, error) {
-	rows, err := s.DB.Query("SELECT seq,task_id,payload_json FROM events WHERE task_id=? AND type='native' AND seq>? AND json_extract(payload_json,'$.event.type')='user_message' ORDER BY seq", id, after)
-	if err != nil {
-		return nil, err
-	}
-	return eventsRows(rows)
 }
 func (s *Store) HasDelivery(id, turn string) (bool, error) {
 	var n int
@@ -406,22 +446,64 @@ func (s *Store) FinalReply(id string) (string, error) {
 }
 func (s *Store) Statistics(task M) (M, error) {
 	id := S(task["id"])
-	current := S(O(task["turnTiming"])["turnId"])
-	var elapsed float64
-	var turns, incomplete int
-	err := s.DB.QueryRow(`SELECT COALESCE(SUM(MAX(0,last-first)),0),COUNT(*),COALESCE(MAX(incomplete),0) FROM (
- SELECT MIN(turn_started_ms) AS first,
- MAX(turn_end_ms) AS last,
- MAX(turn_incomplete) AS incomplete
- FROM events WHERE task_id=? AND type IN ('created','state')
- AND turn_id IS NOT NULL AND turn_id NOT IN ('',?)
- GROUP BY turn_id)`, id, current).Scan(&elapsed, &turns, &incomplete)
-	if err != nil {
-		return nil, err
-	}
+	history := O(task["historyTiming"])
 	var tools int
-	err = s.DB.QueryRow("SELECT COUNT(*) FROM messages,json_each(messages.payload_json,'$.blocks') b WHERE task_id=? AND json_extract(b.value,'$.type')='tool-call'", id).Scan(&tools)
-	return M{"previousMs": elapsed, "previousTurns": turns, "incomplete": incomplete != 0, "toolCalls": tools}, err
+	err := s.DB.QueryRow("SELECT COUNT(*) FROM messages,json_each(messages.payload_json,'$.blocks') b WHERE task_id=? AND json_extract(b.value,'$.type')='tool-call'", id).Scan(&tools)
+	return M{"previousMs": N(history["previousMs"]), "previousTurns": I(history["previousTurns"]), "incomplete": B(history["incomplete"]), "toolCalls": tools}, err
+}
+
+var errEventCursorExpired = errors.New("event cursor expired")
+
+// Only replay rows are deleted. The indexed byte counts avoid reading large
+// JSON bodies; release the writer between batches so foreground commits proceed.
+func (s *Store) pruneEvents(ctx context.Context, now, budget int64) error {
+	var total, high int64
+	first := true
+	for {
+		deleted := false
+		err := s.WriteContext(ctx, func(tx *sql.Tx) error {
+			if first {
+				if err := tx.QueryRow("SELECT COALESCE(SUM(payload_bytes),0),COALESCE(MAX(seq),0) FROM events INDEXED BY event_retention").Scan(&total, &high); err != nil {
+					return err
+				}
+				first = false
+			}
+			// New publications belong to the next pass; do not chase a live
+			// producer forever or rescan the whole cache for each deletion.
+			rows, err := tx.Query("SELECT seq,payload_bytes,created_at_ms FROM events INDEXED BY event_retention WHERE seq<=? ORDER BY seq LIMIT 512", high)
+			if err != nil {
+				return err
+			}
+			var cutoff int64
+			for rows.Next() {
+				var seq, size, at int64
+				if err = rows.Scan(&seq, &size, &at); err != nil {
+					break
+				}
+				if total <= budget && at > now-int64(24*time.Hour/time.Millisecond) {
+					break
+				}
+				cutoff = seq
+				total -= size
+			}
+			rowErr := rows.Err()
+			rows.Close()
+			if err != nil {
+				return err
+			}
+			if rowErr != nil {
+				return rowErr
+			}
+			if cutoff > 0 {
+				deleted = true
+				_, err = tx.Exec("DELETE FROM events WHERE seq<=?", cutoff)
+			}
+			return err
+		})
+		if err != nil || !deleted {
+			return err
+		}
+	}
 }
 func (s *Store) Catalog(key, fingerprint string) ([]M, int64, error) {
 	var raw string

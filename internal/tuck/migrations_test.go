@@ -68,7 +68,7 @@ func migrationRead(t *testing.T, path string) []byte {
 func TestMigrationV1PreservesAllOwnedData(t *testing.T) {
 	path, config, s := legacyMigrationFixture(t)
 	task := BaseTask(ID(), UUID(), "persistent", filepath.Join(filepath.Dir(path), "workspace"), "root", "agent")
-	message := M{"index": 0, "revision": 7, "live": false, "blocks": []any{M{"id": "steer:original", "type": "text", "text": "delivered"}}}
+	message := M{"index": 0, "revision": 7, "live": false, "steering": M{"status": "delivered", "messageId": "original"}, "blocks": []any{M{"id": "steer:original", "type": "text", "text": "delivered"}}}
 	id := S(task["id"])
 	if _, err := s.Publish(task, message, M{"type": "message", "message": message}); err != nil {
 		t.Fatal(err)
@@ -159,10 +159,11 @@ func TestMigrationV1PreservesAllOwnedData(t *testing.T) {
 	defer upgraded.Close()
 	gotTask, _ := upgraded.Task(id)
 	gotMessage, _ := upgraded.Message(id, 0)
+	delete(gotTask, "historyTiming")
 	if !reflect.DeepEqual(gotTask, Clone(task)) || !reflect.DeepEqual(gotMessage, Clone(message)) {
 		t.Fatal("task/message payload changed")
 	}
-	for table, wantCount := range map[string]int{"events": 1, "web_sessions": 1, "login_limits": 1, "task_deliveries": 1, "mcp_catalog": 1} {
+	for table, wantCount := range map[string]int{"events": 0, "web_sessions": 1, "login_limits": 1, "task_deliveries": 1, "mcp_catalog": 1} {
 		var count int
 		if err = upgraded.DB.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != wantCount {
 			t.Fatal(table, count, err)

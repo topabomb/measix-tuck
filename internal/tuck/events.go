@@ -224,9 +224,6 @@ func readObservedText(task M, path string) *string {
 }
 func (n *normalizer) handle(root, event M, observed *string) error {
 	m := n.m
-	if err := m.publishLocked(root, M{"type": "native", "event": event}, nil); err != nil {
-		return err
-	}
 	kind := S(event["type"])
 	if kind == "stream_started" && S(event["session_id"]) != "" && event["session_id"] != root["nativeSessionId"] {
 		child, err := m.createChildLocked(root, S(event["session_id"]), firstString(event["agent_name"], "worker"), "foreground")
@@ -242,6 +239,23 @@ func (n *normalizer) handle(root, event M, observed *string) error {
 		}
 	}
 	task := n.owner(root, event)
+	if kind == "user_message" {
+		if err := m.confirmSteeringLocked(task, event); err != nil {
+			return err
+		}
+	}
+	// Parameter fragments and other progress may have no visible projection.
+	// Keep the last observed turn time for crash recovery, without retaining the
+	// raw stream. Clone only timing, and expose it in memory after the commit.
+	timing, at := O(root["turnTiming"]), NowMS()
+	if len(timing) > 0 && timing["endedAt"] == nil && !B(timing["incomplete"]) && float64(at) > N(timing["observedAt"]) {
+		checkpoint := Merge(root, M{"turnTiming": Clone(timing)})
+		ObserveTurnTiming(checkpoint, at)
+		if err := m.options.Store.SaveTask(checkpoint); err != nil {
+			return err
+		}
+		root["turnTiming"] = checkpoint["turnTiming"]
+	}
 	// A terminal event must identify its actual session. Unknown or missing
 	// identities cannot establish that the root Agent turn has ended.
 	if kind == "stream_stopped" && (S(event["session_id"]) == "" || event["session_id"] != task["nativeSessionId"] || task["id"] != root["id"] && task["parentTaskId"] != root["id"]) {
@@ -288,9 +302,6 @@ func (n *normalizer) handle(root, event M, observed *string) error {
 	case "stream_started":
 		return m.stateLocked(task, M{"status": "working", "lastTurnReason": nil})
 	case "user_message":
-		if err := m.confirmSteeringLocked(task, event); err != nil {
-			return err
-		}
 		if S(event["message"]) != "" && task["id"] != root["id"] {
 			_, err := n.append(task, "user", []any{newBlock("user:"+UUID(), "markdown", M{"markdown": event["message"]})}, false)
 			return err

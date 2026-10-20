@@ -134,6 +134,8 @@ test('ended result summaries, supplement context and live progress share clear s
     await writeFile(join(task.workspace,'result.txt'),'verified')
     await app.deliver(task,'核对完成，请使用修订后的图片。',['result.txt'])
     task.turnCount=2
+    // The fixture skips real turn execution; supply the durable v3 rollup.
+    Object.assign(task,{historyTiming:{previousMs:2000,previousTurns:1,incomplete:false}})
     task.turnTiming={turnId:'turn-2',startedAt:at-65000,observedAt:at,endedAt:at,waitingMs:0}
     task.usage={inputTokens:1000,outputTokens:200,cacheReadTokens:100,cacheWriteTokens:50,reasoningTokens:20}
     app.manager.settle(task,'completed')
@@ -167,6 +169,7 @@ test('ended result summaries, supplement context and live progress share clear s
     await page.screenshot({path:info.outputPath('supplement-context-mobile.png')})
     // An existing uploaded file and a previous answer must not become the new turn's delivery.
     task.status='working';task.lastTurnReason=null;task.turnCount=3;task.turnId='turn-3'
+    Object.assign(task,{historyTiming:{previousMs:67000,previousTurns:2,incomplete:false}})
     task.turnTiming={turnId:'turn-3',startedAt:Date.now()-2000,observedAt:Date.now(),waitingMs:0}
     task.activity={phase:'processing',startedAt:Date.now()}
     app.manager.publish(task,{type:'task',task})

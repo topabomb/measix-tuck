@@ -15,7 +15,7 @@ import type {
 } from './contracts'
 import { normalizeTokenUsage } from './session-semantics'
 
-export type SessionKernelEventKind = 'content' | 'append' | 'status' | 'queue' | 'interaction' | 'foreground' | 'usage' | 'plan' | 'title'
+export type SessionKernelEventKind = 'content' | 'append' | 'reset' | 'status' | 'queue' | 'interaction' | 'foreground' | 'usage' | 'plan' | 'title'
 export type SessionKernelContentPatch =
   | { kind: 'append-markdown'; blockId: string; delta: string }
   | { kind: 'append-reasoning'; blockId: string; delta: string }
@@ -37,7 +37,7 @@ export interface SessionKernelEvent {
 export class ConversationSessionKernel {
   readonly id: string
   #title: string
-  readonly history: ConversationHistorySource
+  history: ConversationHistorySource
 
   #appended: LogicalMessage[] = []
   #overrides = new Map<number, LogicalMessage>()
@@ -98,6 +98,15 @@ export class ConversationSessionKernel {
   }
 
   get lastEvent(): SessionKernelEvent { return this.#lastEvent }
+  /** Replace an expired replay projection with a prepared authoritative source. */
+  replaceHistory(history: ConversationHistorySource, descriptor: ConversationDescriptor): void {
+    this.history = history
+    this.#appended = []
+    this.#overrides.clear()
+    this.#turnCount = Math.max(0, Math.floor(descriptor.turnCount ?? 0))
+    this.#stepCount = Math.max(this.#turnCount, Math.floor(descriptor.stepCount ?? this.#turnCount))
+    this.#emit({ kind: 'reset' }, false)
+  }
   get title(): string { return this.#title }
   setTitle(title: string): void {
     if (this.#title === title) return

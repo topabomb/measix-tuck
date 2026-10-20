@@ -87,7 +87,7 @@ Tuck 数据库事务不能与原生 HTTP 执行联合提交。需要区分尚未
 | 工具用途及输入合同 | 基于最终获准工具集合生成 MCP 定义 |
 | 查询结果和附件 | 保留来源及真实媒体类型，经原生协议提交 |
 
-记录 Tuck 添加内容的来源、适用任务／轮次、生成时间、依据版本及替代关系，优先复用消息和事件元数据。编排生成的推断不升级为系统规则，不覆盖用户原文。
+记录 Tuck 添加内容的来源、适用任务／轮次、生成时间、依据版本及替代关系，优先复用任务和消息元数据；短期同步事件不能承担长期来源或执行记录，见[存储设计](database-design.md)。编排生成的推断不升级为系统规则，不覆盖用户原文。
 
 入口只取得接待所需目标与结果；编排只取得判断所需证据；主代理取得任务原文、有效约束和必要背景；子代理取得局部任务与预期输出。摘要与引用优先，详细材料按需读取。
 
@@ -146,7 +146,7 @@ Tuck 数据库事务不能与原生 HTTP 执行联合提交。需要区分尚未
 | 同会话流水线 | [handoffs / force_handoff](https://github.com/docker/docker-agent/blob/v1.150.0/docs/concepts/multi-agent/index.md) | 适合明确允许共享历史的固定阶段。当前 Tuck 工具许可只遍历主代理及 sub_agents，需明确验证路由目标身份后适配，不能为使其通过而关闭校验 |
 | 激活前选择代理、完成后路由审查 | `before_agent_run` / `after_agent_complete` | 配置格式 16 已满足，仍需公开配置投影及路由身份支持；仅用于同会话路线。不能直接承担隔离准备、并行分支或检查后反复返回原代理 |
 | 立即补充与后续轮次 | [steer / followup](https://github.com/docker/docker-agent/blob/v1.150.0/docs/features/api-server/index.md) | steer 已用于 Tuck 协作；followup 需覆盖产品队列编辑、暂停、排序、来源、恢复与逐轮授权后才能接管，避免双队列 |
-| 入口及编排跟踪进度 | 原生执行 SSE、会话状态／快照及 events API | 继续由 Tuck 事件 owner 规范化并持久化；不能假设所有 serve api 会话的 events 流都包含完整前台执行事件 |
+| 入口及编排跟踪进度 | 原生执行 SSE、会话状态／快照及 events API | 继续由 Tuck 规范化业务事实并提供短期事件重放；不能假设所有 serve api 会话的 events 流都包含完整前台执行事件 |
 | 执行预算 | [budget / budgets](https://github.com/docker/docker-agent/blob/v1.150.0/docs/configuration/budget/index.md) | 原生支持每次运行及共享命名预算；Tuck 当前不投影这些顶层块，需增加选择和投影。跨多次定时触发的累计上限仍由 Tuck 管理 |
 | 固定目的地通知 | [webhook / send_webhook](https://github.com/docker/docker-agent/blob/v1.150.0/docs/tools/webhook/index.md) | 可选用于授权的固定通知；其返回表示排队，公开合同只在最终失败时反馈，不提供产品所需的完整确认。原生已有重试，不在其外叠加同一投递重试 |
 

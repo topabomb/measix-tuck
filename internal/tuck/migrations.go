@@ -96,9 +96,9 @@ func checkPlatformPersistence(db *sql.DB, config M, version int) error {
 	return err
 }
 
-// Transaction covers DDL, ciphertext and user_version. Product rows, event
-// sequences (including sqlite_sequence), delivery IDs/versions and bytes stay
-// untouched. Invalid/oversized reconstructable MCP catalogs are discarded.
+// Transaction covers DDL, ciphertext, extracted business facts and user_version.
+// Replay is discarded only after extracting facts; its high-water mark and
+// delivery IDs/versions/bytes survive. Invalid reconstructable catalogs expire.
 func migrateDatabase(s *Store, config M, expected int) error {
 	return s.Write(func(tx *sql.Tx) error {
 		version, err := inspectDatabase(tx)
@@ -116,29 +116,35 @@ func migrateDatabase(s *Store, config M, expected int) error {
 				return err
 			}
 		}
-		var installation string
-		var encrypted []byte
-		err = tx.QueryRow("SELECT installation_id,encrypted_payload FROM platform_session WHERE id=1").Scan(&installation, &encrypted)
-		var next []byte
-		if err == nil {
-			plain, _, e := decryptPlatformState(config, installation, 1, encrypted)
-			if e != nil {
-				return Problem(409, "credential_key", "平台凭据无法解密，迁移已回滚")
+		if version < 2 {
+			var installation string
+			var encrypted []byte
+			err = tx.QueryRow("SELECT installation_id,encrypted_payload FROM platform_session WHERE id=1").Scan(&installation, &encrypted)
+			var next []byte
+			if err == nil {
+				plain, _, e := decryptPlatformState(config, installation, 1, encrypted)
+				if e != nil {
+					return Problem(409, "credential_key", "平台凭据无法解密，迁移已回滚")
+				}
+				next, err = platformCrypt(config, installation, platformFormatVersion, plain, false)
 			}
-			next, err = platformCrypt(config, installation, platformFormatVersion, plain, false)
-		}
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if _, err = tx.Exec(schemaV2); err != nil {
-			return err
-		}
-		if next != nil {
-			if _, err = tx.Exec("UPDATE platform_session SET encrypted_payload=?,format_version=? WHERE id=1", next, platformFormatVersion); err != nil {
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return err
 			}
+			if _, err = tx.Exec(schemaV2); err != nil {
+				return err
+			}
+			if next != nil {
+				if _, err = tx.Exec("UPDATE platform_session SET encrypted_payload=?,format_version=? WHERE id=1", next, platformFormatVersion); err != nil {
+					return err
+				}
+			}
 		}
-		return nil
+		if err = migrateEventFacts(tx); err != nil {
+			return err
+		}
+		_, err = tx.Exec(schemaV3)
+		return err
 	})
 }
 
@@ -300,7 +306,7 @@ func MigrateCommand(path string, args []string, output io.Writer) error {
 		}
 	}
 	// Commit the database first. A crash here leaves a supported mixed version;
-	// rerunning this command checks v2 and completes only the remaining config.
+	// rerunning this command checks the current DB and finishes the config.
 	before, err = os.ReadFile(abs)
 	if err != nil || !bytes.Equal(before, raw) {
 		return Problem(409, "settings_changed", "数据库已迁移，配置发生变化；保留备份并重新运行 migrate --check 后续迁")

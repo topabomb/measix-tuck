@@ -838,22 +838,22 @@ func TestParityNativeDeliveryContinuation(t *testing.T) {
 	if I(done["turnCount"]) != 2 || I(O(done["latestDelivery"])["version"]) != 1 {
 		t.Fatal(done)
 	}
-	events, err := app.Store.TaskEvents(id, []string{"native"})
+	events, err := app.Store.TaskEvents(id, []string{"state"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	stops := 0
+	stops := map[string]bool{}
 	for _, row := range events {
-		event := O(row["event"])
-		if event["type"] == "stream_stopped" {
-			if event["session_id"] != done["nativeSessionId"] || event["reason"] != "normal" {
-				t.Fatal("unexpected official completion contract", event)
+		state := O(row["task"])
+		if state["nativeStopped"] != nil {
+			if state["nativeSessionId"] != done["nativeSessionId"] || state["nativeStopped"] != "completed" {
+				t.Fatal("unexpected official completion projection", state)
 			}
-			stops++
+			stops[S(state["turnId"])] = true
 		}
 	}
-	if stops != 2 {
-		t.Fatal("expected one explicit root stop per native turn", stops)
+	if len(stops) != 2 || I(O(done["historyTiming"])["previousTurns"]) != 1 {
+		t.Fatal("expected a confirmed completion for each native turn", stops, done["historyTiming"])
 	}
 	messages := taskMessages(t, app.Store, id)
 	found := false

@@ -5,9 +5,11 @@ import type { DockerTask, DockerWorkspaceRuntime } from '../../shared/workspace/
 import ActivityStatus from '../../shared/ui/ActivityStatus.vue'
 import TaskActions from './TaskActions.vue'
 import TaskProgress from './TaskProgress.vue'
+import DeleteConversationDialog from '../chat/components/DeleteConversationDialog.vue'
 import { taskName, taskState, taskIsActive, taskHasEnded, taskNeedsConversation } from './task-view'
 const props = defineProps<{task: DockerTask; workspace: DockerWorkspaceRuntime; connected: boolean}>()
 const observedRequest = ref(false)
+const deleteOpen = ref(false)
 watch(() => props.task.turnTiming?.turnId, () => { observedRequest.value = false })
 watch(() => props.task.pendingInteraction, pending => { if (pending) observedRequest.value = true }, {immediate:true})
 const notice = computed(() => {
@@ -26,5 +28,7 @@ const notice = computed(() => {
     <TaskProgress :task="task" :workspace="workspace" :connected="connected" />
     <p v-if="!task.pendingInteraction" role="status">{{ notice }}</p>
     <TaskActions :task="task" :workspace="workspace" :connected="connected" expanded />
+    <button type="button" class="task-button" data-testid="task-delete" @click="deleteOpen = true">删除对话</button>
+    <DeleteConversationDialog v-if="deleteOpen" :task="task" :workspace="workspace" @close="deleteOpen = false" />
   </section>
 </template>

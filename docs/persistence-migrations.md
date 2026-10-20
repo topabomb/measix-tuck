@@ -1,14 +1,14 @@
 # 持久化版本与迁移
 
-本文描述正式 Go 配置 v1 → v2 → v3、数据库 v1 → v2 迁移及后续维护约定。实现入口为 [migrations.go](../internal/tuck/migrations.go)，结构识别在 [storage_schema.go](../internal/tuck/storage_schema.go)，离线数据检查在 [persistence_check.go](../internal/tuck/persistence_check.go)。正常启动只接受当前版本或初始化空库，不在启动过程中升级已有数据。
+本文描述正式 Go 配置 v1 → v2 → v3、数据库 v1 → v2 → v3 迁移及后续维护约定。实现入口为 [migrations.go](../internal/tuck/migrations.go)，结构识别在 [storage_schema.go](../internal/tuck/storage_schema.go)，离线数据检查在 [persistence_check.go](../internal/tuck/persistence_check.go)。正常启动只接受当前版本或初始化空库，不在启动过程中升级已有数据。
 
 ## 所有权与版本
 
 | 持久内容 | 版本及事实来源 | 迁移与保留规则 |
 | --- | --- | --- |
 | 唯一配置 `tuck.config.json` | 顶层 `schemaVersion=3`，独立于数据库和程序版本 | 配置 owner 校验后原子替换；保留密码哈希、credentialKey、身份、路径、用户参数及合法原生扩展 |
-| Tuck `tuck.db` | `application_id=0x5455434b`、`user_version=2`，并核对完整实际 DDL | 编号 SQL 和必要的数据变换在一个事务内提交；不根据表名或版本数字猜来源 |
-| tasks / messages / events 的 JSON | 由数据库版本统一管理；不在每个 DTO 再加一套版本 | 结构或语义变更必须写数据库迁移；原生事件正文属于外部公开合同，保留原值 |
+| Tuck `tuck.db` | `application_id=0x5455434b`、`user_version=3`，并核对完整实际 DDL | 编号 SQL 和必要的数据变换在一个事务内提交；不根据表名或版本数字猜来源 |
+| tasks / messages / events 的 JSON | 由数据库版本统一管理；不在每个 DTO 再加一套版本 | 结构或语义变更必须写数据库迁移；规范化历史保留原值，短期事件缓存可重建 |
 | `task_deliveries.files_json` 与 `deliveries/snapshots/<task>/<delivery>/files/<file>` | 当前文件布局 v1；其解释由数据库版本管理 | 当前迁移不搬移或重写文件；保留交付 ID、版本、摘要、路径、大小和 SHA256 |
 | `platform_session` | `format_version=2` 独立标识平台密文格式；解密后的绑定形状由该格式管理 | 保留安装身份、绑定、凭据、快照、pendingRefresh 幂等键与 applied 回执；密钥丢失时拒绝，绝不生成新密钥覆盖旧身份 |
 | `web_sessions` / `login_limits` | 数据库版本 | 迁移保留令牌哈希、CSRF、身份、到期和限流事实；之后仍按正常认证规则过期或撤销。设置解锁仅在内存中 |
@@ -28,15 +28,19 @@
 
 配置 2 → 3 将 Tuck 工具 `list_sessions` / `send_session_message` 改为 `list_conversations` / `send_conversation_message`，列表字段改为 `conversations[].conversation_id`，发送参数改为 `target_conversation_id`。迁移替换 `agents.*.disabledTuckTools` 中的旧名称；顶层 `permissions` 保留原规则，对匹配旧工具而需要调整名称或参数的规则，追加新工具的精确名称及相同参数条件，将发送规则中的 `target_task_id` 改为 `target_conversation_id`。涵盖 allow、ask、deny，不扩大通配符范围。保留旧规则是为了不改变原生或外部同名工具的许可，不继续暴露旧 Tuck 工具别名。
 
-自定义 Agent 指令、hooks、外接引擎全局配置和原生会话级权限不属于上述名称迁移，升级前需核对其中的旧工具引用及授权。历史工具调用保留原名称和原始结果，不重写原生历史。数据库保持 v2；生成的原生 YAML 升到格式 16 与本次工具名称迁移是独立变化。
+自定义 Agent 指令、hooks、外接引擎全局配置和原生会话级权限不属于上述名称迁移，升级前需核对其中的旧工具引用及授权。历史工具调用保留原名称和原始结果，不重写原生历史。该次工具名称变更不涉及数据库格式；生成的原生 YAML 升到格式 16 与本次工具名称迁移是独立变化。
 
 完整校验也覆盖本机工具数量、引擎路径类型，以及平台模型参数/工具选择的对象类型。错误的数组、null 或标量不能静默转成空对象，尤其不能因此把明确的工具选择解释为默认全部授权范围。格式正确的值原样保留；不符合合同的旧文件先明确修正，再执行迁移。
 
 数据库 1 → 2 使用 [001.sql](../internal/tuck/contract/storage/001.sql) 和 [002.sql](../internal/tuck/contract/storage/002.sql)。v1 是已发布基线，v2 增加平台密文 `format_version`，将 AES-GCM AAD 从固定字符串升级为包含格式版本与 installation_id 的认证内容，并将 MCP 缓存约束收紧为可读取的数组。原平台明文字节解密校验后直接重新加密，既不转换 Snapshot，也不刷新凭据或访问平台。没有平台行时不创建虚构绑定。
 
+数据库 2 → 3 在同一事务内，先按旧统计口径将非当前轮次的累计时长、数量和不完整标记写入 tasks.historyTiming，再用旧 user_message 事件确认尚未收束的补充消息；有唯一匹配回执才标为 delivered，其余为 unknown。只更新相关消息的回执元数据和展示标签，位置、修订号、正文及附件不变。然后执行 [003.sql](../internal/tuck/contract/storage/003.sql)，清空旧同步缓存、移除旧统计索引和生成列，保留 sqlite_sequence 高水位。零时间事件不猜日期，也不作为长期历史保留。旧事件不搬入第二个库；原始数据留在升级备份中。
+
+迁移不改变 pendingInteraction、队列、任务当前 turnTiming、usage、交付、认证或平台密文 v2。配置 v3 无需再升级。升级须同时发布配套前端，已经打开的旧版页面需要刷新；新版前端在游标过期时通过 reset 重新取得快照。正常启动仍只做既有恢复收束。事件日常保留策略与用途见 [存储设计](database-design.md)。首次释放的页可由 SQLite 复用；如需立即缩小文件，备份和校验后另行停服执行 Tuck 库的 VACUUM，在线程序不做全库重写。
+
 任务、消息和单事件沿用 128 MiB 读取上限，MCP 目录沿用 4 MiB 上限，写入也使用同一上限。超限或序列化失败返回明确错误，不写入重启后无法读取的记录；任务/消息/事件的联合发布整体回滚，保留旧消息、任务和游标。Go 的 nil 工具切片规范化为空数组，仍与“没有缓存记录”区分。
 
-升级保留任务 ID、nativeSessionId、消息 position/revision、事件 seq 及 AUTOINCREMENT 高水位、轮次统计、交付版本、Web 会话和登录限流。迁移不广播执行事件、不重新执行队列或工具、不触发交付保留裁剪。数据库提交后的普通启动恢复仍按现有规则收束中断任务和暂停队列。
+升级保留任务 ID、nativeSessionId、消息 position/revision 及事件 AUTOINCREMENT 高水位、轮次统计、交付版本、Web 会话和登录限流。迁移不广播执行事件、不重新执行队列或工具、不触发交付保留裁剪。数据库提交后的普通启动恢复仍按现有规则收束中断任务和暂停队列。
 
 封存 Node demo 即使也有 `user_version=2`，其 application_id、DDL 和配置来源仍不同，不属于此链。未知、未来版本、被改动的已发布 DDL 和封存结构均明确拒绝；不会清空数据、猜测导入或自动降级。历史行为对比不等于历史存储格式兼容。
 
@@ -57,7 +61,7 @@ Windows 使用 `tuck.exe` 和实际 Windows 路径。`--check` 打开只读业�
 
 备份范围是 `migration-inputs`，不是完整部署备份：本次迁移只变更配置和 Tuck 库，工作文件、快照及原生资产不变。发布前仍需另外做下文规定的完整冷备份。已是当前版本时重复执行为无写入操作，不创建多余备份；不存在或真正空白的库留到首次启动初始化。
 
-数据库 DDL、平台密文和 user_version 同事务提交，失败整体回滚。之后再次比较配置原始字节，原子保存配置。配置与 SQLite 不能联合原子提交：断电或写配置失败可能留下“配置 v1 + 数据库 v2”。这是一种可识别的中间状态；保留第一次备份，重新检查，再用另一个新备份目录续迁，只完成余下配置。反向组合“配置 v2 + 数据库 v1”也可检查并仅迁移数据库。不得只手改版本数字绕过检查。
+数据库 DDL、平台密文和 user_version 同事务提交，失败整体回滚。之后再次比较配置原始字节，原子保存配置。配置与 SQLite 不能联合原子提交：断电或写配置失败可能留下“旧配置 + 数据库 v3”。这是一种可识别的中间状态；保留第一次备份，重新检查，再用另一个新备份目录续迁，只完成余下配置。反向组合“配置 v3 + 旧数据库”也可检查并仅迁移数据库。不得只手改版本数字绕过检查。
 
 ## 完整备份与回退
 

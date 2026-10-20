@@ -6,6 +6,21 @@ func EmptyUsage() M {
 	return M{"inputTokens": 0, "outputTokens": 0, "cacheReadTokens": 0, "cacheWriteTokens": 0, "reasoningTokens": 0}
 }
 func StartTurnTiming(task M, at int64) {
+	previous := O(task["turnTiming"])
+	if S(previous["turnId"]) != "" {
+		if previous["turnId"] == task["turnId"] {
+			return
+		}
+		history := Merge(O(task["historyTiming"]))
+		end := N(previous["endedAt"])
+		if end == 0 {
+			end = N(previous["observedAt"])
+		}
+		history["previousMs"] = N(history["previousMs"]) + max(0, end-N(previous["startedAt"]))
+		history["previousTurns"] = I(history["previousTurns"]) + 1
+		history["incomplete"] = B(history["incomplete"]) || B(previous["incomplete"])
+		task["historyTiming"] = history
+	}
 	task["turnTiming"] = M{"turnId": task["turnId"], "startedAt": at, "observedAt": at, "waitingMs": 0}
 }
 func ObserveTurnTiming(task M, at int64) {

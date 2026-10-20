@@ -37,6 +37,10 @@ type completionAuditConn struct {
 	after  func(string)
 }
 
+func (c completionAuditConn) BeginTx(ctx context.Context, options driver.TxOptions) (driver.Tx, error) {
+	return c.Conn.(driver.ConnBeginTx).BeginTx(ctx, options)
+}
+
 func (c completionAuditConn) QueryContext(ctx context.Context, query string, values []driver.NamedValue) (driver.Rows, error) {
 	if c.before != nil {
 		c.before(query)
@@ -84,6 +88,8 @@ func TestCompletionReviewSnapshotCursorReplay(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer store.Close()
+				store.cancelMaintenance()
+				<-store.maintenanceDone
 				manager, err := NewManager(ManagerOptions{Store: store, Engine: &fakeNative{}, WorkspaceRoot: t.TempDir()})
 				if err != nil {
 					t.Fatal(err)
@@ -99,7 +105,7 @@ func TestCompletionReviewSnapshotCursorReplay(t *testing.T) {
 				underlying := store.DB
 				name := "completion-audit-" + ID()
 				barrier := func(query string) {
-					if query == "SELECT COALESCE(MAX(seq),0) FROM events" && blocked.CompareAndSwap(false, true) {
+					if query == "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='events'),0)" && blocked.CompareAndSwap(false, true) {
 						close(atCursor)
 						<-proceed
 					}

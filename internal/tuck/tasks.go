@@ -47,9 +47,8 @@ type taskRun struct {
 }
 type interaction struct{ pending, native M }
 type steeringRecord struct {
-	hash, status, messageID, turnID string
-	after                           int64
-	index                           int
+	hash, status, messageID string
+	index                   int
 }
 type Manager struct {
 	mu                                sync.Mutex
@@ -59,6 +58,8 @@ type Manager struct {
 	runs                              map[string]*taskRun
 	interactions                      map[string][]interaction
 	resolving, policyChanges, sending map[string]bool
+	deleting                          map[string]bool
+	nativeChanges                     map[string]int
 	sendWait                          map[string]chan struct{}
 	steering                          map[string][]*steeringRecord
 	receipts                          map[string]map[string]bool
@@ -74,6 +75,8 @@ func NewManager(o ManagerOptions) (*Manager, error) {
 	}
 	m := &Manager{options: o, tasks: map[string]M{}, runs: map[string]*taskRun{}, interactions: map[string][]interaction{}, resolving: map[string]bool{}, policyChanges: map[string]bool{}, sending: map[string]bool{}, steering: map[string][]*steeringRecord{}, receipts: map[string]map[string]bool{}, listeners: map[chan struct{}]struct{}{}}
 	m.sendWait = map[string]chan struct{}{}
+	m.deleting = map[string]bool{}
+	m.nativeChanges = map[string]int{}
 	m.taskOrder = map[string]int{}
 	m.normalizer.init(m)
 	tasks, err := o.Store.Tasks()
@@ -178,6 +181,9 @@ func (m *Manager) AssistantCatalog() M {
 	return AssistantCatalog(m.Config())
 }
 func (m *Manager) getLocked(id string) (M, error) {
+	if m.deleting[id] {
+		return nil, Problem(409, "task_deleting", "正在删除此对话，请稍后重试")
+	}
 	t := m.tasks[id]
 	if t == nil {
 		return nil, Problem(404, "task_not_found", "Task not found")
@@ -253,7 +259,11 @@ func (m *Manager) publishLocked(task, event, message M) error {
 		return err
 	}
 	if _, ok := m.taskOrder[S(task["id"])]; !ok {
-		m.taskOrder[S(task["id"])] = len(m.taskOrder)
+		next := 0
+		for _, order := range m.taskOrder {
+			next = max(next, order+1)
+		}
+		m.taskOrder[S(task["id"])] = next
 	}
 	m.notifyLocked()
 	return nil
@@ -348,6 +358,12 @@ func TurnHasEnded(t M) bool {
 	return S(t["status"]) == "idle" && S(t["lastTurnReason"]) != "" && !TaskIsActive(t)
 }
 func (m *Manager) checkLocked(t M, allowStopping bool) error {
+	if t == nil {
+		return Problem(404, "task_not_found", "Task not found")
+	}
+	if m.deleting[S(t["id"])] {
+		return Problem(409, "task_deleting", "正在删除此对话，请稍后重试")
+	}
 	if m.changing || m.closed {
 		return Problem(409, "configuration_changing", "配置正在应用，请稍后执行")
 	}
@@ -553,10 +569,11 @@ func (m *Manager) Rename(ctx context.Context, id, title string) (M, error) {
 	if title == "" || utf8.RuneCountInString(title) > 120 || strings.IndexFunc(title, func(r rune) bool { return r < 32 || r == 127 }) >= 0 {
 		return nil, Problem(400, "invalid_title", "对话名称需为 1–120 个字符，且不能包含换行或控制字符")
 	}
-	t, e := m.Get(id)
+	t, finish, e := m.beginNativeChange(id)
 	if e != nil {
 		return nil, e
 	}
+	defer finish()
 	if v := ParseTaskTitle(S(t["title"])); v != nil {
 		title = "T-" + S(v["code"]) + " · " + TaskName(title)
 	}
@@ -701,8 +718,7 @@ func (m *Manager) drain(ctx context.Context, id string, run *taskRun) {
 			if Code(runErr) == "native_error" {
 				if snapshot, err := m.Get(id); err == nil {
 					_, lookup := m.options.Engine.Request(ctx, "GET", nativePath(snapshot, ""), nil)
-					var native *nativeHTTPError
-					if errors.As(lookup, &native) && Status(lookup) == 404 && S(native.Payload["message"]) == "session not found: session not found" {
+					if nativeSessionMissing(lookup) {
 						runErr = Problem(409, "native_session_missing", "Docker Agent 中已找不到此会话，当前无法续接原生历史。可恢复原生会话备份后重试，或新建对话；本地历史与文件仍保留。")
 					}
 				}
@@ -983,7 +999,7 @@ func (m *Manager) Abort(ctx context.Context, id string) error {
 func (m *Manager) Active() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if len(m.runs) > 0 {
+	if len(m.runs) > 0 || len(m.deleting) > 0 || len(m.nativeChanges) > 0 {
 		return true
 	}
 	for _, t := range m.tasks {
@@ -1229,6 +1245,11 @@ func (m *Manager) ForkOptions(ctx context.Context, id string) ([]M, error) {
 	return result, nil
 }
 func (m *Manager) Fork(ctx context.Context, id string, index int) (M, error) {
+	_, finish, err := m.beginNativeChange(id)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	if index < 0 {
 		return nil, Problem(400, "invalid_fork", "无效的分支位置")
 	}

@@ -16,7 +16,14 @@ const page = ref<InstanceType<typeof ChatPage> | null>(null)
 const ready = ref(false), pending = ref(false), error = ref(''), creating = ref(false), epoch = ref(0)
 let request = 0
 const catalogRevision = ref(0)
-const unsubscribe = props.workspace.subscribe(() => { catalogRevision.value++ })
+const unsubscribe = props.workspace.subscribe(() => {
+  catalogRevision.value++
+  if (route.meta.mode === 'chat' && (ready.value || deliveryId.value) && typeof route.params.id === 'string' && !props.workspace.hasSession(route.params.id)) {
+    ready.value = false; deliveryId.value = ''
+    const next = props.workspace.descriptors[0]?.id
+    void router.replace(next ? conversationPath(next) : '/chat')
+  }
+})
 const deliveryId=ref('')
 const deliveryTask=computed(()=>{void catalogRevision.value;return props.workspace.tasks.get(deliveryId.value)})
 function save() { page.value?.saveView() }

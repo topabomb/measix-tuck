@@ -206,12 +206,7 @@ func (m *Manager) Steer(ctx context.Context, id, prompt string, ids []string, so
 		m.mu.Unlock()
 		return nil, err
 	}
-	cursor, err := m.options.Store.Cursor()
-	if err != nil {
-		m.mu.Unlock()
-		return nil, err
-	}
-	record := &steeringRecord{hash: Hash([]byte(trimEnd(S(native["content"])))), after: cursor, status: "pending", index: -1, turnID: S(snapshot["turnId"])}
+	record := &steeringRecord{hash: Hash([]byte(trimEnd(S(native["content"])))), status: "pending", index: -1}
 	m.steering[id] = append(m.steering[id], record)
 	m.mu.Unlock()
 	submissionError := func(err error) error {
@@ -238,18 +233,16 @@ func (m *Manager) Steer(ctx context.Context, id, prompt string, ids []string, so
 			display = append(display, b)
 		}
 	}
-	entry := M{"turnId": snapshot["turnId"], "role": "user", "blocks": display, "steering": M{"hash": record.hash, "afterSeq": record.after, "status": record.status}}
+	entry := M{"turnId": snapshot["turnId"], "role": "user", "blocks": display}
 	if source != nil {
 		entry["source"] = Clone(source)
 	}
+	updateSteeringMessage(entry, record)
 	msg, err := m.appendLocked(task, entry)
 	if err != nil {
 		return nil, submissionError(err)
 	}
 	record.index = I(msg["index"])
-	if err = m.updateSteeringLocked(task, record); err != nil {
-		return nil, submissionError(err)
-	}
 	if record.status != "pending" {
 		m.forgetSteeringLocked(id, record)
 	}
@@ -277,6 +270,12 @@ func (m *Manager) updateSteeringLocked(task M, record *steeringRecord) error {
 	if err != nil {
 		return err
 	}
+	if updateSteeringMessage(msg, record) {
+		return m.replaceLocked(task, msg)
+	}
+	return nil
+}
+func updateSteeringMessage(msg M, record *steeringRecord) bool {
 	labels := map[string]string{"pending": "等待加入上下文", "delivered": "已加入上下文", "unknown": "未确认是否加入上下文"}
 	for _, v := range A(msg["blocks"]) {
 		b := O(v)
@@ -293,14 +292,14 @@ func (m *Manager) updateSteeringLocked(task M, record *steeringRecord) error {
 				source = "跨会话消息"
 			}
 			data["markdown"] = "> **" + source + "** · " + labels[record.status] + body
-			msg["steering"] = M{"hash": record.hash, "afterSeq": record.after, "status": record.status}
+			msg["steering"] = M{"status": record.status}
 			if record.messageID != "" {
 				O(msg["steering"])["messageId"] = record.messageID
 			}
-			return m.replaceLocked(task, msg)
+			return true
 		}
 	}
-	return nil
+	return false
 }
 func (m *Manager) confirmSteeringLocked(task, event M) error {
 	id := S(task["id"])
@@ -314,16 +313,17 @@ func (m *Manager) confirmSteeringLocked(task, event M) error {
 	hash := Hash([]byte(trimEnd(S(event["message"]))))
 	for _, r := range m.steering[id] {
 		if r.status == "pending" && r.hash == hash {
+			confirmed := *r
+			confirmed.status, confirmed.messageID = "delivered", receipt
+			if err := m.updateSteeringLocked(task, &confirmed); err != nil {
+				return err
+			}
+			*r = confirmed
 			if receipt != "" {
 				if m.receipts[id] == nil {
 					m.receipts[id] = map[string]bool{}
 				}
 				m.receipts[id][receipt] = true
-			}
-			r.status = "delivered"
-			r.messageID = receipt
-			if err := m.updateSteeringLocked(task, r); err != nil {
-				return err
 			}
 			if r.index >= 0 {
 				m.forgetSteeringLocked(id, r)
@@ -337,10 +337,12 @@ func (m *Manager) settleSteeringLocked(task M) error {
 	id := S(task["id"])
 	for _, r := range m.steering[id] {
 		if r.status == "pending" {
-			r.status = "unknown"
-			if err := m.updateSteeringLocked(task, r); err != nil {
+			settled := *r
+			settled.status = "unknown"
+			if err := m.updateSteeringLocked(task, &settled); err != nil {
 				return err
 			}
+			*r = settled
 		}
 	}
 	delete(m.steering, id)
@@ -349,98 +351,23 @@ func (m *Manager) settleSteeringLocked(task M) error {
 }
 func (m *Manager) restoreSteeringLocked() error {
 	for id, task := range m.tasks {
-		messages := []M{}
-		used := map[string]bool{}
 		for start := 0; ; {
 			batch, err := m.options.Store.SteeringMessages(id, start, 512)
 			if err != nil {
 				return err
 			}
-			messages = append(messages, batch...)
+			for _, msg := range batch {
+				status := S(O(msg["steering"])["status"])
+				if status != "delivered" && status != "unknown" && updateSteeringMessage(msg, &steeringRecord{status: "unknown"}) {
+					if err = m.replaceLocked(task, msg); err != nil {
+						return err
+					}
+				}
+			}
 			if len(batch) < 512 {
 				break
 			}
 			start = I(batch[len(batch)-1]["index"]) + 1
-		}
-		pending := false
-		var after int64 = 9007199254740991
-		for _, msg := range messages {
-			steering := O(msg["steering"])
-			if status := S(steering["status"]); status != "delivered" && status != "unknown" {
-				pending = true
-				after = min(after, int64(N(steering["afterSeq"])))
-			}
-			if receipt := S(O(msg["steering"])["messageId"]); receipt != "" {
-				used[receipt] = true
-			}
-		}
-		if !pending {
-			continue
-		}
-		events, err := m.options.Store.SteeringReceipts(id, after)
-		if err != nil {
-			return err
-		}
-		for _, msg := range messages {
-			steering := O(msg["steering"])
-			if S(steering["status"]) == "delivered" || S(steering["status"]) == "unknown" {
-				continue
-			}
-			var content string
-			found := false
-			for _, v := range A(msg["blocks"]) {
-				b := O(v)
-				if strings.HasPrefix(S(b["id"]), "steer:") {
-					text := S(O(b["data"])["markdown"])
-					if i := strings.Index(text, "\n\n"); i >= 0 {
-						content = text[i+2:]
-					} else {
-						content = text
-					}
-					found = true
-					break
-				}
-			}
-			if !found {
-				continue
-			}
-			hash := S(steering["hash"])
-			if hash == "" {
-				hash = Hash([]byte(trimEnd(content)))
-			}
-			candidates := []M{}
-			for _, row := range events {
-				event := O(row["event"])
-				if S(event["type"]) == "user_message" && S(event["session_id"]) == S(task["nativeSessionId"]) && !used[S(event["message_id"])] && N(row["seq"]) > N(steering["afterSeq"]) && Hash([]byte(trimEnd(S(event["message"])))) == hash {
-					candidates = append(candidates, event)
-				}
-			}
-			unique := len(steering) > 0
-			if !unique {
-				count := 0
-				for _, other := range messages {
-					for _, v := range A(other["blocks"]) {
-						b := O(v)
-						text := S(O(b["data"])["markdown"])
-						if strings.HasPrefix(S(b["id"]), "steer:") {
-							i := strings.Index(text, "\n\n")
-							if i >= 0 && Hash([]byte(trimEnd(text[i+2:]))) == hash {
-								count++
-							}
-						}
-					}
-				}
-				unique = count == 1
-			}
-			r := &steeringRecord{hash: hash, after: int64(N(steering["afterSeq"])), index: I(msg["index"]), status: "unknown"}
-			if len(candidates) == 1 && unique {
-				r.status = "delivered"
-				r.messageID = S(candidates[0]["message_id"])
-				used[r.messageID] = true
-			}
-			if err = m.updateSteeringLocked(task, r); err != nil {
-				return err
-			}
 		}
 	}
 	return nil

@@ -79,6 +79,15 @@ func TestHTTPAuthenticationFilesSSEAndReverseProxy(t *testing.T) {
 	}
 	csrfMissing := auth.Clone()
 	csrfMissing.Del("X-Tuck-CSRF")
+	for _, check := range []struct {
+		headers http.Header
+		status  int
+	}{{nil, 401}, {csrfMissing, 403}} {
+		status, _, _ = requestApp(t, app, "POST", "/api/tasks/"+S(task["id"])+"/delete", M{"confirmed": true}, check.headers)
+		if status != check.status {
+			t.Fatal("delete bypassed authentication/CSRF", status)
+		}
+	}
 	status, _, _ = requestApp(t, app, "POST", "/api/tasks", M{}, csrfMissing)
 	if status != 403 {
 		t.Fatal(status)
@@ -472,6 +481,7 @@ func TestStoreLargeIndexedDataset(t *testing.T) {
 		for i := range ids {
 			ids[i] = ID()
 			task := BaseTask(ids[i], UUID(), "task", "", "root", "agent")
+			task["historyTiming"] = M{"previousMs": 99000, "previousTurns": 100, "incomplete": false}
 			if _, e = tasks.Exec(ids[i], NowMS(), "idle", task["nativeSessionId"], string(JSON(task))); e != nil {
 				return e
 			}
@@ -496,7 +506,7 @@ func TestStoreLargeIndexedDataset(t *testing.T) {
 			if i < 100000 {
 				id = ids[i%10]
 				kind = "state"
-				payload = string(JSON(M{"type": "state", "task": M{"turnTiming": M{"turnId": fmt.Sprint("turn_", i/1000), "startedAt": (i / 1000) * 10000, "observedAt": (i/1000)*10000 + i%1000, "incomplete": false}, "padding": strings.Repeat("x", 1024)}}))
+				payload = string(JSON(M{"type": "state", "task": M{"turnTiming": M{"turnId": fmt.Sprint("turn_", i/1000), "startedAt": (i / 1000) * 10000, "observedAt": (i/1000)*10000 + i%1000, "incomplete": false}, "padding": strings.Repeat("x", 128)}}))
 			}
 			if _, e = events.Exec(id, kind, NowMS(), payload); e != nil {
 				return e

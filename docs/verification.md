@@ -34,13 +34,15 @@ node scripts/project.mjs e2e product-navigation.spec.ts mobile-chat.spec.ts comp
 | --- | --- |
 | 任务和原生交互 | 创建、助手并发、目录、标题/归档、队列编辑/移除/停止/恢复、fork、立即补充；审批、类型化问题、执行上限、子会话/后台身份、失败和重启收束；`tasks_test.go`、`native*_test.go`、`native_parity_test.go` |
 | 安全和配置 | Host/Origin、LAN/代理登录、Cookie/CSRF、退出/改密/过期撤销、分类读取与部分保存、在途授权失效、配置应用门与启动资源；`security*_test.go`、`runtime_settings_test.go`、`backend_review_test.go` |
-| 存储和迁移 | 未知库拒绝且不修改，原子联合发布、取消等锁、孤儿清理、冻结 Go v1 夹具、混合状态续迁、WAL 一致备份、错误密钥/DDL/配置保存失败、交付字节、进程占用与崩溃释放、读取上限；`http_store_test.go`、`migrations_test.go` |
+| 存储和迁移 | 未知库拒绝且不修改，原子联合发布、取消等锁、孤儿清理、冻结 Go v1/v2 DDL 夹具、统计及回执提取、事件保留边界和游标重置、混合状态续迁、WAL 一致备份、错误密钥/DDL/配置保存失败、交付字节、进程占用与崩溃释放、读取上限；`http_store_test.go`、`migrations_test.go`、`storage_retention_test.go`、`replay-reset.spec.ts` |
 | 平台和模型 | schema/JCS、快照版本、身份/来源/许可/admit、刷新幂等与失响应、Chat/Responses、大媒体、流式脱敏；`platform*_test.go`、`enterprise_parity_test.go` |
 | MCP 和文件 | 原生恢复与共享连接、SSE priming/空体确认、精确目录及权限；图片解码、路径/文件身份、条件写入、取消、未知写入结果；`mcp_test.go`、`local_tools_review_test.go`、`workspace*_test.go`、`files_delivery_test.go` |
 | 前端语义 | 身份、当前计划与历史、精确交互关联、拟议调用无虚构状态、子会话独立及父子结果分离、流式增量和中立层边界；[前端单测](../frontend/tests/) |
 | 产品页面 | URL 直达/刷新/登录返回/前进后退、筛选分页、历史窗口、交付版本、设置/保护、文件草稿/预览、真实 select 菜单；[浏览器测试](../frontend/e2e/) |
 
 表中的 Go 文件位于 [internal/tuck/](../internal/tuck/)。夹具 JavaScript 只合成外部服务并驱动 Go，不是另一个产品实现。存储变化还须核对 [迁移约定](persistence-migrations.md#后续修改约定) 的支持范围与失败边界。
+
+显式删除覆盖 `task_delete_test.go`、`conversation-delete.test.ts` 和 `conversation-delete.spec.ts`：主子会话范围、独立分支、暂停队列/审批/后台执行拦截、并发修改、原生失败与本地事务回滚后的重试、共享源文件与符号链接保护、删除事件及过期快照同步、迟到响应与默认会话缓存不能复活已删除对话、旧事件补读已删除历史后的快照恢复。浏览器使用官方引擎和合成模型，检查确认/取消、归档与任务频道入口、多窗口同步以及 1365/390px 布局；文件链接测试在支持符号链接的平台运行。
 
 ## 附件识别链路
 

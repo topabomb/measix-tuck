@@ -16,17 +16,26 @@ const props = defineProps<{workspace: DockerWorkspaceRuntime; state: TaskViewSta
 const route = useRoute(), router = useRouter()
 const host = ref<HTMLElement>()
 const tasks = shallowRef<DockerTask[]>([]), assistants = shallowRef<Assistant[]>([]), connected = ref(false)
+const workspaceError = ref('')
 let revision = -1
 function update() {
   connected.value = props.workspace.connected
+  workspaceError.value = props.workspace.error || ''
   if (revision === props.workspace.taskRevision) return
   revision = props.workspace.taskRevision
+  for (const [key,draft] of Object.entries(props.state.drafts)) {
+    if (draft.taskId && !props.workspace.hasSession(draft.taskId)) delete props.state.drafts[key]
+  }
   tasks.value = sortedTasks([...props.workspace.tasks.values()])
   const catalog = props.workspace.runtimeInfo.assistants || defaultAssistants
   assistants.value = [...catalog.items]
   for (const task of tasks.value) if (!assistants.value.some(item => item.agent === task.agent)) assistants.value.push({agent:task.agent,displayName:task.assistantName || task.agent,unavailable:true})
 }
-const unsubscribe = props.workspace.subscribe(update)
+const unsubscribe = props.workspace.subscribe(() => {
+  const removed = typeof route.params.id === 'string' && tasks.value.some(task => task.id === route.params.id) && !props.workspace.hasSession(route.params.id)
+  update()
+  if (route.meta.mode === 'tasks' && removed) void router.replace('/tasks')
+})
 update()
 const agent = computed(() => typeof route.params.agent === 'string' ? route.params.agent : '')
 const id = computed(() => typeof route.params.id === 'string' ? route.params.id : '')
@@ -105,6 +114,7 @@ onBeforeUnmount(() => { navigation++; unsubscribe() })
   <main ref="host" class="task-channel" aria-label="任务频道" @scroll.passive="remember">
     <TaskNavigation v-if="!error" :class="{'task-navigation-wide': !!agent && !isNew}" :trail="state.trail" :tasks="tasks" :assistants="assistants" />
     <p v-if="!connected" class="channel-notice" role="status">连接中，暂不可操作</p>
+    <p v-if="workspaceError" class="channel-notice" role="alert">{{ workspaceError }}</p>
     <div v-if="loading" class="channel-loading"><TuckLoading label="正在加载任务…" /></div>
     <section v-else-if="error" class="task-page"><RouterLink class="back-link task-back" to="/tasks"><span aria-hidden="true">←</span>返回任务</RouterLink><p role="alert">{{ error }}</p></section>
     <section v-else-if="task && (isSupplement || isDelivery) && taskNeedsConversation(task)" class="task-page" aria-label="任务需要处理"><h1>任务需要处理</h1><p role="status">请进入对话检查错误和待发送内容，再继续任务。</p><RouterLink class="task-button primary" :to="conversationPath(task.id)">进入对话处理</RouterLink></section>

@@ -14,6 +14,7 @@ import SessionNavigation from './components/SessionNavigation.vue'
 import NewConversationDialog from './components/NewConversationDialog.vue'
 import ForkConversationDialog from './components/ForkConversationDialog.vue'
 import RenameConversationDialog from './components/RenameConversationDialog.vue'
+import DeleteConversationDialog from './components/DeleteConversationDialog.vue'
 import { useLightDismiss } from '../../shared/use-light-dismiss'
 import TaskFiles from './components/TaskFiles.vue'
 import EnterpriseWorkspace from '../../shared/enterprise-workspace/EnterpriseWorkspace.vue'
@@ -58,6 +59,7 @@ const liveWorkspace = props.workspace
 const forkTaskId = ref<string | null>(null)
 const newTaskOpen = ref(false)
 const renameOpen = ref(false)
+const deleteTask = ref<import('../../shared/workspace/runtime').DockerTask | null>(null)
 const deliverySummary=ref<InstanceType<typeof DeliverySummary>|null>(null)
 const navigationTasks = computed<readonly import('../../shared/workspace/runtime').DockerTask[]>((previous) => {
   void workspaceRevision.value
@@ -265,9 +267,12 @@ async function archiveTask(): Promise<void> { if (!liveWorkspace) return; try { 
       <details v-if="archivedTasks.length" :open="archivesOpen" class="archived-sessions" @toggle="archivesOpen = ($event.target as HTMLDetailsElement).open">
         <summary><svg aria-hidden="true" viewBox="0 0 20 20"><path d="m7 5 5 5-5 5" /></svg><span>已归档</span><span class="archive-count">{{ archivedTasks.length }}</span></summary>
         <div v-if="archivesOpen" class="archive-list">
-          <button v-for="task in archivedTasks" :key="task.id" type="button" :aria-label="`恢复 ${taskName(task.title)}`" :title="taskName(task.title)" :disabled="!!restoringArchive" @click="restoreArchive(task.id)">
+          <div v-for="task in archivedTasks" :key="task.id" class="archive-entry">
+          <button type="button" :aria-label="`恢复 ${taskName(task.title)}`" :title="taskName(task.title)" :disabled="!!restoringArchive" @click="restoreArchive(task.id)">
             <span class="archive-title">{{ taskName(task.title) }}</span><span class="archive-action"><svg aria-hidden="true" viewBox="0 0 20 20"><path d="M4 8a6 6 0 1 1 0 5M4 3v5h5" /></svg>{{ restoringArchive === task.id ? '恢复中…' : '恢复' }}</span>
           </button>
+          <button type="button" :aria-label="`删除 ${taskName(task.title)}`" @click="deleteTask = task">删除</button>
+          </div>
         </div>
       </details>
       <div v-if="liveWorkspace" class="sidebar-footer"><span class="status-led" :class="{ disconnected: !liveWorkspace.connected }" /><span>{{ liveWorkspace.connected ? '已连接' : '正在重连…' }}</span><span v-if="runningSessionCount">· {{ runningSessionCount }} 个任务执行中</span></div>
@@ -305,7 +310,7 @@ async function archiveTask(): Promise<void> { if (!liveWorkspace) return; try { 
       <template #node-actions="{ unit }"><button class="message-link" type="button" aria-label="复制消息链接" title="复制消息链接" :data-message-link="unit.messageIndex" @click.stop="copyLink(unit.messageIndex)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m8 12 4-4M7 10l-2 2a3 3 0 0 0 4 4l2-2m-2-8 2-2a3 3 0 0 1 4 4l-2 2" /></svg></button></template>
       <template #header-actions>
         <DeliverySummary v-if="showDelivery && taskInfo" ref="deliverySummary" :task="taskInfo" :tool-enabled="deliveryToolEnabled" :require-delivery="deliveryRequirement" />
-        <button v-if="taskInfo?.forkedFrom" class="reference-header-action" type="button" aria-label="来源" :title="taskName(taskInfo.forkedFrom.title)" @click="switchSession(taskInfo.forkedFrom.id)"><svg aria-hidden="true" viewBox="0 0 20 20"><path d="M6 3v8a4 4 0 0 0 4 4h6m-4-4 4 4-4 4" /></svg><span>来源</span></button>
+        <button v-if="taskInfo?.forkedFrom" class="reference-header-action" type="button" aria-label="来源" :disabled="!liveWorkspace.tasks.has(taskInfo.forkedFrom.id)" :title="liveWorkspace.tasks.has(taskInfo.forkedFrom.id) ? taskName(taskInfo.forkedFrom.title) : '来源对话已删除，当前分支仍可使用'" @click="switchSession(taskInfo.forkedFrom.id)"><svg aria-hidden="true" viewBox="0 0 20 20"><path d="M6 3v8a4 4 0 0 0 4 4h6m-4-4 4 4-4 4" /></svg><span>来源</span></button>
         <button class="reference-header-action" type="button" data-testid="task-files" aria-label="产物" title="产物" :aria-expanded="filesOpen" @click="filesTrigger=$event.currentTarget as HTMLElement;filesOpen = !filesOpen"><svg aria-hidden="true" viewBox="0 0 20 20"><path d="M5 2h7l4 4v12H5Z M12 2v5h4 M8 11h5 M8 14h5" /></svg><span>产物</span></button>
         <button ref="enterpriseToggle" class="reference-header-action workspace-toggle" type="button" aria-label="工作区" :title="enterpriseOpen?'收起工作区':'打开工作区'" aria-controls="enterprise-workspace-panel" :aria-expanded="enterpriseOpen" :aria-pressed="enterpriseOpen" @click="toggleEnterprise"><RuncoveMark /><span>工作区</span></button>
         <details ref="sessionMenu" class="tuck-session-menu">
@@ -316,6 +321,7 @@ async function archiveTask(): Promise<void> { if (!liveWorkspace) return; try { 
             <button class="mobile-header-item" type="button" @click="toggleEnterprise();sessionMenu&&(sessionMenu.open=false)"><RuncoveMark /><span>工作区</span></button>
             <button type="button" @click="copyLink(); sessionMenu && (sessionMenu.open = false)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m8 12 4-4 M7 13l-1 1a3 3 0 0 1-4-4l4-4a3 3 0 0 1 4 0 M13 7l1-1a3 3 0 0 1 4 4l-4 4a3 3 0 0 1-4 0" /></svg><span>复制对话链接</span></button><button v-if="taskInfo" type="button" @click="renameOpen = true; sessionMenu && (sessionMenu.open = false)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 3 5 5 M3 17l4-1L17 6a2 2 0 0 0-3-3L4 13Z" /></svg><span>重命名</span></button><button v-if="!taskInfo?.parentTaskId && taskInfo?.status === 'idle' && taskInfo.logicalCount" @click="forkTaskId = activeSession.id; sessionMenu && (sessionMenu.open = false)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 5v10 M6 10h5a3 3 0 0 0 3-3V5 M4 3h4v3H4Z M12 2h4v3h-4Z M4 15h4v3H4Z" /></svg><span>创建分支</span></button>
             <button v-if="!taskInfo?.parentTaskId && activeUiState.sessionStatus === 'idle'" type="button" data-testid="task-archive" @click="archiveTask"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 3h14v4H3Z M4 7v10h12V7 M8 10h4" /></svg><span>归档对话</span></button>
+            <button v-if="taskInfo && !taskInfo.parentTaskId" type="button" data-testid="task-delete" @click="deleteTask = taskInfo; sessionMenu && (sessionMenu.open = false)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12 M8 3h4 M6 6l1 11h6l1-11" /></svg><span>删除对话</span></button>
             <button v-if="taskInfo?.queue.length" type="button" @click="liveWorkspace?.command(activeSession.id, 'clear-queue', {}); sessionMenu && (sessionMenu.open = false)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12 M8 3h4 M6 6l1 11h6l1-11" /></svg><span>清空队列</span></button>
             <button data-testid="diagnostics-open" type="button" :aria-pressed="diagnosticsOpen" @click="diagnosticsOpen = !diagnosticsOpen; sessionMenu && (sessionMenu.open = false); sessionMenu?.querySelector('summary')?.focus()"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 16V9 M8 16V4 M13 16v-6 M18 16V7" /></svg><span>运行详情</span></button>
           </div>
@@ -361,6 +367,7 @@ async function archiveTask(): Promise<void> { if (!liveWorkspace) return; try { 
     <TaskFiles v-if="filesOpen && artifactTask" :key="activeSession.id" :task="artifactTask" :trigger="filesTrigger" :shared="!!taskInfo?.parentTaskId" @close="filesOpen = false" />
     <ForkConversationDialog v-if="forkTaskId" :workspace="liveWorkspace" :task-id="forkTaskId" @close="forkTaskId = null" @created="switchSession" />
     <RenameConversationDialog v-if="renameOpen && taskInfo" :task="taskInfo" :workspace="liveWorkspace" @close="renameOpen = false" />
+    <DeleteConversationDialog v-if="deleteTask" :task="deleteTask" :workspace="liveWorkspace" @close="deleteTask = null" />
     <NewConversationDialog v-if="newTaskOpen" :workspace="liveWorkspace" :connection="connection" :initial-agent="assistantFilter || assistants.defaultAgent" @close="newTaskOpen = false" @created="sessionCreated" />
     <div v-if="copyNotice" class="copy-feedback" role="status">{{ copyNotice }}</div>
   </section>

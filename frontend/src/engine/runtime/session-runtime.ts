@@ -220,6 +220,24 @@ export class ConversationSessionRuntime {
     const oldCount = this.#knownLogicalCount
     const newCount = this.logicalCount
 
+    if (event.kind === 'reset') {
+      // Keep this runtime and its draft/reader identity while replacing all
+      // cached content. The producer prepares this window before publishing.
+      this.#knownLogicalCount = newCount
+      this.segment.setTotalMessages(newCount)
+      if (this.followTail) {
+        this.segment.setEndingAt(newCount - 1)
+        this.currentLogicalPosition = Math.max(0, newCount - 1)
+      }
+      this.pageHeights = new PageHeightIndex(newCount)
+      this.projectionEngine.clear()
+      this.#activeUnits = this.#materialize(this.range)
+      this.#refreshPageEstimates()
+      this.projection.replace(this.#activeUnits)
+      this.#stateNotifier.markDirty()
+      return
+    }
+
     if (newCount !== oldCount) {
       const wasPinned = this.followTail
       const canAppend = this.range.end === oldCount && this.range.end - this.range.start < this.segment.capacity

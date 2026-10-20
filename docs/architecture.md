@@ -56,7 +56,7 @@ Tuck 自组织的模型内容统一经 `model_content.go`，业务和协议代�
 
 `orchestration.go` 根据已取得的运行事实决定是否补充内容；Manager 提供事实、管理队列并在提交前核对目标、轮次、配置及许可；`model_content` 构造正文及来源包装；Docker Agent 执行和消费消息。策略不能直接修改任务、操作队列或拼接消息，Manager 不持有不断增长的业务策略。以上为职责划分，不各建服务或执行循环。
 
-当前自动补交付只在执行流正常返回且取得明确匹配根会话 ID 的 `stream_stopped` 后判断。基线正常事件为 `reason=normal, finish_reason=stop`，只有 normal 映射为 completed。EOF、工具结果、子代理结束、缺失/未知身份、空原因、错误、取消和执行上限均不能代替正常根终止事实。未知身份只保留原始事件，子会话只更新自身。
+当前自动补交付只在执行流正常返回且取得明确匹配根会话 ID 的 `stream_stopped` 后判断。基线正常事件为 `reason=normal, finish_reason=stop`，只有 normal 映射为 completed。EOF、工具结果、子代理结束、缺失/未知身份、空原因、错误、取消和执行上限均不能代替正常根终止事实。未知终止身份不改变根状态，子会话只更新自身。原生事件消费后只持久化业务投影，保留规则见 [存储设计](database-design.md)。
 
 正常结束后读取当前编排开关、工具许可及本轮交付事实；需要补交付时进入既有队列，发送前再次核对。每个真实用户根轮次最多补充一次，自动轮次不能触发自身；运行中关闭开关须移除未执行自动项，保留用户队列。跨会话消息的目标与接收规则见 [工具参考](tools-reference.md#send_conversation_message)，accepted、进入原生上下文和完成分别记录。
 

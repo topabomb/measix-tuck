@@ -9,8 +9,8 @@ import (
 	"image"
 	"image/color"
 	"image/gif"
-	"image/jpeg"
-	"image/png"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"mime"
 	"net/http"
@@ -22,8 +22,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	webpencoder "github.com/gen2brain/webp"
 	"golang.org/x/image/draw"
-	_ "golang.org/x/image/webp"
+	webpdecoder "golang.org/x/image/webp"
 )
 
 const MaxUploadBytes = 16 << 20
@@ -581,11 +582,11 @@ func (f *Files) Prepare(task M, prompt string, ids []string) (M, []any, error) {
 			if Hash(raw) != S(item["sha256"]) {
 				return nil, nil, Problem(400, "attachment_changed", "图片已被修改，请重新添加")
 			}
-			encoded, mime, e := PrepareModelImage(raw)
-			if e != nil {
-				return nil, nil, e
-			}
 			if directImages {
+				encoded, mime, e := PrepareModelImage(raw)
+				if e != nil {
+					return nil, nil, e
+				}
 				media.Bytes, media.MIME = encoded, mime
 			}
 		} else {
@@ -835,7 +836,13 @@ func decodeImage(raw []byte) (image.Image, bool, error) {
 	if mime == "image/webp" && len(raw) >= 21 && string(raw[12:16]) == "VP8X" && raw[20]&2 != 0 {
 		return decodeAnimatedWebP(raw)
 	}
-	config, _, e := image.DecodeConfig(bytes.NewReader(raw))
+	var config image.Config
+	var e error
+	if mime == "image/webp" {
+		config, e = webpdecoder.DecodeConfig(bytes.NewReader(raw))
+	} else {
+		config, _, e = image.DecodeConfig(bytes.NewReader(raw))
+	}
 	if e != nil {
 		return nil, false, e
 	}
@@ -854,8 +861,10 @@ func decodeImage(raw []byte) (image.Image, bool, error) {
 		}
 		return all.Image[0], animated, nil
 	}
-	if mime == "image/webp" && len(raw) >= 21 && string(raw[12:16]) == "VP8X" && raw[20]&2 != 0 {
-		animated = true
+	if mime == "image/webp" {
+		// The encoder registers its own decoder; keep the existing pixel decoder.
+		img, err := webpdecoder.Decode(bytes.NewReader(raw))
+		return img, false, err
 	}
 	img, _, e := image.Decode(bytes.NewReader(raw))
 	if e != nil {
@@ -930,50 +939,18 @@ func PrepareModelImage(raw []byte) ([]byte, string, error) {
 	}
 	bounds := img.Bounds()
 	width, height := bounds.Dx(), bounds.Dy()
-	if max(width, height) > 2048 {
-		scale := 2048 / float64(max(width, height))
+	if max(width, height) > 2560 {
+		scale := 2560 / float64(max(width, height))
 		width = max(1, int(float64(width)*scale))
 		height = max(1, int(float64(height)*scale))
 		resized := image.NewNRGBA(image.Rect(0, 0, width, height))
 		draw.CatmullRom.Scale(resized, resized.Bounds(), img, bounds, draw.Over, nil)
 		img = resized
 	}
-	alpha := encodedAlpha(raw)
-	for y := img.Bounds().Min.Y; y < img.Bounds().Max.Y && !alpha; y++ {
-		for x := img.Bounds().Min.X; x < img.Bounds().Max.X; x++ {
-			_, _, _, a := img.At(x, y).RGBA()
-			if a != 65535 {
-				alpha = true
-				break
-			}
-		}
-	}
 	var out bytes.Buffer
-	if alpha {
-		e = png.Encode(&out, img)
-		return out.Bytes(), "image/png", e
-	}
-	e = jpeg.Encode(&out, img, &jpeg.Options{Quality: 85})
-	return out.Bytes(), "image/jpeg", e
-}
-
-func encodedAlpha(raw []byte) bool {
-	if ImageType(raw) == "image/png" && len(raw) > 25 {
-		if raw[25] == 4 || raw[25] == 6 {
-			return true
-		}
-		for p := 8; p+12 <= len(raw); {
-			n := int(binary.BigEndian.Uint32(raw[p : p+4]))
-			if n < 0 || n > len(raw)-p-12 {
-				return false
-			}
-			if string(raw[p+4:p+8]) == "tRNS" {
-				return true
-			}
-			p += n + 12
-		}
-	}
-	return ImageType(raw) == "image/webp" && len(raw) >= 21 && string(raw[12:16]) == "VP8X" && raw[20]&16 != 0
+	// libwebp defaults to lossless alpha (alpha_quality=100), independently of RGB quality.
+	e = webpencoder.Encode(&out, img, webpencoder.Options{Quality: 90, Method: 4})
+	return out.Bytes(), "image/webp", e
 }
 
 // The standard decoder handles static WebP. Decode each ANMF frame as an
@@ -1010,7 +987,7 @@ func decodeAnimatedWebP(raw []byte) (image.Image, bool, error) {
 			frame.WriteString("WEBPVP8X")
 			frame.Write([]byte{10, 0, 0, 0, 16, 0, 0, 0, byte(w - 1), byte((w - 1) >> 8), byte((w - 1) >> 16), byte(h - 1), byte((h - 1) >> 8), byte((h - 1) >> 16)})
 			frame.Write(payload)
-			img, _, err := image.Decode(bytes.NewReader(frame.Bytes()))
+			img, err := webpdecoder.Decode(bytes.NewReader(frame.Bytes()))
 			if err != nil {
 				return nil, false, err
 			}

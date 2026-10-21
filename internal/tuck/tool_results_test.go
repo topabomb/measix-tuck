@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -126,6 +127,27 @@ func TestToolResultBusinessProjection(t *testing.T) {
 	value = modelContent.ToolResult("upload_runcove_file", transferFailure(context.Canceled, true))
 	if len(value) != 3 || value["status"] != "unknown" || value["code"] != "outcome_unknown" {
 		t.Fatal(value)
+	}
+}
+
+func TestModelImageProcessingDetailsStayInternal(t *testing.T) {
+	details := M{"width": 2560, "height": 1440, "original_width": 3840, "alpha": true,
+		"transparency": true, "resized": true, "quality": 90, "method": 4, "pixel_limit": 40000000}
+	technical := regexp.MustCompile("(?i)(^|[^a-z])(width|height|dimensions?|resolution|aspect_ratio|alpha|transparency|transparent|resized?|pixels?|quality|method)([^a-z]|$)")
+	// Check the actual model projection, including unknown business-owner facts.
+	result := modelContent.ToolResult("generate_images", Merge(details, M{
+		"status": "completed", "files": []any{Merge(details, M{"path": "artifacts/images/image.png", "promptPath": "artifacts/images/image.prompt.txt"})},
+	}))
+	if technical.Match(JSON(result)) {
+		t.Fatal("processing details leaked through the tool result", result)
+	}
+	if technical.Match(JSON(modelContent.Tools(modelContent.ToolNames(), M{}))) {
+		t.Fatal("processing details leaked through tool parameters or descriptions")
+	}
+	for _, code := range []string{"attachment_limit", "attachment_invalid_image", "image_limit"} {
+		if result := modelContent.Failure(code); technical.Match(JSON(result)) {
+			t.Fatal("processing details leaked through an error", result)
+		}
 	}
 }
 

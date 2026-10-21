@@ -5,10 +5,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/gif"
+	"image/jpeg"
 	"image/png"
 	"io"
 	"net/http/httptest"
@@ -20,6 +23,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"golang.org/x/image/draw"
+	webpdecoder "golang.org/x/image/webp"
 )
 
 func uploadData(name string, raw []byte) M {
@@ -237,18 +243,18 @@ func TestImageNormalizationAndAnimation(t *testing.T) {
 	if e != nil || kind != "image/webp" || !bytes.Equal(animated, prepared) {
 		t.Fatal("animated WebP", kind, e)
 	}
-	raw := testPNG(t, 2500, 100, false)
+	raw := testPNG(t, 3000, 100, false)
 	out, mime, e := PrepareModelImage(raw)
 	if e != nil {
 		t.Fatal(e)
 	}
 	cfg, _, e := image.DecodeConfig(bytes.NewReader(out))
-	if e != nil || cfg.Width != 2048 || cfg.Height > 100 || mime != "image/jpeg" {
+	if e != nil || cfg.Width != 2560 || cfg.Height != 85 || mime != "image/webp" {
 		t.Fatal(cfg, mime, e)
 	}
 	raw = testPNG(t, 32, 24, true)
 	out, mime, e = PrepareModelImage(raw)
-	if e != nil || mime != "image/png" || len(out) == 0 {
+	if e != nil || mime != "image/webp" || len(out) == 0 {
 		t.Fatal(mime, e)
 	}
 	palette := color.Palette{color.Black, color.White}
@@ -265,6 +271,102 @@ func TestImageNormalizationAndAnimation(t *testing.T) {
 	}
 	if _, _, e = PrepareModelImage(buf.Bytes()[:buf.Len()-3]); e == nil {
 		t.Fatal("truncated animation accepted")
+	}
+}
+
+func TestModelImageStaticPolicy(t *testing.T) {
+	for _, tt := range []struct {
+		name                                 string
+		width, height, wantWidth, wantHeight int
+	}{
+		{"landscape", 3000, 96, 2560, 81},
+		{"portrait", 96, 3000, 81, 2560},
+		{"at_limit", 2560, 16, 2560, 16},
+		{"small", 32, 24, 32, 24},
+		{"single_pixel", 1, 1, 1, 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := testPNG(t, tt.width, tt.height, false)
+			original := bytes.Clone(raw)
+			out, mime, err := PrepareModelImage(raw)
+			if err != nil || mime != "image/webp" || ImageType(out) != mime {
+				t.Fatal(mime, err)
+			}
+			cfg, err := webpdecoder.DecodeConfig(bytes.NewReader(out))
+			if err != nil || cfg.Width != tt.wantWidth || cfg.Height != tt.wantHeight || !bytes.Equal(raw, original) {
+				t.Fatal("dimensions or original bytes changed", cfg, err)
+			}
+		})
+	}
+	t.Run("orientation_before_resize", func(t *testing.T) {
+		var jpegBytes bytes.Buffer
+		if err := jpeg.Encode(&jpegBytes, image.NewRGBA(image.Rect(0, 0, 3000, 96)), &jpeg.Options{Quality: 90}); err != nil {
+			t.Fatal(err)
+		}
+		exif := []byte("Exif\x00\x00II\x2a\x00\x08\x00\x00\x00\x01\x00\x12\x01\x03\x00\x01\x00\x00\x00\x06\x00\x00\x00\x00\x00\x00\x00")
+		raw := append([]byte{}, jpegBytes.Bytes()[:2]...)
+		raw = append(raw, 0xff, 0xe1, byte((len(exif)+2)>>8), byte(len(exif)+2))
+		raw = append(raw, exif...)
+		raw = append(raw, jpegBytes.Bytes()[2:]...)
+		out, mime, err := PrepareModelImage(raw)
+		if err != nil || mime != "image/webp" {
+			t.Fatal(mime, err)
+		}
+		cfg, err := webpdecoder.DecodeConfig(bytes.NewReader(out))
+		if err != nil || cfg.Width != 81 || cfg.Height != 2560 {
+			t.Fatal("EXIF orientation was not applied before resizing", cfg, err)
+		}
+	})
+	t.Run("pixel_limit_before_decode", func(t *testing.T) {
+		raw := testPNG(t, 1, 1, false)
+		binary.BigEndian.PutUint32(raw[16:20], 40000001)
+		binary.BigEndian.PutUint32(raw[29:33], crc32.ChecksumIEEE(raw[12:29]))
+		if _, _, err := PrepareModelImage(raw); err == nil {
+			t.Fatal("oversized decoded image accepted")
+		}
+	})
+}
+
+func TestModelImagePreservesAlpha(t *testing.T) {
+	for _, width := range []int{256, 2600} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			src := image.NewNRGBA(image.Rect(0, 0, width, 8))
+			for y := 0; y < 8; y++ {
+				for x := 0; x < width; x++ {
+					src.SetNRGBA(x, y, color.NRGBA{R: 220, G: 70, B: 110, A: uint8(x + y)})
+				}
+			}
+			var raw bytes.Buffer
+			if err := png.Encode(&raw, src); err != nil {
+				t.Fatal(err)
+			}
+			out, mime, err := PrepareModelImage(raw.Bytes())
+			if err != nil || mime != "image/webp" {
+				t.Fatal(mime, err)
+			}
+			got, err := webpdecoder.Decode(bytes.NewReader(out))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var want image.Image = src
+			if width > 2560 {
+				scaled := image.NewNRGBA(image.Rect(0, 0, 2560, 7))
+				draw.CatmullRom.Scale(scaled, scaled.Bounds(), src, src.Bounds(), draw.Over, nil)
+				want = scaled
+			}
+			if got.Bounds() != want.Bounds() {
+				t.Fatal(got.Bounds(), want.Bounds())
+			}
+			for y := 0; y < got.Bounds().Dy(); y++ {
+				for x := 0; x < got.Bounds().Dx(); x++ {
+					_, _, _, gotAlpha := got.At(x, y).RGBA()
+					_, _, _, wantAlpha := want.At(x, y).RGBA()
+					if gotAlpha != wantAlpha {
+						t.Fatalf("alpha changed at %d,%d: %d != %d", x, y, gotAlpha, wantAlpha)
+					}
+				}
+			}
+		})
 	}
 }
 func deliveryFixture(t *testing.T) (*Deliveries, *toolTurn, *Manager, *Store, *platformFixture) {
@@ -453,7 +555,26 @@ func TestOfficialAttachmentLargeImage(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	pic, e := app.Files.Upload(task, uploadData("large.png", testPNG(t, 2048, 1024, true)))
+	// Keep the >10 MiB transport regression independent of static compression.
+	// Animations retain their original bytes and exercise the same native input.
+	palette := make(color.Palette, 256)
+	for i := range palette {
+		palette[i] = color.NRGBA{R: uint8(i), G: uint8(255 - i), B: uint8(i / 2), A: 255}
+	}
+	animation := &gif.GIF{}
+	for i := 0; i < 8; i++ {
+		frame := image.NewPaletted(image.Rect(0, 0, 1024, 1024), palette)
+		if _, e := rand.Read(frame.Pix); e != nil {
+			t.Fatal(e)
+		}
+		animation.Image = append(animation.Image, frame)
+		animation.Delay = append(animation.Delay, 10)
+	}
+	var raw bytes.Buffer
+	if e = gif.EncodeAll(&raw, animation); e != nil {
+		t.Fatal(e)
+	}
+	pic, e := app.Files.Upload(task, uploadData("large.gif", raw.Bytes()))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -477,6 +598,55 @@ func TestOfficialAttachmentLargeImage(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("large body did not reach provider")
+	}
+}
+
+func TestOfficialStaticAttachmentModelRepresentation(t *testing.T) {
+	f := newPlatformFixture(t, 5)
+	O(A(f.snapshot["models"])[0])["inputModalities"] = []any{"TEXT", "IMAGE"}
+	f.enroll()
+	app := f.startApp()
+	task, err := app.Manager.Create(context.Background(), M{"modelId": f.models.Catalog()[0]["modelId"], "approvalMode": "auto"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := testPNG(t, 3000, 96, true)
+	model, mime, err := PrepareModelImage(raw)
+	if err != nil || mime != "image/webp" {
+		t.Fatal(mime, err)
+	}
+	pic, err := app.Files.Upload(task, uploadData("original.png", raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = app.Manager.Submit(S(task["id"]), "STATIC_IMAGE_POLICY_PROOF", []string{S(pic["id"])}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	settled := waitIdle(t, app.Manager, S(task["id"]))
+	if settled["lastTurnReason"] != "completed" {
+		t.Fatal(settled["lastFailure"])
+	}
+	want := "data:image/webp;base64," + base64.StdEncoding.EncodeToString(model)
+	found := false
+	for _, r := range f.requestList() {
+		if !strings.HasPrefix(S(r["path"]), "/runtime/") {
+			continue
+		}
+		for _, message := range A(O(r["body"])["messages"]) {
+			for _, content := range A(O(message)["content"]) {
+				part := O(content)
+				if part["type"] == "image_url" && S(O(part["image_url"])["url"]) == want {
+					found = true
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("the prepared WebP bytes did not reach the model unchanged")
+	}
+	original, err := os.ReadFile(filepath.Join(S(task["workspace"]), S(pic["path"])))
+	if err != nil || !bytes.Equal(original, raw) {
+		t.Fatal("uploaded original changed", err)
 	}
 }
 func TestDeliveryTwoGiBStreaming(t *testing.T) {

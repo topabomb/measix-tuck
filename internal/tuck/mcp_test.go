@@ -3,6 +3,7 @@ package tuck
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -310,6 +311,31 @@ func TestMCPRawSSEAndRedaction(t *testing.T) {
 	}
 	if e := mapSSE(strings.NewReader(`data: {"id":1}`), io.Discard, func(v M) (M, error) { return v, nil }); e == nil {
 		t.Fatal("accepted truncated SSE")
+	}
+}
+
+func TestExternalMCPImageResultIsUnchanged(t *testing.T) {
+	f := preparedMCP(t)
+	p := newMCPPeer(t, f)
+	p.rpc(t, "tools/list", M{})
+	raw := testPNG(t, 3000, 16, true)
+	want := M{
+		"content":           []any{M{"type": "image", "mimeType": "image/png", "data": base64.StdEncoding.EncodeToString(raw)}},
+		"structuredContent": M{"width": 3000, "height": 16, "alpha": true},
+		"isError":           false,
+	}
+	f.change(func() {
+		f.hook = func(w http.ResponseWriter, r *http.Request, body M) bool {
+			if !strings.Contains(r.URL.Path, "/mcp_") || body["method"] != "tools/call" {
+				return false
+			}
+			WriteJSON(w, 200, M{"jsonrpc": "2.0", "id": body["id"], "result": want})
+			return true
+		}
+	})
+	status, response := p.rpc(t, "tools/call", M{"name": ToolAlias("search_records"), "arguments": M{"query": "image"}})
+	if status != 200 || string(JSON(response["result"])) != string(JSON(want)) {
+		t.Fatal("external image bytes or metadata were changed", status)
 	}
 }
 

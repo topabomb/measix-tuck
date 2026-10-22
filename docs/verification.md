@@ -70,7 +70,7 @@ node scripts/project.mjs e2e product-navigation.spec.ts mobile-chat.spec.ts comp
 
 构建后运行 `node scripts/project.mjs e2e image-generation.spec.ts --workers=1`。实际操作设置菜单、全局选择及 Agent 覆盖，保存刷新后核对请求资源；检查四图结果、输入/输出/提示词文件、放大、复制、下载、刷新及分支，覆盖 1365/390/320px。原图与历史模型表示分别核对，不把缩放图标为原图。
 
-真实服务使用已授权的兼容生图资源及 IMAGE 聊天模型，检查实际文件和下一次模型请求。没有资源就记录未执行；合成图片不证明模型理解、真实图片质量或计费。引擎临时补丁的跨工具图片排序回归另见 [补丁记录](../patches/docker-agent/README.md)，不能用 Tuck 基线用例替代其验收。
+真实服务使用已授权的兼容生图资源及 IMAGE 聊天模型，检查实际文件和下一次模型请求。没有资源就记录未执行；合成图片不证明模型理解、真实图片质量或计费。官方引擎升级还须检查工具结果批次、图片类型与载荷、调用来源及旧会话续接；真实视觉测试使用仅出现在像素中的信息。已撤除的临时补丁见 [引擎补丁记录](../patches/docker-agent/README.md)，不能用普通 Tuck 基线用例替代多模态验收。
 
 ## 性能与布局门槛
 

@@ -11,7 +11,7 @@
   },
   "engine": {
     "mode": "managed",
-    "version": "v1.150.0",
+    "version": "v1.152.0",
     "binary": "",
     "url": "http://127.0.0.1:8091",
     "desktopProxy": false

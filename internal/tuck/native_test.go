@@ -403,8 +403,8 @@ func resolveAllNative(t *testing.T, f *nativeFixture, id string) M {
 
 func TestOfficialNativeFullLoop(t *testing.T) {
 	f := officialFixture(t, 16)
-	if S(f.engine.State()["version"]) != "v1.150.0" {
-		t.Fatal("test contract requires official v1.150.0", f.engine.State())
+	if S(f.engine.State()["version"]) != "v1.152.0" {
+		t.Fatal("test contract requires official v1.152.0", f.engine.State())
 	}
 	id := f.create(t, nil)
 	submitTask(t, f.manager, id, "FULL_LOOP")

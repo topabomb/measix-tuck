@@ -180,7 +180,7 @@ func TestEngineSavedSelectionRollbackAfterModelRebuildFailure(t *testing.T) {
 	if e := u.Check(context.Background()); e != nil {
 		t.Fatal(e)
 	}
-	if e := u.Download(context.Background(), "v1.150.0"); e != nil {
+	if e := u.Download(context.Background(), "v1.152.0"); e != nil {
 		t.Fatal(e)
 	}
 	before, _ := os.ReadFile(a.Config.Path)
@@ -188,7 +188,7 @@ func TestEngineSavedSelectionRollbackAfterModelRebuildFailure(t *testing.T) {
 	calls := 0
 	var ddl string
 	a.Store.DB.QueryRow("SELECT sql FROM sqlite_master WHERE name='mcp_catalog'").Scan(&ddl)
-	e := u.Apply(context.Background(), "v1.150.0", func() error {
+	e := u.Apply(context.Background(), "v1.152.0", func() error {
 		calls++
 		if calls == 2 {
 			_, e := a.Store.DB.Exec("DROP TABLE mcp_catalog")

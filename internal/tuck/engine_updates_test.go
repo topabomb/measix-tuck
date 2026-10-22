@@ -31,7 +31,7 @@ func updateClient(t *testing.T, binary string, corrupt bool) *http.Client {
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
-	release := M{"tag_name": "v1.150.0", "draft": false, "prerelease": false, "assets": []any{M{"name": name, "size": info.Size(), "digest": "sha256:" + hash, "browser_download_url": "https://github.com/docker/docker-agent/releases/download/v1.150.0/" + name}}}
+	release := M{"tag_name": "v1.152.0", "draft": false, "prerelease": false, "assets": []any{M{"name": name, "size": info.Size(), "digest": "sha256:" + hash, "browser_download_url": "https://github.com/docker/docker-agent/releases/download/v1.152.0/" + name}}}
 	return &http.Client{Transport: testTransport(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Host == "api.github.com" {
 			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(bytes.NewReader(JSON(release))), Request: r}, nil
@@ -74,10 +74,10 @@ func TestEngineOfficialArtifactUpdateAndPendingSelection(t *testing.T) {
 	if e := u.Check(ctx); e != nil {
 		t.Fatal(e)
 	}
-	if e := u.Download(ctx, "v1.150.0"); e != nil {
+	if e := u.Download(ctx, "v1.152.0"); e != nil {
 		t.Fatal(e)
 	}
-	if e := u.Verify("v1.150.0"); e != nil {
+	if e := u.Verify("v1.152.0"); e != nil {
 		t.Fatal(e)
 	}
 	current, revision, _ := a.Config.Read()
@@ -88,14 +88,14 @@ func TestEngineOfficialArtifactUpdateAndPendingSelection(t *testing.T) {
 	if !a.Config.Pending() {
 		t.Fatal("pending settings missing")
 	}
-	if e := u.Apply(ctx, "v1.150.0", func() error { return nil }); e != nil {
+	if e := u.Apply(ctx, "v1.152.0", func() error { return nil }); e != nil {
 		t.Fatal(e)
 	}
 	saved, _, _ := a.Config.Read()
-	if O(saved["engine"])["version"] != "v1.150.0" || !a.Config.Pending() || B(O(a.Models.Config()["workbench"])["requireDelivery"]) {
+	if O(saved["engine"])["version"] != "v1.152.0" || !a.Config.Pending() || B(O(a.Models.Config()["workbench"])["requireDelivery"]) {
 		t.Fatal("update applied unrelated pending settings", saved)
 	}
-	if a.Engine.State()["version"] != "v1.150.0" || !strings.Contains(a.Engine.Options().Binary, filepath.Join("engines", "v1.150.0")) {
+	if a.Engine.State()["version"] != "v1.152.0" || !strings.Contains(a.Engine.Options().Binary, filepath.Join("engines", "v1.152.0")) {
 		t.Fatal(a.Engine.State(), a.Engine.Options())
 	}
 }
@@ -112,7 +112,7 @@ func TestEngineCorruptionAuthorizationAndStartupRollback(t *testing.T) {
 	if e = u.Check(context.Background()); e != nil {
 		t.Fatal(e)
 	}
-	if e = u.Download(context.Background(), "v1.150.0"); e == nil {
+	if e = u.Download(context.Background(), "v1.152.0"); e == nil {
 		t.Fatal("corruption accepted")
 	}
 	if a.Engine.State()["state"] != "ready" {
@@ -172,10 +172,10 @@ func TestEngineUpdateConcurrencyExternalAndCancellation(t *testing.T) {
 	a.Engine.mu.Lock()
 	a.Engine.options.External = true
 	a.Engine.mu.Unlock()
-	if e := u.Download(context.Background(), "v1.150.0"); Code(e) != "external_engine" {
+	if e := u.Download(context.Background(), "v1.152.0"); Code(e) != "external_engine" {
 		t.Fatal(e)
 	}
-	for _, bad := range []EngineRelease{{Version: "v1.150.0", URL: "http://github.com/docker/docker-agent/releases/download/v1.150.0/x", SHA256: strings.Repeat("0", 64)}, {Version: "v1.150.0", URL: "https://attacker.invalid/x", SHA256: strings.Repeat("0", 64)}} {
+	for _, bad := range []EngineRelease{{Version: "v1.152.0", URL: "http://github.com/docker/docker-agent/releases/download/v1.152.0/x", SHA256: strings.Repeat("0", 64)}, {Version: "v1.152.0", URL: "https://attacker.invalid/x", SHA256: strings.Repeat("0", 64)}} {
 		if e := DownloadEngine(context.Background(), http.DefaultClient, bad, filepath.Join(t.TempDir(), "binary")); e == nil {
 			t.Fatal("nonofficial release accepted")
 		}

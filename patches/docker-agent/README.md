@@ -31,54 +31,10 @@
 
 定时任务只读检查、报告实质变化；它不自动修改代码或生产。发现正式修复后应推动验证和切回，不以维持本地补丁为默认选择。
 
-## 首个补丁：工具图片排序
+## 当前状态与撤除记录
 
-**状态：使用中。** 2026-10-18 经用户授权制作、验证并部署，补丁版本为 `v1.150.0+tuck-tool-image-order.1`。同日生产原对话继续执行后正常结束（`normal/stop`），故障阻塞已解除。尚待验证可替代它的官方正式版本。
+当前无项目维护的 Docker Agent 补丁，默认使用官方 v1.152.0。
 
-上游关联：[原问题 #4608](https://github.com/docker/docker-agent/issues/4608)、[文本化修复 #4610](https://github.com/docker/docker-agent/pull/4610)、[延后附件方案 #4609](https://github.com/docker/docker-agent/pull/4609)、[视觉回归问题 #4629](https://github.com/docker/docker-agent/issues/4629)。本次调查中，#4610 消除了图片引起的工具批次中断，但把图片数据 URL 变成普通文本，未满足真实视觉输入要求。
+2026-10-22，工具图片排序补丁 `v1.150.0+tuck-tool-image-order.1` 由官方 [v1.152.0](https://github.com/docker/docker-agent/releases/tag/v1.152.0)（`e7f1ec394dfa47aea0b066092a35c72564b192cb`）替代，项目补丁文件已撤除。我们提交的 [#4661](https://github.com/docker/docker-agent/pull/4661) 已合并并进入该正式版本，完整解决 [#4608](https://github.com/docker/docker-agent/issues/4608) 的工具批次排序与 [#4629](https://github.com/docker/docker-agent/issues/4629) 的图片文本化问题，并覆盖显式缓存分支。
 
-2026-10-18 已向 #4629 [补充实际引擎识图、旧历史回放、生产恢复及显式缓存分支的集成建议](https://github.com/docker/docker-agent/issues/4629#issuecomment-6251482700)，并注明当前补丁不直接适用于 main，接受满足同等行为的上游实现。此为已发布证据，跟进任务不重复通知其创建，继续关注维护者回复与后续修复。
-
-### 修改与适用范围
-
-官方 v1.150.0 在每个工具结果后立即追加 user 图片附件，可能形成 `tool → user(image) → tool`，打断尚未结束的并行工具返回批次。补丁暂存生成的附件，在连续有效工具结果结束或输入结束时输出；先跳过已有规则过滤的空 assistant。工具完成顺序不变，附件仍为原生图片/文档内容块，载荷和 detail 不变，标签附带 `tool_call_id` 保留来源。不补造真正缺失的工具返回。
-
-只修改 `pkg/model/provider/oaistream/messages.go`（+12/-2）及 `messages_test.go`（+117）。补丁见 [v1.150.0-tool-image-order.patch](v1.150.0-tool-image-order.patch)。
-
-当前 Tuck 的 `tuck-chat` 及哈希模型键走完整消息列表转换，已实际验证。DMR 复用转换器且包回归通过，未做 DMR 真实模型验收。官方 OpenAI 显式 prompt-cache 分支逐条调用转换器，无法跨调用暂存附件，不在这个最小补丁覆盖范围。Responses、Anthropic、Gemini、Bedrock 的原生转换未改，只有包回归，没有新增真实模型验收。不能把此补丁宣称为所有引擎配置的完整修复。
-
-### 冻结基线与构建
-
-| 项目 | 本次记录 |
-| --- | --- |
-| 官方仓库 / tag | [docker/docker-agent](https://github.com/docker/docker-agent) / `v1.150.0` |
-| 官方 commit | `5277e7842058fc3fbb9943a6e88bc05a1c8e6fe2` |
-| 补丁 commit 标识 | `5277e7842058fc3fbb9943a6e88bc05a1c8e6fe2+tool-image-order.1` |
-| 构建工具 / 目标 | 官方 Go `1.27.2`；`linux/amd64`；`CGO_ENABLED=0` |
-| 补丁 SHA256 | `050508ea165f6fc0c63bf4533d92c79806213f018eba24dec14fed6b597512a1` |
-| 已验收程序 SHA256 | `964e377edfd35dd632a9f7e44e648838cffacf316e4d00942b696f3ef7b8cced` |
-
-在干净的独立 Docker Agent 检出中执行，替换示例补丁路径；不修改 `go.mod`、`go.sum` 或供应商依赖。临时检出已在验收后清理，重建需重新准备并记录结果。
-
-```sh
-git checkout --detach 5277e7842058fc3fbb9943a6e88bc05a1c8e6fe2
-git apply --check /path/to/v1.150.0-tool-image-order.patch
-git apply /path/to/v1.150.0-tool-image-order.patch
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -p 3 \
-  -ldflags '-X github.com/docker/docker-agent/pkg/version.Version=v1.150.0+tuck-tool-image-order.1 -X github.com/docker/docker-agent/pkg/version.Commit=5277e7842058fc3fbb9943a6e88bc05a1c8e6fe2+tool-image-order.1' \
-  -o docker-agent-linux-amd64 ./main.go
-```
-
-### 已取得的验收证据
-
-- 新增测试在官方基线失败、补丁后通过，覆盖并行及反向完成、图文混合、失败结果、单图、后续真实用户、连续批次、空 assistant 和 PDF 附件。
-- Linux 全量测试有 242 个包通过；`pkg/remote` 的本地 fixture 受 Docker Desktop 代理影响失败。相同源码的整个该包在无网络、无 Docker socket 的隔离容器中重验通过，合计 243 包；不是单次全量命令通过。`golangci-lint`、项目 lint、依赖差异、定向 vet、gofmt 和空白检查通过。Windows 初次全量的环境失败也已保留日志。
-- 同一个合成原生会话及不透明数据库，官方旧程序仍报缺工具返回，补丁可正常继续。五张真实图片内容块的载荷与顺序不变，真实模型对像素中的代码、颜色、形状识别 5/5 正确，并按文件名正确关联来源；实际附件标签保留调用 ID。
-- 公开接口导出的旧会话 1,102 条消息经公开接口导入隔离实例，候选程序的一次请求保留 537 个调用、537 个返回和 126 个图片内容块，原失败调用存在，原生续接正常。这项使用协议校验 fixture，没有将真实旧历史发送给付费模型或重跑旧工具，不等同于原生数据库克隆或原任务完成证明。
-- 生产切换前后配置仅 `engine.binary` 改变，运行中程序摘要匹配，健康、业务库完整性、公开会话和交付文件核对通过；随后用户继续原对话的实际轮次正常完成，复查未见新的原生 error 事件。
-
-部署使用 `/data/engines/v1.150.0-tuck-tool-image-order.1/docker-agent`，保留官方 v1.150.0 程序与配置版本。本补丁没有存储格式修改；回退先停服务并保留最新数据与不透明资产，仅恢复当前配置中的官方程序选择，不用旧配置覆盖后续设置。存在不兼容迹象时按既有持久化回退规则处理。
-
-详细生产回执、有效冷备份位置、复现脚本、失败尝试及清理记录保存在已忽略的 `.production/engine-image-order-20261018/`。临时数据库、会话导出、工具链和工作树已清理，历史脚本不能直接重跑。
-
-继续使用既有 `docker-agent-4608` 自动化，每两天只读跟进上述上游问题及正式发布。官方正式版本保留完整工具配对、真实图片语义与来源，且当前使用路径的同等回归和旧会话恢复通过后，按本页流程切回官方并撤补丁；不会因只消除 400 或只合并 PR 而提前撤除。
+未修改的官方 Linux 程序通过 Chat Completions / Responses 与视觉 / 纯文本四组协议回归；补丁版创建的合成会话可由官方新版在同一不透明会话资产上续接，五张图片载荷保持不变、工具未重跑，真实模型对像素中的代码、颜色、形状及来源调用识别 5/5 正确。配置格式 16、公开会话读取与执行 SSE 也已验证。这些隔离证据不代替生产切换后的实际验收；生产按正常升级流程切换并移除临时 `engine.binary` 选择。详细历史由 Git 和私密运维回执保留。

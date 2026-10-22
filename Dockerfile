@@ -29,7 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 WORKDIR /opt/tuck
 COPY --from=backend /tuck ./tuck
 COPY --from=frontend /build/dist ./frontend/dist/
-COPY --from=engine /docker-agent ./engine/v1.150.0/docker-agent
+COPY --from=engine /docker-agent ./engine/v1.152.0/docker-agent
 RUN mkdir -p /data /config && chown 1000:1000 /data /config
 USER 1000:1000
 ENV HOME=/data

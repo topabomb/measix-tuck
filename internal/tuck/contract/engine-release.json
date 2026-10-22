@@ -1,17 +1,17 @@
 {
-  "version": "v1.150.0",
+  "version": "v1.152.0",
   "targets": {
     "win32-x64": {
-      "url": "https://github.com/docker/docker-agent/releases/download/v1.150.0/docker-agent-windows-amd64.exe",
-      "sha256": "144191a21a25c0c1ecfa8c0b320af00c8373187a27fccd73256a7fc39de3d6c3"
+      "url": "https://github.com/docker/docker-agent/releases/download/v1.152.0/docker-agent-windows-amd64.exe",
+      "sha256": "2f3e3b3103025d70a1f4b4304118583a72127ae1cfbc2aa85d38f2bcb759d35a"
     },
     "linux-x64": {
-      "url": "https://github.com/docker/docker-agent/releases/download/v1.150.0/docker-agent-linux-amd64",
-      "sha256": "791fa6bac9f829847f00ab948f838bf54d11e0830988a5e5bce88d65ea65f2d1"
+      "url": "https://github.com/docker/docker-agent/releases/download/v1.152.0/docker-agent-linux-amd64",
+      "sha256": "bb591b3b73e6ce06b24a19732371fefb5a99f001813c94e146a4b1474135c8e8"
     },
     "linux-arm64": {
-      "url": "https://github.com/docker/docker-agent/releases/download/v1.150.0/docker-agent-linux-arm64",
-      "sha256": "12ae093844531a60f32c344f4afb90bc92a010ea8438a5a760b3e79f8e81c8e7"
+      "url": "https://github.com/docker/docker-agent/releases/download/v1.152.0/docker-agent-linux-arm64",
+      "sha256": "a048a1b5da4d57b1e9669e72460e16153ea7185722b74a411ea0a9b5341ec94f"
     }
   }
 }

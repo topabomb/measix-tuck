@@ -2,7 +2,7 @@ import { onBeforeUnmount, ref, shallowRef, watch, type Ref } from 'vue'
 import type { Document, DocumentView } from './state'
 import { embeddedImageDataURL, imageURL, staticPreview, type PreviewLink } from './preview'
 import { previewBridge } from './preview-bridge'
-import { previewImages, type ImageDemand, type ImageProgress, type ImageUpdate } from './preview-images'
+import { previewImages, type previewResourcePool, type ImageDemand, type ImageProgress, type ImageUpdate } from './preview-images'
 
 interface PreviewOptions {
   document:()=>Document
@@ -11,6 +11,7 @@ interface PreviewOptions {
   position:DocumentView['preview']
   fragment:()=>string|undefined
   read:(path:string,limit:number,headers:Record<string,string>,signal:AbortSignal,background:boolean)=>Promise<Uint8Array>
+  resource:ReturnType<typeof previewResourcePool>
   open:(path:string,fragment:string)=>void
   interact:()=>void
 }
@@ -90,13 +91,13 @@ export function useDocumentPreview(options:PreviewOptions) {
     }
     try {
       if(type==='image') {
-        const result=await imageURL(await resource(path,24*1024*1024,false,'图片'))
+        const result=await options.resource(signal,async()=>imageURL(await resource(path,24*1024*1024,false,'图片')))
         if(valid()){objectURL=result.url;image.value=result.url;dimensions.value=`${result.width} × ${result.height}`}
         else URL.revokeObjectURL(result.url)
       }else {
         const prepared=await staticPreview(text,path,type==='markdown',{
           signal,
-          stylesheet:async target=>{const data=await resource(target,512*1024,true,'样式');signal.throwIfAborted();return new TextDecoder('utf-8',{fatal:true}).decode(data)},
+          stylesheet:target=>options.resource(signal,async()=>{const data=await resource(target,512*1024,true,'样式');signal.throwIfAborted();return new TextDecoder('utf-8',{fatal:true}).decode(data)}),
         })
         if(!valid())return
         // All consumers use the same prepared descriptors, never re-discover
@@ -107,7 +108,7 @@ export function useDocumentPreview(options:PreviewOptions) {
         const warnings=prepared.warnings.slice(0,4)
         notice.value=warnings.join('\n')
         token=Array.from(crypto.getRandomValues(new Uint8Array(16)),byte=>byte.toString(16).padStart(2,'0')).join('')
-        loader=previewImages(paths,async(target,readSignal,edge)=>embeddedImageDataURL(await resource(target,24*1024*1024,true,'图片',readSignal),readSignal,edge),
+        loader=previewImages(paths,(target,readSignal,edge)=>options.resource(readSignal,async()=>embeddedImageDataURL(await resource(target,24*1024*1024,true,'图片',readSignal),readSignal,edge)),
         update=>{if(valid()){updates.set(update.index,update);if(ready)send({type:'image',...update})}},status=>{
           if(valid()) {
             loading.value=status.loading;progress.value=status.total?`已加载 ${status.loaded} / ${status.total} 张图片`:''

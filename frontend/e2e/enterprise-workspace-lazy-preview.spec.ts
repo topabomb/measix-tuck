@@ -170,6 +170,7 @@ for(const dirty of [false,true])test(`file tab quota ${dirty?'protects drafts an
     if(dirty)await panel.locator('.ew-document:visible .cm-content').fill(`draft ${index}`)
   }
   await panel.getByRole('tab',{name:'返回文件列表',exact:true}).click()
+  await expect(page).not.toHaveURL(/[?&]file=/)
   const previousURL=page.url()
   await panel.getByRole('option',{name:/^tab-12\.txt/}).dblclick()
   await expect(panel.locator('.ew-document-tab')).toHaveCount(12)

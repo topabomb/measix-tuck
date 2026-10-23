@@ -23,12 +23,12 @@ watch(()=>state.active,async()=>{await nextTick();tabList.value?.querySelector<H
 const wide = computed(()=>props.standalone||route.query.wide==='1'), filter = computed(()=>String(route.query.filter || '')), hidden = computed(()=>route.query.hidden==='1'), sort = computed(()=>route.query.sort==='size'||route.query.sort==='date'?route.query.sort:'name'), grid = computed(()=>route.query.view==='grid')
 const order=computed(()=>route.query.order==='asc'||route.query.order==='desc'?route.query.order:sort.value==='name'?'asc':'desc')
 const active = computed(()=>state.tabs.find(d=>d.path===state.active)), selectedEntries = computed(()=>state.entries.filter(e=>selected.value.includes(e.path)))
-// Keep just the active and previous viewer. Other tabs retain their lightweight
+// Keep the four most recent viewers. Other tabs retain their lightweight
 // reading state; closing/evicting a tab also releases its mounted resources.
 const recentViewers=ref<number[]>([])
 watch(()=>[state.active,state.tabs.map(doc=>doc.id)] as const,()=>{
   const ids=recentViewers.value.filter(id=>state.tabs.some(doc=>doc.id===id))
-  recentViewers.value=(active.value?[active.value.id,...ids.filter(id=>id!==active.value!.id)]:ids).slice(0,2)
+  recentViewers.value=(active.value?[active.value.id,...ids.filter(id=>id!==active.value!.id)]:ids).slice(0,4)
 },{immediate:true})
 const viewers=computed(()=>state.tabs.filter(doc=>recentViewers.value.includes(doc.id)))
 const focused=computed(()=>!!active.value&&route.query.focus==='1'),treeVisible=computed(()=>wide.value&&!active.value&&route.query.tree!=='0')
@@ -49,15 +49,18 @@ const gridPage=ref(1), thumbnails=ref<Record<string,string>>({})
 const visibleEntries=computed(()=>grid.value?entries.value.slice((gridPage.value-1)*48,gridPage.value*48):entries.value)
 let thumbnailController=new AbortController(),thumbnailRun=0;const thumbnailVersions=new Map<string,string>()
 function clearThumbnails(){thumbnailController.abort();thumbnailController=new AbortController();for(const url of Object.values(thumbnails.value))URL.revokeObjectURL(url);thumbnails.value={};thumbnailVersions.clear()}
-watch([visibleEntries,grid,()=>state.active,()=>state.projection?.filesAvailable],async()=>{
+watch([visibleEntries,grid,()=>state.active,()=>state.projection?.filesAvailable,()=>state.loading,()=>state.refreshing],async()=>{
   thumbnailController.abort();thumbnailController=new AbortController()
-  if(!grid.value || state.active || !state.projection?.filesAvailable){clearThumbnails();return}
+  if(!grid.value || !state.projection?.filesAvailable){clearThumbnails();return}
+  // Keep the last directory page while a document is open. On return, the
+  // refreshed listing below validates every retained thumbnail's version.
+  if(state.active||state.loading||state.refreshing||state.refreshError)return
   const signal=thumbnailController.signal,generation=owner.generation(),run=++thumbnailRun
   const images=visibleEntries.value.filter(entry=>entry.kind==='FILE'&&kind(entry.path)==='image'&&(entry.size===undefined||entry.size<=24*1024*1024))
   const versions=new Map(images.map(entry=>[entry.path,`${generation}:${entry.etag||(entry.modifiedAt?`${entry.size??''}:${entry.modifiedAt}`:`unversioned:${run}`)}`]))
   for(const [path,url] of Object.entries(thumbnails.value))if(!versions.has(path)||thumbnailVersions.get(path)!==versions.get(path)){URL.revokeObjectURL(url);delete thumbnails.value[path];thumbnailVersions.delete(path)}
-  for(const entry of images){if(signal.aborted)return;if(thumbnails.value[entry.path])continue
-    try{
+  await Promise.all(images.filter(entry=>!thumbnails.value[entry.path]).map(async entry=>{
+    try{await owner.previewResource(signal,async()=>{
       const {data}=await owner.bounded(entry.path,24*1024*1024,entry.etag?{'If-Match':entry.etag}:{},signal,true)
       if(signal.aborted)return
       const metadata=rasterMetadata(data),scale=Math.min(1,128/metadata.width,128/metadata.height)
@@ -66,9 +69,10 @@ watch([visibleEntries,grid,()=>state.active,()=>state.projection?.filesAvailable
       try{canvas.getContext('2d')!.drawImage(bitmap,0,0)}finally{bitmap.close()}
       const blob=await new Promise<Blob|null>(resolve=>canvas.toBlob(resolve))
       if(blob&&!signal.aborted){thumbnails.value[entry.path]=URL.createObjectURL(blob);thumbnailVersions.set(entry.path,versions.get(entry.path)!)}
-    }catch{/* The file icon remains the explicit fallback. */}
-  }
+    })}catch{/* The file icon remains the explicit fallback. */}
+  }))
 })
+watch([()=>state.projection?.subject,()=>state.projection?.agentSpaceId],clearThumbnails,{flush:'sync'})
 watch([filter,()=>state.dir],()=>{gridPage.value=1})
 watch(()=>entries.value.length,()=>{gridPage.value=Math.min(gridPage.value,Math.max(1,Math.ceil(entries.value.length/48)))})
 watch(()=>state.entries,()=>{const paths=new Set(state.entries.map(entry=>entry.path));selected.value=selected.value.filter(path=>paths.has(path))})
@@ -140,7 +144,15 @@ async function closeTabs(paths:string[]) {
   const next=state.tabs.slice(0,index).reverse().find(doc=>!ids.has(doc.id))||state.tabs.slice(index+1).find(doc=>!ids.has(doc.id))
   const closingActive=docs.some(doc=>doc.path===state.active)
   state.tabs=state.tabs.filter(doc=>!ids.has(doc.id))
-  if(closingActive){state.active=next?.path||'';await query({file:state.active||undefined,anchor:undefined})}
+  if(closingActive){
+    state.active=next?.path||''
+    const current=++navigation
+    // Closing is local and final before any network wait. Refresh through the
+    // existing cancellable owner so late results cannot select a closed tab.
+    if(!next)void owner.refreshDirectory(typeof route.query.space==='string'?route.query.space:undefined)
+    await query({file:state.active||undefined,anchor:undefined})
+    if(current!==navigation||generation!==owner.generation()||disposed)return
+  }
   await nextTick();(tabList.value?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')||host.value?.querySelector<HTMLElement>('.ew-files')||host.value)?.focus()
 }
 function closeTabGroup(others=false){dismissDetails(tabMenu.value);void closeTabs(state.tabs.filter(doc=>!others||doc.path!==state.active).map(doc=>doc.path))}
@@ -283,7 +295,7 @@ onBeforeUnmount(()=>{disposed=true;sync++;treeController?.abort();owner.cancelRe
   <div v-if="state.error" class="ew-error" role="alert">{{state.error}}<button v-if="state.error.includes('其他企业工作区')" @click="query({space:undefined,dir:undefined,file:undefined})">打开当前工作区</button></div><p v-if="state.notice" class="ew-notice" role="status">{{state.notice}}<button aria-label="关闭提示" @click="state.notice=''">×</button></p>
   <p v-if="state.refreshError" class="ew-notice" role="status">{{state.refreshError}}</p>
   <div v-if="state.tabs.length" class="ew-tab-bar">
-    <div ref="tabList" class="ew-tabs" role="tablist"><button class="ew-file-list-tab ew-label-button" :aria-selected="!active" role="tab" aria-label="返回文件列表" title="返回目录" @click="state.active='';query({file:undefined,anchor:undefined})"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5h2m4 0h10M4 12h2m4 0h10M4 19h2m4 0h10" /></svg><span class="ew-file-list-label">目录</span></button><span v-for="doc in state.tabs" :key="doc.id" class="ew-document-tab" :class="{'is-active':state.active===doc.path}"><button role="tab" :aria-selected="state.active===doc.path" :title="doc.path" @click="open(doc.path)">{{basename(doc.path)}}{{doc.text!==doc.original?' •':''}}</button><button class="ew-tab-close" :disabled="state.busy" :aria-label="`关闭 ${basename(doc.path)}`" :title="`关闭 ${doc.path}`" @click="closeTabs([doc.path])"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M7 17 17 7" /></svg></button></span></div>
+    <div ref="tabList" class="ew-tabs" role="tablist"><button class="ew-file-list-tab ew-label-button" :aria-selected="!active" role="tab" aria-label="返回文件列表" title="返回目录" @click="act(()=>navigate(state.dir,false))"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5h2m4 0h10M4 12h2m4 0h10M4 19h2m4 0h10" /></svg><span class="ew-file-list-label">目录</span></button><span v-for="doc in state.tabs" :key="doc.id" class="ew-document-tab" :class="{'is-active':state.active===doc.path}"><button role="tab" :aria-selected="state.active===doc.path" :title="doc.path" @click="open(doc.path)">{{basename(doc.path)}}{{doc.text!==doc.original?' •':''}}</button><button class="ew-tab-close" :disabled="state.busy" :aria-label="`关闭 ${basename(doc.path)}`" :title="`关闭 ${doc.path}`" @click="closeTabs([doc.path])"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M7 17 17 7" /></svg></button></span></div>
     <details ref="tabMenu" class="ew-more ew-tabs-more" @keydown.esc.stop.prevent="dismissDetails(tabMenu)">
       <summary role="button" aria-label="更多标签操作" title="更多标签操作" @click="menu=false"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 12h.1m6.9 0h.1m6.9 0h.1" stroke-width="4" /></svg></summary>
       <div><button :disabled="state.busy || !active || state.tabs.length<2" @click="closeTabGroup(true)">关闭其他</button><button :disabled="state.busy" @click="closeTabGroup()">关闭所有</button></div>

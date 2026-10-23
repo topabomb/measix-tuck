@@ -25,6 +25,28 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('enterprise workspace state ownership', () => {
+  it('rejects queued resources from an aborted generation while preserving shared slots for new work',async()=>{
+    const owner=createEnterpriseWorkspace(),signal=new AbortController().signal
+    const releases=Array.from({length:4},()=>deferred<void>())
+    const started:number[]=[]
+    const running=releases.map((release,index)=>owner.previewResource(signal,async()=>{started.push(index);await release.promise}))
+    await vi.waitFor(()=>expect(started).toEqual([0,1,2,3]))
+    const oldWork=vi.fn(async()=>{})
+    const oldResult=owner.previewResource(signal,oldWork).catch(error=>error)
+    owner.abort()
+    const newWork=vi.fn(async()=>{})
+    const next=owner.previewResource(signal,newWork)
+    await Promise.resolve()
+    expect(newWork).not.toHaveBeenCalled()
+    releases[0]!.resolve()
+    expect(await oldResult).toMatchObject({message:'企业工作区已变化，已停止后续操作'})
+    await next
+    expect(oldWork).not.toHaveBeenCalled()
+    expect(newWork).toHaveBeenCalledTimes(1)
+    for(const release of releases)release.resolve()
+    await Promise.all(running)
+  })
+
   it('reads an unavailable projection for a status summary without enabling file access',async()=>{
     const unavailable={...projection,filesAvailable:false,filesReason:'not_provisioned',state:'UNPROVISIONED'}
     authFetch.mockResolvedValue(json(unavailable))

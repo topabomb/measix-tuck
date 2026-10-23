@@ -17,7 +17,7 @@ async function start(page:Page,file:string,chat=false){
 async function tab(page:Page,name:string){await panel(page).getByRole('tab',{name,exact:true}).click();await expect(viewer(page)).toHaveAttribute('aria-label',name)}
 async function open(page:Page,name:string){
   await panel(page).getByRole('tab',{name:'返回文件列表',exact:true}).click()
-  await panel(page).getByRole('option',{name:new RegExp(name.replaceAll('.','\\.'))}).dblclick()
+  await panel(page).getByRole('option',{name:new RegExp('^'+name.replaceAll('.','\\.')+'(?:\\s|$)')}).dblclick()
   await expect(viewer(page)).toHaveAttribute('aria-label',name)
 }
 
@@ -54,7 +54,7 @@ for(const chat of [false,true])test(`focus reclaims the mobile navigation height
 
 test('recent static previews reuse the frame and resources; eviction restores reading position without rereading text',async({page})=>{
   core.put('reader.css','h1 {color:rgb(12,34,56)}')
-  for(const name of ['a','b','c'])core.put(`${name}.html`,`<link rel="stylesheet" href="reader.css"><h1>${name}</h1><img width="40" height="40" src="sample.png"><div style="height:4000px">long reader</div>`)
+  for(const name of ['a','b','c','d','e'])core.put(`${name}.html`,`<link rel="stylesheet" href="reader.css"><h1>${name}</h1><img width="40" height="40" src="sample.png"><div style="height:4000px">long reader</div>`)
   await start(page,'a.html')
   const frame=()=>viewer(page).frameLocator('iframe')
   await expect(frame().locator('img')).toHaveAttribute('data-workspace-state','loaded')
@@ -74,9 +74,13 @@ test('recent static previews reuse the frame and resources; eviction restores re
   // b has its own resources; returning to a performs no extra CSS/image reads.
   expect(reads('reader.css')).toBe(cssReads+1);expect(reads('sample.png')).toBeLessThanOrEqual(imageReads+1)
   await frame().locator('body').evaluate(()=>scrollTo(0,900))
-  await open(page,'b.html');await open(page,'c.html')
-  await expect(panel(page).locator('.ew-document')).toHaveCount(2)
-  expect(await first!.evaluate(node=>node.isConnected)).toBe(false)
+  const retained=await viewer(page).locator('iframe').elementHandle()
+  await open(page,'b.html');await open(page,'c.html');await open(page,'d.html')
+  await expect(panel(page).locator('.ew-document')).toHaveCount(4)
+  expect(await retained!.evaluate(node=>node.isConnected)).toBe(true)
+  await open(page,'e.html')
+  await expect(panel(page).locator('.ew-document')).toHaveCount(4)
+  expect(await retained!.evaluate(node=>node.isConnected)).toBe(false)
   await tab(page,'a.html')
   await expect.poll(()=>frame().locator('body').evaluate(()=>scrollY)).toBe(900)
   expect(reads('a.html')).toBe(textReads)
@@ -99,14 +103,14 @@ test('source position, selection and drafts survive renderer eviction',async({pa
   await editor().press('Control+End');await editor().press('End');await editor().press('Shift+Home')
   await scroll().evaluate(node=>node.scrollTo(0,900))
   await expect.poll(()=>scroll().evaluate(node=>node.scrollTop)).toBe(900)
-  await open(page,'hello.txt');await open(page,'page.html');await tab(page,'long.txt')
+  await open(page,'hello.txt');await open(page,'page.html');await open(page,'readme.md');await open(page,'shape.svg');await tab(page,'long.txt')
   expect(reads('long.txt'),'return after eviction').toBe(textReads)
   await expect.poll(()=>scroll().evaluate(node=>node.scrollTop)).toBe(900)
   await editor().focus()
   expect(await page.evaluate(()=>getSelection()?.toString())).toBe('line 499: reader position')
   await editor().press('Control+End');await editor().press('End');await editor().press('Enter');await editor().press('d')
   expect(reads('long.txt'),'after editing').toBe(textReads)
-  await open(page,'hello.txt');await open(page,'page.html')
+  await open(page,'hello.txt');await open(page,'page.html');await open(page,'readme.md');await open(page,'shape.svg')
   await panel(page).getByRole('tab',{name:'long.txt •',exact:true}).click()
   await expect(editor()).toContainText('d')
   expect(reads('long.txt')).toBe(textReads)
@@ -129,6 +133,7 @@ test('PDF and CSV controls and image transforms return with each tab, including 
   await open(page,'sample.png')
   await expect(viewer(page).locator('img')).toBeVisible()
   await viewer(page).getByRole('button',{name:'放大图片',exact:true}).click()
+  await open(page,'hello.txt');await open(page,'page.html')
   await tab(page,'document.pdf')
   await expect(viewer(page).getByLabel('PDF 缩放',{exact:true})).toHaveValue('1.5')
   await expect(viewer(page).getByLabel('查找 PDF 文字',{exact:true})).toHaveValue('Workspace')
@@ -139,7 +144,7 @@ test('PDF and CSV controls and image transforms return with each tab, including 
   await expect.poll(()=>viewer(page).locator('.csv-scroll').evaluate(node=>node.scrollTop)).toBe(400)
   await tab(page,'sample.png')
   await expect(viewer(page).locator('.ew-zoom-value')).toHaveText('125%')
-  await expect(panel(page).locator('.ew-document')).toHaveCount(2)
+  await expect(panel(page).locator('.ew-document')).toHaveCount(4)
 })
 
 test('nested HTML scrolling restores after eviction and Markdown retains its preview mode',async({page})=>{
@@ -152,7 +157,7 @@ test('nested HTML scrolling restores after eviction and Markdown retains its pre
   await expect(frame().locator('h1')).toHaveText('Workspace')
   await viewer(page).getByRole('button',{name:'源码',exact:true}).click()
   await expect(viewer(page).locator('.cm-content')).toContainText('# Workspace')
-  await open(page,'hello.txt');await tab(page,'nested.html')
+  await open(page,'hello.txt');await open(page,'page.html');await open(page,'shape.svg');await tab(page,'nested.html')
   await expect.poll(()=>frame().locator('main').evaluate(node=>node.scrollTop)).toBe(750)
   await tab(page,'readme.md')
   await expect(viewer(page).getByRole('button',{name:'源码',exact:true})).toHaveAttribute('aria-pressed','true')
@@ -172,7 +177,7 @@ test('media switching releases its source and retains playback position and cont
   await expect.poll(()=>audio().evaluate(node=>(node as HTMLAudioElement).readyState)).toBeGreaterThanOrEqual(1)
   await audio().evaluate(node=>(node as HTMLAudioElement).pause())
   expect(await audio().evaluate(node=>(node as HTMLAudioElement).currentTime)).toBeGreaterThanOrEqual(.3)
-  await open(page,'hello.txt');await open(page,'page.html');await tab(page,'sound.wav')
+  await open(page,'hello.txt');await open(page,'page.html');await open(page,'readme.md');await open(page,'shape.svg');await tab(page,'sound.wav')
   await expect.poll(()=>audio().evaluate(node=>(node as HTMLAudioElement).readyState)).toBeGreaterThanOrEqual(1)
   const restored=await audio().evaluate(node=>{const media=node as HTMLAudioElement;return{position:media.currentTime,rate:media.playbackRate,volume:media.volume,muted:media.muted,paused:media.paused}})
   expect(restored.position).toBeGreaterThanOrEqual(.3)

@@ -40,6 +40,7 @@ watch(()=>props.doc.path,()=>{compare.value='';error.value=''})
 const {frame,rendered,links,image,dimensions,loading:previewLoading,progress:previewProgress,notice:previewNotice,error:previewError,failures:imageFailures,scroll:scrollPreview,retry:retryPreviewImage}=useDocumentPreview({
   document:()=>props.doc,mode,active:()=>props.active,position:view.preview,fragment:()=>props.fragment,
   read:async(...args)=>(await owner.bounded(...args)).data,
+  resource:owner.previewResource,
   open:previewLink,
   interact:()=>{if(more.value)more.value.open=false;if(previewInfo.value)previewInfo.value.open=false},
 })

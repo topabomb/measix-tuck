@@ -88,11 +88,17 @@ export async function staticPreview(text:string,path:string,markdown:boolean,opt
   cleanAttributes(doc)
   for(const {node,link} of anchors)if(link){node.setAttribute('data-workspace-link',link.path);if(link.fragment!==undefined)node.setAttribute('data-workspace-fragment',link.fragment);node.setAttribute('href','#')}
   const cssCache=new Map<string,Promise<string>>()
-  for(const {node,target} of sheets){
+  const sheetResults=await Promise.all(sheets.map(async({target})=>{
+    if(!target||!options.stylesheet)return null
+    if(!cssCache.has(target))cssCache.set(target,Promise.resolve().then(()=>options.stylesheet!(target)))
+    try{return staticCSS(await cssCache.get(target)!)}catch{return null}
+  }))
+  for(const [index,{node,target}] of sheets.entries()){
     options.signal?.throwIfAborted()
     resources.push({kind:'stylesheet',path:target})
     if(target&&options.stylesheet){
-      try{if(!cssCache.has(target))cssCache.set(target,Promise.resolve().then(()=>options.stylesheet!(target)));const css=await cssCache.get(target)!;options.signal?.throwIfAborted();const style=doc.createElement('style');style.textContent=staticCSS(css);node.replaceWith(style)}catch{options.signal?.throwIfAborted();node.remove();warnings.push(`样式不可用：${target}`)}
+      const css=sheetResults[index]
+      if(css!==null&&css!==undefined){const style=doc.createElement('style');style.textContent=css;node.replaceWith(style)}else{node.remove();warnings.push(`样式不可用：${target}`)}
     }else{node.remove();if(target)warnings.push(`未加载样式：${target}`)}
   }
   const defaults=doc.createElement('style');defaults.textContent=markdown?':where(body){font:14px/1.65 system-ui,sans-serif;padding:20px;color:#243044;overflow-wrap:anywhere}:where(img,svg){max-width:100%}:where(pre){overflow:auto;background:#f4f5f7;padding:12px}:where(table){border-collapse:collapse}:where(td,th){border:1px solid #ccd2da;padding:6px}':':where(body){overflow-wrap:anywhere}:where(img,svg){max-width:100%}'

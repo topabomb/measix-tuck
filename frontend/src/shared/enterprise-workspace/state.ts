@@ -2,6 +2,7 @@ import { reactive, type InjectionKey } from 'vue'
 import { authFetch, csrfHeader, expiredLogin } from '../../app/auth'
 import { appUrl } from '../../app/urls'
 import { workspaceConflict } from './dialog'
+import { previewResourcePool } from './preview-images'
 import { basename, copyPath, decodeText, encodeText, join, kind, parent, validPath, type Entry, type Projection } from './files'
 export interface ScrollPosition {left:number;top:number}
 // Transient reader state belongs to the existing tab, never browser storage.
@@ -20,6 +21,7 @@ const maxTabs=12,maxCachedTextBytes=24*1024*1024
 // browser header encoding and Core's byte-length validation agree.
 const uploadETag=(value?:string)=>!!value&&value.length<=1024&&/^"[^\x00-\x20"<>\[\]()\x7f-\uffff]*"$/.test(value)
 export function createEnterpriseWorkspace() {
+  const resourcePool=previewResourcePool()
   const state = reactive({projection:null as Projection|null,projectionReadAt:null as number|null,dir:'',directoryLoaded:false,entries:[] as Entry[],tabs:[] as Document[],active:'',error:'',notice:'',loading:false,busy:false,uploading:false,refreshing:false,refreshError:'',used:undefined as number|undefined,available:undefined as number|undefined,clipboard:null as {cut:boolean;entries:Entry[]}|null,transfers:[] as Transfer[],tree:{} as Record<string,Entry[]>})
   const controllers = new Set<AbortController>(),loads=new Map<number,Promise<void>>(); let epoch = 0, listing = 0,projectionSequence=0,documentId=0,refreshController:AbortController|null=null
   const lastUsed=new Map<number,number>(),saving=new Set<number>();let accessSequence=0
@@ -37,6 +39,10 @@ export function createEnterpriseWorkspace() {
   }
   const generation=()=>epoch
   const assertGeneration=(expected:number)=>{if(expected!==epoch)throw new Error('企业工作区已变化，已停止后续操作')}
+  function previewResource<T>(signal:AbortSignal,work:()=>Promise<T>):Promise<T> {
+    const current=epoch
+    return resourcePool(signal,()=>{assertGeneration(current);return work()})
+  }
   function cancelRefresh() {refreshController?.abort();refreshController=null;state.refreshing=false}
   function abort() { cancelRefresh();epoch++;state.uploading=false; for (const c of controllers) c.abort(); controllers.clear(); for (const t of state.transfers) t.cancel?.() }
   function reset() { abort();projectionSequence++;loads.clear();lastUsed.clear();saving.clear(); Object.assign(state,{projection:null,projectionReadAt:null,entries:[],tabs:[],active:'',dir:'',directoryLoaded:false,clipboard:null,tree:{},transfers:[],error:'',notice:'',refreshError:''}) }
@@ -234,5 +240,5 @@ export function createEnterpriseWorkspace() {
     } finally {if(current===epoch)state.uploading=false}
   }
   const dirty = () => state.tabs.some(d => d.text !== d.original)
-  return {state,reset,abort,unavailable,cancelRefresh,refreshDirectory,generation,assertGeneration,url,refresh,list,mutate,put,bounded,response,open,save,upload,dirty,download:(paths:string[]) => appUrl(paths.length === 1 && state.entries.find(e => e.path === paths[0])?.kind !== 'DIRECTORY' ? url('/content',paths[0]) : url('/archive','',{paths:JSON.stringify(paths)}))}
+  return {state,previewResource,reset,abort,unavailable,cancelRefresh,refreshDirectory,generation,assertGeneration,url,refresh,list,mutate,put,bounded,response,open,save,upload,dirty,download:(paths:string[]) => appUrl(paths.length === 1 && state.entries.find(e => e.path === paths[0])?.kind !== 'DIRECTORY' ? url('/content',paths[0]) : url('/archive','',{paths:JSON.stringify(paths)}))}
 }

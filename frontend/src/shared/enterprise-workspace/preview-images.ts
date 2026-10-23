@@ -6,6 +6,24 @@ export interface ImageProgress {loading:boolean;loaded:number;total:number;failu
 // bounded by both entries and estimated UTF-16 data-URL bytes, and dies with the
 // frame. Visible resources are working data, never denied by a lifetime quota.
 export const previewCacheLimits={entries:24,bytes:32*1024*1024}
+export const previewConcurrency=4
+// One workspace shares these slots across previews and directory thumbnails.
+// A cancelled running task releases its slot only when it actually exits.
+export function previewResourcePool() {
+  let active=0
+  const queue:{start:()=>void;cancel:()=>void}[]=[]
+  function pump(){while(active<previewConcurrency&&queue.length)queue.shift()!.start()}
+  return function run<T>(signal:AbortSignal,work:()=>Promise<T>):Promise<T> {
+    if(signal.aborted)return Promise.reject(new DOMException('已取消','AbortError'))
+    return new Promise<T>((resolve,reject)=>{
+      const item={start:()=>{
+        signal.removeEventListener('abort',item.cancel);active++
+        void Promise.resolve().then(()=>{signal.throwIfAborted();return work()}).then(resolve,reject).finally(()=>{active--;pump()})
+      },cancel:()=>{const index=queue.indexOf(item);if(index>=0)queue.splice(index,1);signal.removeEventListener('abort',item.cancel);reject(new DOMException('已取消','AbortError'))}}
+      signal.addEventListener('abort',item.cancel,{once:true});queue.push(item);pump()
+    })
+  }
+}
 const resolution=(edge:number)=>[128,256,512,1024,2048].find(size=>size>=edge)||2048
 export function previewImages(
   paths:Map<number,string>,
@@ -13,8 +31,8 @@ export function previewImages(
   deliver:(update:ImageUpdate)=>void,
   progress:(value:ImageProgress)=>void,
 ) {
-  let wanted=new Map<number,ImageDemand>(),running=false,disposed=false
-  let active:{path:string;controller:AbortController}|undefined
+  let wanted=new Map<number,ImageDemand>(),disposed=false
+  const active=new Map<string,AbortController>()
   const cache=new Map<string,{url:string;edge:number}>(),failures=new Map<string,string>(),loaded=new Set<number>()
   const sent=new Map<number,ImageUpdate>()
   function send(update:ImageUpdate) {
@@ -26,7 +44,7 @@ export function previewImages(
     if(disposed)return
     const items:{index:number;path:string;error:string}[]=[],seen=new Set<string>()
     for(const [index,path] of paths)if(failures.has(path)&&!seen.has(path)){seen.add(path);items.push({index,path,error:failures.get(path)!})}
-    progress({loading:!!active,loaded:loaded.size,total:paths.size,failures:items})
+    progress({loading:active.size>0,loaded:loaded.size,total:paths.size,failures:items})
   }
   function desiredPaths(){return new Set([...wanted.keys()].map(index=>paths.get(index)!))}
   function requestedEdge(path:string){return Math.max(...[...wanted.values()].filter(item=>paths.get(item.index)===path).map(item=>item.edge))}
@@ -40,29 +58,27 @@ export function previewImages(
   function show(path:string,state:ImageUpdate['state'],url?:string,error?:string) {
     for(const index of wanted.keys())if(paths.get(index)===path){if(state==='loaded')loaded.add(index);send({index,state,url,error})}
   }
-  async function pump() {
-    if(running||disposed)return
-    running=true
-    try {
-      while(!disposed) {
+  function pump() {
+      while(!disposed&&active.size<previewConcurrency) {
         const candidates=[...wanted.values()].sort((a,b)=>Number(b.visible)-Number(a.visible))
-        const next=candidates.find(item=>needsRead(paths.get(item.index)!))
+        const next=candidates.find(item=>!active.has(paths.get(item.index)!)&&needsRead(paths.get(item.index)!))
         if(!next)break
         const path=paths.get(next.index)!,controller=new AbortController()
-        active={path,controller};if(!cache.has(path))show(path,'loading');report()
+        active.set(path,controller);if(!cache.has(path))show(path,'loading');report()
+        void (async()=>{
         try {
           const edge=requestedEdge(path)
           const url=await read(path,controller.signal,edge)
-          if(disposed||controller.signal.aborted||!desiredPaths().has(path))continue
+          if(disposed||controller.signal.aborted||!desiredPaths().has(path))return
           cache.delete(path);cache.set(path,{url,edge});show(path,'loaded',url);trim()
         } catch(cause) {
           if(!disposed&&!controller.signal.aborted&&desiredPaths().has(path)){
             const error=cause instanceof Error?cause.message:'图片读取失败'
             failures.set(path,error);const previous=cache.get(path);if(previous)show(path,'loaded',previous.url);else show(path,'failed',undefined,error)
           }
-        } finally {if(active?.controller===controller)active=undefined;report()}
+        } finally {active.delete(path);pump();report()}
+        })()
       }
-    } finally {running=false}
   }
   function update(demands:ImageDemand[]) {
     if(disposed)return
@@ -77,10 +93,12 @@ export function previewImages(
       nearby.add(path);return true
     }).map(item=>[item.index,{...item,edge:resolution(item.edge)}]))
     const desired=desiredPaths()
-    if(active){
-      const readingVisible=[...wanted.values()].some(item=>item.visible&&paths.get(item.index)===active!.path)
-      const pendingVisible=[...wanted.values()].some(item=>item.visible&&paths.get(item.index)!==active!.path&&needsRead(paths.get(item.index)!))
-      if(!desired.has(active.path)||!readingVisible&&pendingVisible)active.controller.abort()
+    const visible=new Set([...wanted.values()].filter(item=>item.visible).map(item=>paths.get(item.index)!))
+    const pendingVisible=[...visible].filter(path=>!active.has(path)&&needsRead(path)).length
+    let available=previewConcurrency-active.size
+    for(const [path,controller] of active){
+      if(!desired.has(path)){controller.abort();available++}
+      else if(!visible.has(path)&&pendingVisible>available){controller.abort();available++}
     }
     for(const index of previous.keys())if(!wanted.has(index))send({index,state:'deferred'})
     for(const index of wanted.keys()) {
@@ -103,7 +121,7 @@ export function previewImages(
     cache.delete(path);failures.set(path,error);show(path,'failed',undefined,error);report()
   }
   function dispose() {
-    disposed=true;active?.controller.abort();active=undefined
+    disposed=true;for(const controller of active.values())controller.abort()
     wanted.clear();cache.clear();failures.clear();loaded.clear();sent.clear()
   }
   return {update,retry,reject,dispose}

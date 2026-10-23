@@ -2,6 +2,7 @@ package tuck
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -25,6 +26,100 @@ func localProvider(origin string) M {
 type runtimeTransport func(*http.Request) (*http.Response, error)
 
 func (fn runtimeTransport) RoundTrip(r *http.Request) (*http.Response, error) { return fn(r) }
+
+func TestConnectionRestartSurvivesRequestCancellation(t *testing.T) {
+	f := newPlatformFixture(t, 5)
+	f.enroll()
+	app := f.startApp()
+	task, err := app.Manager.Create(t.Context(), M{"approvalMode": "auto"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := S(task["id"])
+	runAppTask(t, app, id, "Before connection restart")
+	nativeID := mustTask(t, app.Manager, id)["nativeSessionId"]
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	transport := app.Engine.client.Transport
+	var canceled atomic.Bool
+	app.Engine.client.Transport = runtimeTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/api/ping" && !canceled.Swap(true) {
+			cancel()
+		}
+		return transport.RoundTrip(r)
+	})
+	r := httptest.NewRequestWithContext(ctx, "POST", app.URL+"/api/connection/sync", strings.NewReader(`{}`))
+	if err = app.changeConnection(httptest.NewRecorder(), r); err != nil {
+		t.Fatal("request cancellation interrupted shared engine restart", err, app.Engine.State())
+	}
+	if !canceled.Load() || ctx.Err() == nil || app.Engine.State()["state"] != "ready" {
+		t.Fatal("restart did not complete after browser cancellation", app.Engine.State())
+	}
+	runAppTask(t, app, id, "After canceled connection request")
+	if mustTask(t, app.Manager, id)["nativeSessionId"] != nativeID {
+		t.Fatal("connection restart replaced native session")
+	}
+}
+
+func TestConnectionSyncCancellationKeepsEngineRunning(t *testing.T) {
+	f := newPlatformFixture(t, 5)
+	f.enroll()
+	app := f.startApp()
+	before := app.Engine.process
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	app.Platform.Client.Transport = runtimeTransport(func(r *http.Request) (*http.Response, error) {
+		cancel()
+		return nil, r.Context().Err()
+	})
+	r := httptest.NewRequestWithContext(ctx, "POST", app.URL+"/api/connection/sync", strings.NewReader(`{}`))
+	if err := app.changeConnection(httptest.NewRecorder(), r); err == nil || ctx.Err() == nil {
+		t.Fatal("platform sync ignored request cancellation", err)
+	}
+	if app.Engine.process != before || app.Engine.State()["state"] != "ready" {
+		t.Fatal("canceled platform sync stopped the existing engine", app.Engine.State())
+	}
+}
+
+func TestConnectionRestartShutdownCancelsAndDrains(t *testing.T) {
+	f := newPlatformFixture(t, 5)
+	app := f.startApp()
+	entered := make(chan struct{})
+	app.Engine.client.Transport = runtimeTransport(func(r *http.Request) (*http.Response, error) {
+		close(entered)
+		<-r.Context().Done()
+		return nil, r.Context().Err()
+	})
+	r := httptest.NewRequestWithContext(t.Context(), "POST", app.URL+"/api/connection/sync", strings.NewReader(`{}`))
+	restarted := make(chan error, 1)
+	go func() { restarted <- app.changeConnection(httptest.NewRecorder(), r) }()
+	select {
+	case <-entered:
+	case <-time.After(15 * time.Second):
+		t.Fatal("engine restart did not reach readiness probe")
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- app.Close(t.Context()) }()
+	select {
+	case err := <-restarted:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatal("shutdown did not cancel restart", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("restart did not stop on service shutdown")
+	}
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown did not drain connection restart")
+	}
+	if app.Engine.process != nil || app.Store.DB.Ping() == nil {
+		t.Fatal("shutdown left engine or store open")
+	}
+}
 
 func TestOfficialDeliveryNativeMCP(t *testing.T) {
 	f := newPlatformFixture(t, 5)

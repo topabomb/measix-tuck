@@ -788,6 +788,13 @@ func (a *App) changeConnection(w http.ResponseWriter, r *http.Request) error {
 	if a.Engine.Options().External {
 		return Problem(409, "external_engine", "外部 Docker Agent 配置由宿主管理")
 	}
+	// Platform calls remain request-cancelable. Once they succeed, applying the
+	// shared engine configuration belongs to the app, including shutdown/drain.
+	op, finish, err := a.lifecycleOperation(context.Background())
+	if err != nil {
+		return err
+	}
+	defer finish()
 	if !a.changeMu.TryLock() {
 		return Problem(409, "configuration_changing", "配置正在应用，请稍后重试")
 	}
@@ -826,14 +833,14 @@ func (a *App) changeConnection(w http.ResponseWriter, r *http.Request) error {
 	if e = a.Models.Rebuild(); e != nil {
 		return e
 	}
-	a.Models.MCP.Prepare(r.Context(), true)
+	a.Models.MCP.Prepare(op, true)
 	if e = a.Engine.Close(); e != nil {
 		return e
 	}
 	if e = a.configureEngine(); e != nil {
 		return e
 	}
-	if e = a.Engine.Start(r.Context()); e != nil {
+	if e = a.Engine.Start(op); e != nil {
 		return e
 	}
 	if e = a.publishConnection(); e != nil {

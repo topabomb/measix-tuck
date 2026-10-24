@@ -173,7 +173,7 @@ async function resolve(approved: boolean) {
               <div class="queue-actions">
                 <button type="button" :disabled="busy || !!pending || !connected" title="运行时补充到当前轮；空闲时优先发送" @click="queueAction('send', entry.id)">立即发送</button>
                 <button type="button" :disabled="busy" @click="editing = entry.id; editText = entry.prompt">编辑</button>
-                <button type="button" :disabled="busy || !connected" aria-label="移除排队消息" title="移除" @click="queueAction('remove', entry.id)">×</button>
+                <button class="queue-remove" type="button" :disabled="busy || !connected" aria-label="移除排队消息" title="移除" @click="queueAction('remove', entry.id)"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="m6 6 12 12M6 18 18 6" /></svg></button>
               </div>
             </template>
           </li>
@@ -327,4 +327,5 @@ select, option { color-scheme:var(--tuck-scheme); background:var(--tuck-surface)
 :deep(.active-plan-strip > summary) { height:var(--chat-auxiliary-row-height,26px); border:1px solid var(--tuck-border); border-radius:6px; background:var(--tuck-surface); box-shadow:none; }
 :deep(.active-plan-popover) { position:static; margin-top:4px; max-height:160px; box-shadow:none; border-radius:6px; }
 :deep(.active-plan-strip:not([open]):hover .active-plan-popover) { display:none; }
+.queue-actions{align-items:center}.queue-actions .queue-remove{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;width:28px;min-width:28px;height:28px;min-height:28px;padding:0;line-height:1;flex:none}
 </style>

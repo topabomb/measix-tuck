@@ -108,6 +108,8 @@ test('bounded rail, retry feedback, themes and diagnostics have matching geometr
   }
   for (const width of [1365,830,390]) {
     await page.setViewportSize({width,height:850})
+    const remove=await page.getByRole('button',{name:'移除 retry.txt',exact:true}).boundingBox()
+    expect(remove!.width).toBe(28);expect(remove!.height).toBe(28)
     const rail = await page.locator('.draft-attachments').boundingBox()
     expect(rail!.height).toBeLessThan(85)
     expect(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth)).toBe(true)

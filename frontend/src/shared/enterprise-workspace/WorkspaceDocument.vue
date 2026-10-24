@@ -145,7 +145,7 @@ onBeforeUnmount(()=>{adjacentController?.abort();window.removeEventListener('poi
     </div>
   </div>
   <p v-if="source && doc.loaded && saveFeedback" class="ew-save-status" role="status" aria-label="文件保存状态"><span v-if="saving" class="ew-spinner" aria-hidden="true" />{{saveFeedback}}</p>
-  <p v-if="doc.reason" class="ew-notice">{{doc.reason}} <button v-if="!doc.reason.includes('截断') && !doc.reason.includes('版本')" @click="doc.readonly=false;doc.newline='\n';doc.reason='已转换为 UTF-8/LF，请另存';doc.etag=''">转换为 UTF-8/LF</button></p>
+  <p v-if="doc.reason" class="ew-notice" data-kind="warning">{{doc.reason}} <button v-if="!doc.reason.includes('截断') && !doc.reason.includes('版本')" @click="doc.readonly=false;doc.newline='\n';doc.reason='已转换为 UTF-8/LF，请另存';doc.etag=''">转换为 UTF-8/LF</button></p>
   <div v-if="error || previewError || doc.error" class="ew-error" role="alert">{{error || previewError || doc.error}}<template v-if="source"><button @click="act(compareRemote)">查看远端版本</button><button :disabled="doc.readonly || pending || owner.state.busy || !owner.state.projection?.filesAvailable || !doc.loaded" @click="save(true)">另存草稿</button><button @click="downloadDraft">下载草稿</button></template></div>
   <details v-if="compare"><summary>远端版本（当前草稿仍保留）</summary><pre>{{compare}}</pre></details>
   <p v-if="!doc.loaded && !doc.error">正在读取文件…</p>

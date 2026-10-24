@@ -33,6 +33,7 @@ test('switching to source cancels stylesheet preparation and a late result canno
   await expect.poll(()=>core.requests.some(r=>r.path==='slow-preview.css'&&r.method==='GET')).toBe(true)
   await panel.getByRole('button',{name:'源码',exact:true}).click()
   await expect.poll(()=>stylesheetClosed).toBe(true)
+  const readsAfterCancel=core.requests.filter(r=>r.path==='unread-after-cancel.css'&&r.method==='GET').length
   await panel.locator('.cm-content').fill('<h1>编辑后的预览正文</h1><img src="sample.png">')
   releaseStylesheet!()
   await expect(panel.locator('iframe')).toHaveCount(0)
@@ -40,7 +41,8 @@ test('switching to source cancels stylesheet preparation and a late result canno
   const frame=panel.frameLocator('iframe[title="文件静态预览"]:visible')
   await expect(frame.getByRole('heading',{name:'编辑后的预览正文',exact:true})).toBeVisible()
   await expect(frame.locator('img')).toHaveAttribute('data-workspace-state','loaded')
-  expect(core.requests.some(r=>r.path==='unread-after-cancel.css'&&r.method==='GET')).toBe(false)
+  // Preparation is concurrent: the sibling may already have completed before cancellation.
+  expect(core.requests.filter(r=>r.path==='unread-after-cancel.css'&&r.method==='GET')).toHaveLength(readsAfterCancel)
   await panel.getByRole('button',{name:'源码',exact:true}).click()
   await expect(panel.locator('.cm-content')).toContainText('编辑后的预览正文')
   await expect(panel.getByRole('button',{name:'保存',exact:true})).toBeEnabled()

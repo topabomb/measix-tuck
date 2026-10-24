@@ -14,7 +14,7 @@ watch(() => props.items, items => { if (preview.value && !items.some(item => ite
       <span v-else class="file-icon" aria-hidden="true">▤</span>
       <div class="attachment-label"><span :title="item.file.name">{{ item.file.name }}</span><small role="status" :title="item.error">{{ item.status === 'uploading' ? '上传中…' : item.status === 'error' ? item.error : item.uploaded?.kind === 'image' ? '图片' : '文件' }}</small></div>
       <button v-if="item.status === 'error'" :disabled="disabled" :aria-label="`重试 ${item.file.name}`" @click="$emit('retry', item.id)">重试</button>
-      <button :disabled="disabled" :aria-label="`移除 ${item.file.name}`" @click="$emit('remove', item.id)">×</button>
+      <button class="attachment-remove" :disabled="disabled" :aria-label="`移除 ${item.file.name}`" @click="$emit('remove', item.id)"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="m6 6 12 12M6 18 18 6" /></svg></button>
     </div>
   </div>
   <WorkbenchDialog v-if="preview" :label="`图片预览 ${preview.file.name}`" wide preview @close="preview = null">
@@ -34,4 +34,5 @@ button { border:0; border-radius:4px; background:transparent; color:var(--tuck-t
 button:hover { background:var(--tuck-hover); } button:disabled { opacity:.45; cursor:default; }
 .thumbnail { padding:0; width:40px; height:40px; cursor:zoom-in; overflow:hidden; } .thumbnail img { width:100%; height:100%; object-fit:contain; }
 .file-icon { font-size:24px; color:var(--tuck-muted); }
+.attachment-remove{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;width:28px;min-width:28px;height:28px;min-height:28px;padding:0;line-height:1;flex:none}
 </style>

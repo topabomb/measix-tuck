@@ -103,7 +103,7 @@ onBeforeUnmount(() => { close(); window.removeEventListener('resize', positionPo
     <Teleport to="body">
       <section :id="popupId" ref="popup" popover="auto" class="agent-popover" role="dialog" aria-label="子代理会话" data-testid="agent-popover" @toggle="toggled" @keydown="arrow">
         <template v-if="open">
-          <header><strong>会话切换</strong><span>{{ childCount }} 个子代理 · {{ summary }}</span><button aria-label="关闭子代理列表" @click="close">×</button></header>
+          <header><strong>会话切换</strong><span>{{ childCount }} 个子代理 · {{ summary }}</span><button class="agent-popover-close" aria-label="关闭子代理列表" @click="close"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="m6 6 12 12M6 18 18 6" /></svg></button></header>
           <input v-if="searchable" v-model="search" aria-label="搜索子代理" placeholder="搜索名称、Agent 或状态…" />
           <div class="agent-choices">
             <template v-for="{task, depth, run} in visible" :key="run?.id || task.id">
@@ -189,4 +189,5 @@ onBeforeUnmount(() => { close(); window.removeEventListener('resize', positionPo
   .session-navigation > .agent-switch,.session-navigation:not(.is-child) > .agent-switch { max-width:100%; flex:0 1 auto; }
   .session-navigation.is-child .agent-count-summary { display:none; }
 }
+.agent-popover header .agent-popover-close{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;width:28px;min-width:28px;height:28px;min-height:28px;padding:0;line-height:1;flex:none}
 </style>

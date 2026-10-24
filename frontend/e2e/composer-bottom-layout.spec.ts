@@ -19,6 +19,10 @@ test('errors and run feedback precede the plan next to the input at every width'
       await expect(page.getByTestId('composer-stop')).toBeEnabled()
       await expect(page.getByTestId('conversation-loading')).toBeHidden()
       expect((await page.getByTestId('queue-banner').boundingBox())!.height).toBeLessThanOrEqual(27)
+      await page.getByTestId('queue-banner').getByRole('button',{name:/待发送/}).click()
+      const remove=await page.getByRole('button',{name:'移除排队消息'}).boundingBox()
+      expect(remove!.width).toBe(28);expect(remove!.height).toBe(28)
+      await page.getByTestId('queue-banner').getByRole('button',{name:/待发送/}).click()
       expect((await summary.boundingBox())!.height).toBeLessThanOrEqual(27)
       if(width>760)expect((await page.locator('.run-feedback-row').boundingBox())!.height).toBeLessThanOrEqual(27)
       // This representative one-line state should leave room for message

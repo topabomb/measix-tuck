@@ -22,7 +22,8 @@ const maxTabs=12,maxCachedTextBytes=24*1024*1024
 const uploadETag=(value?:string)=>!!value&&value.length<=1024&&/^"[^\x00-\x20"<>\[\]()\x7f-\uffff]*"$/.test(value)
 export function createEnterpriseWorkspace() {
   const resourcePool=previewResourcePool()
-  const state = reactive({projection:null as Projection|null,projectionReadAt:null as number|null,dir:'',directoryLoaded:false,entries:[] as Entry[],tabs:[] as Document[],active:'',error:'',notice:'',loading:false,busy:false,uploading:false,refreshing:false,refreshError:'',used:undefined as number|undefined,available:undefined as number|undefined,clipboard:null as {cut:boolean;entries:Entry[]}|null,transfers:[] as Transfer[],tree:{} as Record<string,Entry[]>})
+  const state = reactive({projection:null as Projection|null,projectionReadAt:null as number|null,dir:'',directoryLoaded:false,entries:[] as Entry[],tabs:[] as Document[],active:'',error:'',notice:'',noticeKind:'info' as 'info'|'success'|'warning'|'error',loading:false,busy:false,uploading:false,refreshing:false,refreshError:'',used:undefined as number|undefined,available:undefined as number|undefined,clipboard:null as {cut:boolean;entries:Entry[]}|null,transfers:[] as Transfer[],tree:{} as Record<string,Entry[]>})
+  function notify(message:string,kind:typeof state.noticeKind='info'){state.notice=message;state.noticeKind=kind}
   const controllers = new Set<AbortController>(),loads=new Map<number,Promise<void>>(); let epoch = 0, listing = 0,projectionSequence=0,documentId=0,refreshController:AbortController|null=null
   const lastUsed=new Map<number,number>(),saving=new Set<number>();let accessSequence=0
   const textBytes=(doc:Document)=>2*(doc.text.length+(doc.text===doc.original?0:doc.original.length))
@@ -45,7 +46,7 @@ export function createEnterpriseWorkspace() {
   }
   function cancelRefresh() {refreshController?.abort();refreshController=null;state.refreshing=false}
   function abort() { cancelRefresh();epoch++;state.uploading=false; for (const c of controllers) c.abort(); controllers.clear(); for (const t of state.transfers) t.cancel?.() }
-  function reset() { abort();projectionSequence++;loads.clear();lastUsed.clear();saving.clear(); Object.assign(state,{projection:null,projectionReadAt:null,entries:[],tabs:[],active:'',dir:'',directoryLoaded:false,clipboard:null,tree:{},transfers:[],error:'',notice:'',refreshError:''}) }
+  function reset() { abort();projectionSequence++;loads.clear();lastUsed.clear();saving.clear(); Object.assign(state,{projection:null,projectionReadAt:null,entries:[],tabs:[],active:'',dir:'',directoryLoaded:false,clipboard:null,tree:{},transfers:[],error:'',notice:'',noticeKind:'info',refreshError:''}) }
   function unavailable(message:string){abort();if(state.projection)state.projection.filesAvailable=false;state.error=message}
   function url(resource:string,path = '',extra:Record<string,string> = {}) {
     const p = state.projection
@@ -232,7 +233,7 @@ export function createEnterpriseWorkspace() {
             reject(new Error(xhr.status>=500||value.outcome==='UNKNOWN'||xhr.status>=200&&xhr.status<300?`${message}；远端结果未知，请刷新核对`:message))
           }; xhr.send(file)
         }); transfer.status = '服务端已确认保存'; transfer.progress = 100;transfer.loaded=file.size
-        if(state.tabs.some(doc=>doc.path===path))state.notice='文件已上传；已打开的同名文件请重新读取，草稿已保留'
+        if(state.tabs.some(doc=>doc.path===path))notify('文件已上传；已打开的同名文件请重新读取，草稿已保留','warning')
       } catch (error) { transfer.status = (error as Error).message; if(current===epoch)state.error=failure=`${file.name}：${transfer.status}` }
       finally { delete transfer.cancel }
     }
@@ -240,5 +241,5 @@ export function createEnterpriseWorkspace() {
     } finally {if(current===epoch)state.uploading=false}
   }
   const dirty = () => state.tabs.some(d => d.text !== d.original)
-  return {state,previewResource,reset,abort,unavailable,cancelRefresh,refreshDirectory,generation,assertGeneration,url,refresh,list,mutate,put,bounded,response,open,save,upload,dirty,download:(paths:string[]) => appUrl(paths.length === 1 && state.entries.find(e => e.path === paths[0])?.kind !== 'DIRECTORY' ? url('/content',paths[0]) : url('/archive','',{paths:JSON.stringify(paths)}))}
+  return {state,notify,previewResource,reset,abort,unavailable,cancelRefresh,refreshDirectory,generation,assertGeneration,url,refresh,list,mutate,put,bounded,response,open,save,upload,dirty,download:(paths:string[]) => appUrl(paths.length === 1 && state.entries.find(e => e.path === paths[0])?.kind !== 'DIRECTORY' ? url('/content',paths[0]) : url('/archive','',{paths:JSON.stringify(paths)}))}
 }

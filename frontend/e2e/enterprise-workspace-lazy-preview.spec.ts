@@ -73,6 +73,7 @@ test('a failed image can be retried inside the preview without blocking later im
   const {panel,frame}=await open(page,'retry.html')
   await expect(frame.locator('#retry')).toHaveAttribute('data-workspace-state','failed')
   await expect(frame.locator('#good')).toHaveAttribute('data-workspace-state','loaded')
+  await panel.getByRole('button',{name:'退出专注内容',exact:true}).click()
   await panel.getByRole('button',{name:'预览说明与链接',exact:true}).click()
   await expect(panel.locator('.ew-resource-error')).toContainText('图片服务暂时不可用')
   await expect(panel.getByRole('button',{name:'打开原图',exact:true})).toBeVisible()
@@ -134,6 +135,7 @@ test('an optional stylesheet budget does not prevent later styles or HTML render
     await page.clock.fastForward(30_100)
     const panel=page.getByRole('complementary',{name:'企业工作区'}),frame=panel.frameLocator('iframe[title="文件静态预览"]')
     await expect(frame.locator('h1')).toHaveCSS('color','rgb(12, 34, 56)')
+    await panel.getByRole('button',{name:'退出专注内容',exact:true}).click()
     await panel.getByRole('button',{name:'预览说明与链接',exact:true}).click()
     await expect(panel.locator('.ew-links')).toContainText('样式不可用：slow.css')
   }finally{release?.()}

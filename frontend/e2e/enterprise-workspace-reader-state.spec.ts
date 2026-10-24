@@ -1,5 +1,6 @@
 import {test,expect,type Page} from '@playwright/test'
 import {fixture} from '../../tests/fixtures/fixture.mjs'
+import {builtInThemes} from '../src/app/themes'
 import {workspaceFixture} from '../../tests/fixtures/workspace-fixture.mjs'
 
 let app:Awaited<ReturnType<typeof fixture>>,core:Awaited<ReturnType<typeof workspaceFixture>>
@@ -28,8 +29,13 @@ for(const chat of [false,true])test(`focus reclaims the mobile navigation height
   for(const width of [320,390,1365]){
     await page.setViewportSize({width,height:760})
     await expect(rail).toBeVisible()
+    await expect(viewer(page).getByRole('toolbar',{name:'文件查看操作'})).toBeVisible()
+    await expect(panel(page).getByRole('button',{name:'复制工作区路径',exact:true})).toBeVisible()
+    await page.screenshot({path:info.outputPath(`normal-${width}.png`)})
     const before=await panel(page).boundingBox()
     await panel(page).getByRole('button',{name:'专注内容',exact:true}).click()
+    await expect(viewer(page).getByRole('toolbar',{name:'文件查看操作'})).toBeHidden()
+    await expect(panel(page).locator('footer')).toBeHidden()
     if(width<=760){
       await expect(rail).toBeHidden()
       expect((await panel(page).boundingBox())!.height-before!.height).toBeGreaterThanOrEqual(54)
@@ -182,4 +188,96 @@ test('media switching releases its source and retains playback position and cont
   const restored=await audio().evaluate(node=>{const media=node as HTMLAudioElement;return{position:media.currentTime,rate:media.playbackRate,volume:media.volume,muted:media.muted,paused:media.paused}})
   expect(restored.position).toBeGreaterThanOrEqual(.3)
   expect(restored).toMatchObject({rate:.75,volume:.4,muted:true,paused:true})
+})
+
+for(const chat of [false,true])test(`footer copies the full workspace path and opens its directory independently (${chat?'chat':'workspace'})`,async({page,context},info)=>{
+  const path='docs/工作区说明.md'
+  core.directories.add('docs')
+  core.put(path,'# 文件内容')
+  await context.grantPermissions(['clipboard-read','clipboard-write'])
+  await start(page,path,chat)
+  await expect(panel(page).locator('.ew-current-file')).toHaveText(path)
+  await panel(page).locator('.ew-current-file').click()
+  await expect(viewer(page)).toBeVisible()
+  await panel(page).getByRole('button',{name:'复制工作区路径',exact:true}).click()
+  expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe(path)
+  await expect(panel(page).locator('.ew-notice')).toContainText('工作区路径已复制')
+  for(const width of [320,390,1365]){
+    await page.setViewportSize({width,height:760})
+    expect((await panel(page).locator('footer').boundingBox())!.height).toBe(29)
+    for(const name of ['打开所在目录','复制工作区路径']){const box=await panel(page).getByRole('button',{name,exact:true}).boundingBox();expect(box!.width).toBe(24);expect(box!.height).toBe(24)}
+    const dismiss=panel(page).getByRole('button',{name:'关闭提示',exact:true})
+    const size=await dismiss.boundingBox()
+    expect(size!.width).toBe(24);expect(size!.height).toBe(24)
+    const notice=await panel(page).locator('.ew-dismissible-notice').boundingBox()
+    expect(notice!.height).toBe(29)
+    expect(notice!.x+notice!.width-size!.x-size!.width).toBeLessThanOrEqual(13)
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true)
+    await page.screenshot({path:info.outputPath(`notice-${width}.png`)})
+  }
+  await panel(page).getByRole('button',{name:'关闭提示',exact:true}).click()
+  await expect(panel(page).locator('.ew-dismissible-notice')).toHaveCount(0)
+  await panel(page).getByRole('button',{name:'打开所在目录',exact:true}).click()
+  await expect(panel(page).getByRole('option',{name:/工作区说明/})).toBeVisible()
+  await expect(viewer(page)).toHaveCount(0)
+})
+
+test('feedback follows every theme and separates clipboard success from failure',async({page,context},info)=>{
+  await context.grantPermissions(['clipboard-read','clipboard-write'])
+  await page.setViewportSize({width:390,height:760})
+  await page.goto(app.url)
+  for(const theme of builtInThemes){
+    await page.evaluate(value=>localStorage.setItem('tuck.appearance.v1',JSON.stringify({selected:value,themes:[]})),theme.id)
+    await start(page,'readme.md',true)
+    await page.reload()
+    await panel(page).getByRole('button',{name:'复制工作区路径',exact:true}).click()
+    const notice=panel(page).locator('.ew-dismissible-notice')
+    await expect(notice).toHaveAttribute('data-kind','success')
+    await expect(notice).toHaveText('工作区路径已复制')
+    const color=await notice.evaluate(el=>getComputedStyle(el).color)
+    const rgb=(hex:string)=>`rgb(${[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)).join(', ')})`
+    expect(color).toBe(rgb(theme.colors.success))
+    expect((await notice.boundingBox())!.height).toBe(29)
+    await page.screenshot({path:info.outputPath(`success-${theme.id}.png`)})
+    await page.evaluate(()=>{navigator.clipboard.writeText=async()=>{throw new Error('denied')};document.execCommand=()=>false})
+    await panel(page).getByRole('button',{name:'复制工作区路径',exact:true}).click()
+    const error=panel(page).locator(':scope > .ew-error')
+    await expect(error).toContainText('复制失败')
+    await expect(notice).toHaveCount(0)
+    expect(await error.evaluate(el=>getComputedStyle(el).color)).toBe(rgb(theme.colors.danger))
+    await page.screenshot({path:info.outputPath(`error-${theme.id}.png`)})
+  }
+})
+
+for(const failures of [0,1,2])test(`batch feedback distinguishes ${failures} failures`,async({page})=>{
+  core.put('batch-a.txt','a');core.put('batch-b.txt','b')
+  await page.route('**/files**',async route=>{
+    const req=route.request()
+    if(req.method()==='POST'){
+      const body=req.postDataJSON()
+      if(body.action==='DELETE'&&(failures===2||failures===1&&body.path==='batch-b.txt')){
+        await route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({error:'测试删除失败'})});return
+      }
+    }
+    await route.continue()
+  })
+  await page.goto(app.url+'/#/workspace')
+  await panel(page).getByRole('option',{name:/^batch-a.txt/}).click()
+  await panel(page).getByRole('option',{name:/^batch-b.txt/}).click({modifiers:['Control']})
+  await panel(page).getByRole('button',{name:'删除',exact:true}).click()
+  await page.getByRole('dialog').getByRole('button',{name:'确定',exact:true}).click()
+  const feedback=panel(page).locator('.ew-dismissible-notice')
+  await expect(feedback).toHaveAttribute('data-kind',['success','warning','error'][failures]!)
+  await expect(feedback).toHaveAttribute('role',failures===2?'alert':'status')
+})
+
+test('late clipboard feedback does not leak into a remounted workspace',async({page})=>{
+  await start(page,'readme.md')
+  await page.evaluate(()=>{navigator.clipboard.writeText=()=>new Promise<void>(resolve=>{(window as any).finishClipboard=resolve})})
+  await panel(page).getByRole('button',{name:'复制工作区路径',exact:true}).click()
+  await page.goto(app.url+'/#/tasks')
+  await expect(panel(page)).toHaveCount(0)
+  await start(page,'page.html')
+  await page.evaluate(()=>{(window as any).finishClipboard()})
+  await expect(panel(page).locator('.ew-dismissible-notice')).toHaveCount(0)
 })

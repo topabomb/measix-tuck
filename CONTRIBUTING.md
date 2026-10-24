@@ -50,6 +50,7 @@ npm run verify
 | [部署](docs/deployment.md) | 安装、发行、升级和实际服务验收 |
 | [存储设计](docs/database-design.md) | DDL、事务、游标、数据所有权与清理 |
 | [迁移](docs/persistence-migrations.md) | 版本、离线迁移、完整备份与回退 |
+| [引擎内置工具参考](docs/docker-agent-tools.md) | Docker Agent 工具分类、版本清单、逐工具功能与参数，及外部接入能力边界 |
 | [工具参考](docs/tools-reference.md) | 工具输入、调用行为、权限和动态工具发现 |
 | [工具返回合同](docs/tool-results.md) | Tuck 工具输出字段、状态与错误码 |
 | [任务文件](docs/task-files.md) | 文件布局、命名、落盘与交付副本边界 |

@@ -80,6 +80,8 @@ Tuck 自组织的模型内容统一经 `model_content.go`，业务和协议代�
 
 ## Docker Agent 合同
 
+Tuck 对引擎内置工具采用“引擎基本工具、引擎配置型工具、市场接入工具”三类约定；外部工具接入器属于能力范围。分类定义、按引擎版本核对的工具集、逐工具功能及参数统一维护在[引擎内置工具参考](docker-agent-tools.md)。
+
 兼容基线为官方 [v1.152.0](https://github.com/docker/docker-agent/releases/tag/v1.152.0)，提交 `e7f1ec394dfa47aea0b066092a35c72564b192cb`；安装校验以 [嵌入发行清单](../internal/tuck/contract/engine-release.json) 为准。[上游文档](https://docker.github.io/docker-agent/)及较新源码不扩大已验收范围。
 
 生成的原生代理 YAML 和内置工具发现临时配置使用格式版本 16，由同一官方基线解析；该数字独立于引擎版本、Tuck 配置版本和数据库版本。声明新格式不自动启用路由、hooks 或其他可选能力。

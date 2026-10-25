@@ -7,7 +7,7 @@
 基于 [Docker Agent](https://github.com/docker/docker-agent) 的自托管 Web 工作台。<br>
 从个人助手到组织工作入口，在一处对话、跟进任务、查看文件、确认交付。
 
-[快速开始](#快速开始) · [界面与能力](#tuck-的工作台体验) · [项目指引](#项目指引) · [Measix 产品体系](#measix-七大产品) · [开发与贡献](CONTRIBUTING.md)
+[快速开始](#快速开始) · [界面与能力](#tuck-的工作台体验) · [独立工具集](#独立命令行工具集) · [项目指引](#项目指引) · [Measix 产品体系](#measix-七大产品) · [开发与贡献](CONTRIBUTING.md)
 
 </div>
 
@@ -100,12 +100,23 @@ npm start
 
 发行运行无需 Go 或 Node.js。容器安装、外部引擎、升级和回退见 [运行与发布](docs/deployment.md)。
 
+## 独立命令行工具集
+
+[cli-tools/](cli-tools/README.md) 在同一仓库维护独立于 Tuck 应用的命令行工具。每个工具有自己的入口、配置、依赖、测试和构建产物，可单独复制执行；不依赖 Tuck 服务，不导入其内部包、读取其配置或接入其 MCP、任务与数据库。Tuck 的安装、构建和发行流程不包含这些工具。
+
+- 每个工具一个目录和独立可执行文件；代码结构保持简洁，公共小型函数放在 `cli-tools/common/`。
+- 每个工具目录只维护一份完整 `README.md`，包含全部命令、参数、示例和必要调研；编译时直接嵌入，离线 `docs` 原样输出。`help` 提供完整命令帮助。
+- 源码、测试、文档和构建脚本纳入 Git；`cli-tools/dist/` 二进制及校验文件、凭据、私有配置、调研缓存和生成素材不提交。公开文档与示例使用通用服务名称和示例域名。
+
+首个工具为 [grok-video](cli-tools/grok-video/README.md)，支持 xAI 视频协议的生成、编辑、续接、查询与下载。完整工具规范、文档职责和构建入口见 [工具集说明](cli-tools/README.md)。
+
 ## 项目指引
 
 | 想做什么 | 从这里开始 |
 | --- | --- |
 | 配置模型、助手和 MCP | [配置指南](docs/configuration.md) |
 | 了解工具及文件操作 | [工具参考](docs/tools-reference.md) |
+| 使用或开发独立命令行工具 | [独立工具集](cli-tools/README.md) |
 | 部署、备份或升级 | [运行与发布](docs/deployment.md) |
 | 理解项目职责和引擎边界 | [架构说明](docs/architecture.md) |
 | 参与开发、运行测试或查找详细文档 | [贡献指南](CONTRIBUTING.md) |

@@ -22,7 +22,7 @@ const tabList = ref<HTMLElement>(),tabMenu=ref<HTMLDetailsElement>()
 watch(()=>state.active,async()=>{await nextTick();tabList.value?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.scrollIntoView({block:'nearest',inline:'nearest'})})
 const wide = computed(()=>props.standalone||route.query.wide==='1'), filter = computed(()=>String(route.query.filter || '')), hidden = computed(()=>route.query.hidden==='1'), sort = computed(()=>route.query.sort==='size'||route.query.sort==='date'?route.query.sort:'name'), grid = computed(()=>route.query.view==='grid')
 const order=computed(()=>route.query.order==='asc'||route.query.order==='desc'?route.query.order:sort.value==='name'?'asc':'desc')
-const active = computed(()=>state.tabs.find(d=>d.path===state.active)), selectedEntries = computed(()=>state.entries.filter(e=>selected.value.includes(e.path)))
+const active = computed(()=>state.tabs.find(d=>d.path===state.active)), selectedPaths=computed(()=>new Set(selected.value)), selectedEntries = computed(()=>state.entries.filter(e=>selectedPaths.value.has(e.path)))
 // Keep the four most recent viewers. Other tabs retain their lightweight
 // reading state; closing/evicting a tab also releases its mounted resources.
 const recentViewers=ref<number[]>([])
@@ -47,31 +47,52 @@ const crumbs = computed(()=>directoryPath.value.split('/').filter(Boolean).map((
 const tree = computed(()=>{const result:{path:string;level:number}[]=[];const visit=(path:string,level:number)=>{result.push({path,level});if(treeExpanded.value.includes(path))for(const child of state.tree[path]||[])if(child.kind==='DIRECTORY')visit(child.path,level+1)};visit('',0);return result})
 const gridPage=ref(1), thumbnails=ref<Record<string,string>>({})
 const visibleEntries=computed(()=>grid.value?entries.value.slice((gridPage.value-1)*48,gridPage.value*48):entries.value)
+const thumbnailEntries=computed(()=>grid.value
+  ? visibleEntries.value.filter(entry=>entry.kind==='FILE'&&kind(entry.path)==='image'&&(entry.size===undefined||entry.size<=24*1024*1024))
+  : [])
+// Reordering the same page keeps its observed nodes and in-flight versions.
+const thumbnailKey=computed(()=>thumbnailEntries.value.map(entry=>JSON.stringify([entry.path,entry.etag,entry.size,entry.modifiedAt])).sort().join('\0'))
 let thumbnailController=new AbortController(),thumbnailRun=0;const thumbnailVersions=new Map<string,string>()
 function clearThumbnails(){thumbnailController.abort();thumbnailController=new AbortController();for(const url of Object.values(thumbnails.value))URL.revokeObjectURL(url);thumbnails.value={};thumbnailVersions.clear()}
-watch([visibleEntries,grid,()=>state.active,()=>state.projection?.filesAvailable,()=>state.loading,()=>state.refreshing],async()=>{
+watch([thumbnailKey,grid,()=>state.active,()=>state.projection?.filesAvailable,()=>state.loading,()=>state.refreshing],(_,__,onCleanup)=>{
   thumbnailController.abort();thumbnailController=new AbortController()
   if(!grid.value || !state.projection?.filesAvailable){clearThumbnails();return}
   // Keep the last directory page while a document is open. On return, the
   // refreshed listing below validates every retained thumbnail's version.
   if(state.active||state.loading||state.refreshing||state.refreshError)return
   const signal=thumbnailController.signal,generation=owner.generation(),run=++thumbnailRun
-  const images=visibleEntries.value.filter(entry=>entry.kind==='FILE'&&kind(entry.path)==='image'&&(entry.size===undefined||entry.size<=24*1024*1024))
+  const images=thumbnailEntries.value
   const versions=new Map(images.map(entry=>[entry.path,`${generation}:${entry.etag||(entry.modifiedAt?`${entry.size??''}:${entry.modifiedAt}`:`unversioned:${run}`)}`]))
   for(const [path,url] of Object.entries(thumbnails.value))if(!versions.has(path)||thumbnailVersions.get(path)!==versions.get(path)){URL.revokeObjectURL(url);delete thumbnails.value[path];thumbnailVersions.delete(path)}
-  await Promise.all(images.filter(entry=>!thumbnails.value[entry.path]).map(async entry=>{
-    try{await owner.previewResource(signal,async()=>{
-      const {data}=await owner.bounded(entry.path,24*1024*1024,entry.etag?{'If-Match':entry.etag}:{},signal,true)
-      if(signal.aborted)return
+  const root=host.value?.querySelector<HTMLElement>('.ew-files')
+  if(!root)return
+  const reads=new Map<string,AbortController>(),byPath=new Map(images.map(entry=>[entry.path,entry]))
+  const observer=new IntersectionObserver(changes=>{
+    for(const change of changes){
+      const entry=byPath.get((change.target as HTMLElement).title)
+      if(!entry)continue
+      if(!change.isIntersecting){reads.get(entry.path)?.abort();reads.delete(entry.path);continue}
+      if(signal.aborted||thumbnails.value[entry.path]||reads.has(entry.path))continue
+      const controller=new AbortController(),cancel=()=>controller.abort()
+      reads.set(entry.path,controller);signal.addEventListener('abort',cancel,{once:true})
+      void read(entry,controller.signal).finally(()=>{signal.removeEventListener('abort',cancel);if(reads.get(entry.path)===controller)reads.delete(entry.path)})
+    }
+  },{root})
+  onCleanup(()=>{observer.disconnect();for(const controller of reads.values())controller.abort()})
+  for(const node of root.querySelectorAll<HTMLElement>('.ew-file'))if(byPath.has(node.title))observer.observe(node)
+  async function read(entry:Entry,readSignal:AbortSignal){
+    try{await owner.previewResource(readSignal,async()=>{
+      const {data}=await owner.bounded(entry.path,24*1024*1024,entry.etag?{'If-Match':entry.etag}:{},readSignal,true)
+      if(readSignal.aborted)return
       const metadata=rasterMetadata(data),scale=Math.min(1,128/metadata.width,128/metadata.height)
       const bitmap=await createImageBitmap(new Blob([data as BlobPart],{type:metadata.type}),{resizeWidth:Math.max(1,Math.floor(metadata.width*scale)),resizeHeight:Math.max(1,Math.floor(metadata.height*scale))})
       const canvas=document.createElement('canvas');canvas.width=bitmap.width;canvas.height=bitmap.height
       try{canvas.getContext('2d')!.drawImage(bitmap,0,0)}finally{bitmap.close()}
       const blob=await new Promise<Blob|null>(resolve=>canvas.toBlob(resolve))
-      if(blob&&!signal.aborted){thumbnails.value[entry.path]=URL.createObjectURL(blob);thumbnailVersions.set(entry.path,versions.get(entry.path)!)}
+      if(blob&&!readSignal.aborted){thumbnails.value[entry.path]=URL.createObjectURL(blob);thumbnailVersions.set(entry.path,versions.get(entry.path)!)}
     })}catch{/* The file icon remains the explicit fallback. */}
-  }))
-})
+  }
+},{flush:'post'})
 watch([()=>state.projection?.subject,()=>state.projection?.agentSpaceId],clearThumbnails,{flush:'sync'})
 watch([filter,()=>state.dir],()=>{gridPage.value=1})
 watch(()=>entries.value.length,()=>{gridPage.value=Math.min(gridPage.value,Math.max(1,Math.ceil(entries.value.length/48)))})
@@ -206,9 +227,9 @@ async function revealTree() {
   }
   if(ancestors.some(ancestor=>!treeKnown(ancestor)&&!treeErrors.value[ancestor]))await act(update,false);else await update()
 }
-watch([()=>state.dir,()=>state.tree,()=>state.busy,()=>state.loading,treeVisible,()=>state.projection?.filesAvailable],()=>{
+watch([()=>state.dir,()=>state.tree,()=>state.busy,()=>state.loading,()=>state.directoryLoaded,treeVisible,()=>state.projection?.filesAvailable],()=>{
   if(!treeVisible.value){treeController?.abort();return}
-  if(state.projection?.filesAvailable&&!state.busy&&!state.loading)void revealTree()
+  if(state.projection?.filesAvailable&&state.directoryLoaded&&!state.busy&&!state.loading)void revealTree()
 },{immediate:true})
 watch(()=>state.tree,()=>{treeErrors.value={};if(!state.projection)lastTreeDir=undefined})
 watch(()=>[state.projection?.subject,state.projection?.agentSpaceId],()=>{treeController?.abort();lastTreeDir=undefined;treeExpanded.value=[''];treeErrors.value={}})
@@ -322,7 +343,7 @@ onBeforeUnmount(()=>{disposed=true;sync++;treeController?.abort();owner.cancelRe
       <div v-if="grid && entries.length>48" class="ew-tools"><button :disabled="gridPage<=1" @click="gridPage--">上页</button><span>{{gridPage}} / {{Math.ceil(entries.length/48)}}</span><button :disabled="gridPage*48>=entries.length" @click="gridPage++">下页</button></div>
       <div v-if="menu" class="ew-menu" role="group" aria-label="所选项目操作"><button :disabled="selected.length!==1" @click="rename">重命名</button><button @click="clipboard(false)">复制</button><button @click="clipboard(true)">剪切</button><button @click="moveTo">移动到…</button><button @click="copyText(selected.join('\n'));menu=false">复制路径</button><button :disabled="selected.length!==1" @click="copyLink">复制定位链接</button><button @click="properties=true;menu=false">属性</button><button @click="menu=false">关闭菜单</button></div>
       <p v-if="state.loading" class="ew-empty">正在读取目录…</p><div v-else-if="!state.directoryLoaded" class="ew-empty"><span>{{state.projection?.filesAvailable?'目录尚未读取成功':'企业工作区尚不可用'}}</span><button :disabled="state.busy" @click="act(reloadDirectory)">重试读取目录</button></div><p v-else-if="!entries.length" class="ew-empty">{{!state.projection?.filesAvailable?'企业工作区尚不可用':filter?'没有匹配项目':state.entries.length?'没有可显示的项目':'此目录为空，可拖入文件上传'}}</p>
-      <div v-else class="ew-files" :class="{'ew-grid':grid}" role="listbox" tabindex="0" aria-label="企业文件" aria-multiselectable="true"><div v-for="entry in visibleEntries" :key="entry.path" class="ew-file" role="option" tabindex="-1" :aria-selected="selected.includes(entry.path)" :title="entry.path" @click="choose($event,entry)" @dblclick="enter(entry)" @contextmenu.prevent="selected=[entry.path];menu=true"><img v-if="grid && thumbnails[entry.path]" class="ew-thumb" :src="thumbnails[entry.path]" alt="" /><span v-else class="ew-file-icon" :class="{'ew-pdf-icon':kind(entry.path)==='pdf'}" aria-hidden="true"><svg v-if="entry.kind==='DIRECTORY'" viewBox="0 0 24 24"><path d="M3 7V5h6l2 2h10v12H3z" /></svg><span v-else-if="kind(entry.path)==='pdf'">PDF</span><svg v-else viewBox="0 0 24 24"><path :d="kind(entry.path)==='image'?'M3 3h18v18H3zM3 17l6-6 4 4 3-3 5 5M15 6a1 1 0 1 0 0 2 1 1 0 0 0 0-2':kind(entry.path)==='audio'?'M9 17V5l11-2v12M9 8l11-2M9 17a3 3 0 1 0-6 0 3 3 0 0 0 6 0M20 15a3 3 0 1 0-6 0 3 3 0 0 0 6 0':kind(entry.path)==='video'?'M3 4h18v16H3zM10 8l6 4-6 4z':kind(entry.path)==='binary'?'M14 3H5v18h14V8zM14 3v5h5':'M14 3H5v18h14V8zM14 3v5h5M8 12h8m-8 4h6'" /></svg></span><span class="ew-file-name">{{basename(entry.path)}}</span><span class="ew-file-size">{{entry.kind==='DIRECTORY'?'文件夹':bytes(entry.size)}}</span><time class="ew-file-date">{{entry.modifiedAt?new Date(entry.modifiedAt).toLocaleString():''}}</time><button class="ew-open" aria-label="打开" @click.stop="enter(entry)">打开</button></div></div>
+      <div v-else class="ew-files" :class="{'ew-grid':grid}" role="listbox" tabindex="0" aria-label="企业文件" aria-multiselectable="true"><div v-for="entry in visibleEntries" :key="entry.path" v-memo="[entry,selectedPaths.has(entry.path),grid,thumbnails[entry.path]]" class="ew-file" role="option" tabindex="-1" :aria-selected="selectedPaths.has(entry.path)" :title="entry.path" @click="choose($event,entry)" @dblclick="enter(entry)" @contextmenu.prevent="selected=[entry.path];menu=true"><img v-if="grid && thumbnails[entry.path]" class="ew-thumb" :src="thumbnails[entry.path]" alt="" /><span v-else class="ew-file-icon" :class="{'ew-pdf-icon':kind(entry.path)==='pdf'}" aria-hidden="true"><svg v-if="entry.kind==='DIRECTORY'" viewBox="0 0 24 24"><path d="M3 7V5h6l2 2h10v12H3z" /></svg><span v-else-if="kind(entry.path)==='pdf'">PDF</span><svg v-else viewBox="0 0 24 24"><path :d="kind(entry.path)==='image'?'M3 3h18v18H3zM3 17l6-6 4 4 3-3 5 5M15 6a1 1 0 1 0 0 2 1 1 0 0 0 0-2':kind(entry.path)==='audio'?'M9 17V5l11-2v12M9 8l11-2M9 17a3 3 0 1 0-6 0 3 3 0 0 0 6 0M20 15a3 3 0 1 0-6 0 3 3 0 0 0 6 0':kind(entry.path)==='video'?'M3 4h18v16H3zM10 8l6 4-6 4z':kind(entry.path)==='binary'?'M14 3H5v18h14V8zM14 3v5h5':'M14 3H5v18h14V8zM14 3v5h5M8 12h8m-8 4h6'" /></svg></span><span class="ew-file-name">{{basename(entry.path)}}</span><span class="ew-file-size">{{entry.kind==='DIRECTORY'?'文件夹':bytes(entry.size)}}</span><time class="ew-file-date">{{entry.modifiedAt?new Date(entry.modifiedAt).toLocaleString():''}}</time><button class="ew-open" aria-label="打开" @click.stop="enter(entry)">打开</button></div></div>
     </div></div>
   <section v-if="state.transfers.length" class="ew-transfers" aria-label="上传进度"><header><strong>上传 · {{state.transfers.filter(t=>t.status==='服务端已确认保存').length}} / {{state.transfers.length}} 已确认保存</strong><button :disabled="state.busy || state.transfers.some(t=>t.cancel)" @click="state.transfers=[]">清除记录</button></header><div ref="transferList" class="ew-transfer-list"><div v-for="(transfer,i) in state.transfers" :key="i" class="ew-transfer"><span :title="transfer.path">{{basename(transfer.path)}}</span><button v-if="transfer.cancel" :aria-label="`取消上传 ${basename(transfer.path)}`" @click="transfer.cancel()">取消</button><progress :value="transfer.progress" max="100" :aria-label="`${basename(transfer.path)} 上传进度`" /><small>{{bytes(transfer.loaded)}} / {{bytes(transfer.total)}} · {{transfer.progress}}%</small><p role="status">{{transfer.status}}</p></div></div></section>
   <footer><template v-if="active"><span class="ew-current-file" :title="active.path">{{active.path}}</span><div class="ew-path-actions"><button class="ew-icon-button" aria-label="打开所在目录" :title="`打开所在目录：${parent(active.path)||'根目录'}`" :disabled="state.busy" @click="act(()=>navigate(parent(active!.path)))"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 7V5h6l2 2h10v12H3zM10 13h7m-3-3 3 3-3 3" /></svg></button><button class="ew-icon-button" aria-label="复制工作区路径" title="复制工作区路径" @click="copyCurrentPath"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 9h12v12H9zM15 9V3H3v12h6" /></svg></button></div></template><template v-else>{{state.directoryLoaded?state.entries.length+' 项':'—'}} <span v-if="selected.length"> · 已选 {{selected.length}} 项</span><span v-if="state.available!==undefined"> · 可用 {{bytes(state.available)}}</span><span v-if="state.used!==undefined"> · 已用 {{bytes(state.used)}}</span></template><span v-if="state.refreshing" role="status"> · 正在自动刷新</span></footer>

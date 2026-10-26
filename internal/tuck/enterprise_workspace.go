@@ -300,28 +300,36 @@ func (e *EnterpriseWorkspace) Handle(w http.ResponseWriter, r *http.Request) err
 			}
 			return nil
 		}
+		// Retain only selected roots, never whole sibling listings. Preserve
+		// selection/visit order while reading each selected parent once.
+		selected := map[string]M{}
+		listed := map[string]bool{}
+		for _, root := range roots {
+			selected[root] = nil
+		}
 		for _, root := range roots {
 			parent := path.Dir(root)
 			if parent == "." {
 				parent = ""
 			}
-			directory, er := list(parent)
-			if er != nil {
-				return er
-			}
-			found := false
-			for _, v := range A(directory["entries"]) {
-				entry := O(v)
-				if S(entry["path"]) == root {
-					found = true
-					if er = visit(entry, 0); er != nil {
-						return er
-					}
-					break
+			if !listed[parent] {
+				directory, er := list(parent)
+				if er != nil {
+					return er
 				}
+				for _, v := range A(directory["entries"]) {
+					entry := O(v)
+					if current, needed := selected[S(entry["path"])]; needed && current == nil {
+						selected[S(entry["path"])] = M{"path": entry["path"], "kind": entry["kind"], "etag": entry["etag"]}
+					}
+				}
+				listed[parent] = true
 			}
-			if !found {
+			if selected[root] == nil {
 				return Problem(404, "workspace_missing", "文件已不存在，请刷新")
+			}
+			if er = visit(selected[root], 0); er != nil {
+				return er
 			}
 		}
 		w.Header().Set("Content-Type", "application/zip")

@@ -229,6 +229,7 @@ test('narrow file grids retain names inside non-overlapping tiles and reveal act
   }
   expect(await fileTab.evaluate(element=>element.getBoundingClientRect().width)).toBeGreaterThanOrEqual(28)
   await panel.getByRole('button',{name:'图标',exact:true}).click()
+  await panel.getByRole('option',{name:/sample\.png/}).scrollIntoViewIfNeeded()
   await expect(panel.getByRole('option',{name:/sample\.png/}).locator('.ew-thumb')).toBeVisible()
   const tiles=await panel.locator('.ew-grid .ew-file').evaluateAll(elements=>elements.map(element=>{
     const box=element.getBoundingClientRect(),name=element.querySelector('.ew-file-name')!.getBoundingClientRect()

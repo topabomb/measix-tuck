@@ -3,9 +3,174 @@ import {fixture} from '../../tests/fixtures/fixture.mjs'
 import {workspaceFixture} from '../../tests/fixtures/workspace-fixture.mjs'
 
 let app:Awaited<ReturnType<typeof fixture>>,core:Awaited<ReturnType<typeof workspaceFixture>>
-test.beforeEach(async()=>{core=await workspaceFixture();app=await fixture({enterprisePlatform:core.platform})})
-test.afterEach(async()=>{try{await app?.close()}finally{await core?.close()}})
+let slowThumbnail=false,thumbnailClosed=false,finishThumbnail:(()=>void)|undefined
+test.beforeEach(async()=>{
+  slowThumbnail=false;thumbnailClosed=false;finishThumbnail=undefined
+  core=await workspaceFixture({content:async(req,res,path)=>{
+    if(slowThumbnail&&req.method==='GET'&&path==='grid-00.png'){
+      res.once('close',()=>{thumbnailClosed=true})
+      await new Promise<void>(resolve=>{finishThumbnail=resolve})
+      return res.destroyed
+    }
+    return false
+  }})
+  app=await fixture({enterprisePlatform:core.platform})
+})
+test.afterEach(async()=>{finishThumbnail?.();try{await app?.close()}finally{await core?.close()}})
 const reads=(path:string)=>core.requests.filter(r=>r.method==='GET'&&r.path===path&&r.url.includes('/content')).length
+
+test('efficiency: first directory load also supplies the tree without listing the root twice',async({page})=>{
+  await page.goto(app.url+'/#/workspace')
+  const panel=page.locator('#enterprise-workspace-panel')
+  await expect(panel.locator('.ew-file[title="hello.txt"]')).toBeVisible()
+  await expect(panel.getByRole('button',{name:'刷新',exact:true})).toBeEnabled()
+  await expect(panel.locator('.ew-tree .ew-tree-name[title="folder"]')).toBeVisible()
+  expect(core.requests.filter(r=>r.method==='GET'&&r.path===''&&r.url.includes('/files'))).toHaveLength(1)
+})
+
+test('efficiency: selecting a file only renders changed rows in a large directory',async({page})=>{
+  await page.addInitScript(()=>{
+    const metrics=window as unknown as {workspaceDateFormats:number};metrics.workspaceDateFormats=0
+    const format=Date.prototype.toLocaleString,stamp=Date.parse('2026-10-26T01:23:45Z')
+    Date.prototype.toLocaleString=function(locales?:Intl.LocalesArgument,options?:Intl.DateTimeFormatOptions){if(this.getTime()===stamp)metrics.workspaceDateFormats++;return format.call(this,locales,options)}
+  })
+  await page.route('**/api/enterprise-workspace/files?**',async route=>{
+    const response=await route.fetch(),value=await response.json()
+    value.entries.push(...Array.from({length:1000},(_,i)=>({path:`render-${i}.txt`,kind:'FILE',size:1,etag:'"v1"',modifiedAt:'2026-10-26T01:23:45Z'})))
+    await route.fulfill({response,json:value})
+  })
+  await page.goto(app.url+'/#/workspace')
+  const panel=page.locator('#enterprise-workspace-panel'),first=panel.locator('.ew-file[title="render-0.txt"]')
+  await expect(first).toBeVisible()
+  const count=()=>page.evaluate(()=>(window as unknown as {workspaceDateFormats:number}).workspaceDateFormats)
+  const before=await count()
+  await first.click()
+  await expect(first).toHaveAttribute('aria-selected','true')
+  expect(await count()-before).toBe(1)
+  const next=panel.locator('.ew-file[title="render-1.txt"]'),selected=await count()
+  await next.click()
+  await expect(next).toHaveAttribute('aria-selected','true')
+  await expect(first).toHaveAttribute('aria-selected','false')
+  expect(await count()-selected).toBe(2)
+})
+
+test('efficiency: changing sort order preserves an in-flight thumbnail of the same version',async({page})=>{
+  for(let i=0;i<2;i++)core.put(`grid-0${i}.png`,core.files.get('sample.png')!)
+  let attempts=0,release=()=>{}
+  const gate=new Promise<void>(resolve=>{release=resolve})
+  await page.route('**/api/enterprise-workspace/content?**',async route=>{
+    if(route.request().method()==='GET'&&new URL(route.request().url()).searchParams.get('path')==='grid-00.png'){attempts++;await gate}
+    await route.continue().catch(()=>{})
+  })
+  try{
+    await page.goto(app.url+'/#/workspace?view=grid&filter=grid-')
+    const panel=page.locator('#enterprise-workspace-panel')
+    await expect.poll(()=>attempts).toBe(1)
+    await expect(panel.locator('.ew-file[title="grid-01.png"] img')).toBeVisible()
+    await panel.getByRole('button',{name:'显示选项',exact:true}).click()
+    await panel.getByRole('button',{name:'降序',exact:true}).click()
+    await expect(page).toHaveURL(/order=desc/)
+    // Let observer and watcher updates run before releasing the original read.
+    await page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))))
+    release()
+    await expect(panel.locator('.ew-file[title="grid-00.png"] img')).toBeVisible()
+    expect(attempts).toBe(1)
+  }finally{release()}
+})
+
+for(const width of [390,1365])test(`grid thumbnails read only visible images and reuse them after scrolling at ${width}px`,async({page},info)=>{
+  await page.setViewportSize({width,height:760})
+  for(let i=0;i<44;i++)core.put(`grid-${String(i).padStart(2,'0')}.png`,core.files.get('sample.png')!)
+  await page.goto(app.url+'/#/workspace?view=grid&filter=grid-')
+  const panel=page.locator('#enterprise-workspace-panel'),first=panel.locator('.ew-file[title="grid-00.png"]'),last=panel.locator('.ew-file[title="grid-43.png"]')
+  await expect(first.locator('img')).toBeVisible()
+  const visible=await panel.locator('.ew-file').evaluateAll(nodes=>nodes.filter(node=>{const rect=node.getBoundingClientRect(),root=node.parentElement!.getBoundingClientRect();return rect.bottom>root.top&&rect.top<root.bottom}).map(node=>(node as HTMLElement).title))
+  for(const path of visible)await expect(panel.locator(`.ew-file[title="${path}"] img`)).toBeVisible()
+  const initialReads=core.requests.filter(r=>r.method==='GET'&&r.path.startsWith('grid-')&&r.url.includes('/content')).length
+  expect(initialReads).toBe(visible.length)
+  expect(initialReads).toBeLessThan(44)
+  expect(reads('grid-43.png')).toBe(0)
+  await last.scrollIntoViewIfNeeded()
+  await expect(last.locator('img')).toBeVisible()
+  expect(reads('grid-43.png')).toBe(1)
+  const firstReads=reads('grid-00.png')
+  await first.scrollIntoViewIfNeeded()
+  await expect(first.locator('img')).toBeVisible()
+  expect(reads('grid-00.png')).toBe(firstReads)
+  const imageReads=core.requests.filter(r=>r.method==='GET'&&r.path.startsWith('grid-')&&r.url.includes('/content'))
+  const lists=core.requests.filter(r=>r.method==='GET'&&r.url.includes('/files'))
+  expect(new Set(imageReads.map(r=>r.path)).size).toBe(imageReads.length)
+  expect(core.requests.filter(r=>r.method==='HEAD'&&r.path.startsWith('grid-'))).toHaveLength(0)
+  const counts={initialImages:initialReads,imagesAfterScrolling:imageReads.length,lists:lists.length,projection:core.requests.filter(r=>new URL(r.url,'http://fixture').pathname.endsWith('/workspace')).length}
+  console.info(`grid ${width}px request counts`,counts)
+  await info.attach('request-counts',{body:JSON.stringify(counts),contentType:'application/json'})
+  await page.screenshot({path:info.outputPath(`grid-${width}.png`)})
+})
+
+test('scrolling a grid thumbnail offscreen cancels its upstream read and permits a later reread',async({page})=>{
+  slowThumbnail=true
+  await page.setViewportSize({width:390,height:760})
+  for(let i=0;i<44;i++)core.put(`grid-${String(i).padStart(2,'0')}.png`,core.files.get('sample.png')!)
+  await page.goto(app.url+'/#/workspace?view=grid&filter=grid-')
+  const panel=page.locator('#enterprise-workspace-panel'),first=panel.locator('.ew-file[title="grid-00.png"]'),last=panel.locator('.ew-file[title="grid-43.png"]')
+  await expect.poll(()=>reads('grid-00.png')).toBe(1)
+  await last.scrollIntoViewIfNeeded()
+  await expect.poll(()=>thumbnailClosed).toBe(true)
+  await expect(last.locator('img')).toBeVisible()
+  slowThumbnail=false;finishThumbnail?.()
+  await first.scrollIntoViewIfNeeded()
+  await expect(first.locator('img')).toBeVisible()
+  expect(reads('grid-00.png')).toBe(2)
+  await expect(panel.getByRole('alert')).toHaveCount(0)
+})
+
+for(const failure of ['permission','version'])test(`a ${failure} failure leaves a file icon and refresh recovers without rereading other thumbnails`,async({page})=>{
+  for(let i=0;i<2;i++)core.put(`grid-0${i}.png`,core.files.get('sample.png')!)
+  let failed=true,attempts=0
+  await page.route('**/api/enterprise-workspace/content?**',async route=>{
+    if(route.request().method()==='GET'&&new URL(route.request().url()).searchParams.get('path')==='grid-00.png'){
+      attempts++
+      if(failed){
+        if(failure==='permission'){await route.fulfill({status:403,json:{code:'forbidden'}});return}
+        core.put('grid-00.png',Buffer.concat([core.files.get('grid-00.png')!,Buffer.from('changed-version')]))
+      }
+    }
+    await route.continue()
+  })
+  const rejected=page.waitForResponse(response=>response.request().method()==='GET'&&new URL(response.url()).searchParams.get('path')==='grid-00.png')
+  await page.goto(app.url+'/#/workspace?view=grid&filter=grid-')
+  expect((await rejected).status()).toBe(failure==='permission'?403:412)
+  const panel=page.locator('#enterprise-workspace-panel'),first=panel.locator('.ew-file[title="grid-00.png"]'),second=panel.locator('.ew-file[title="grid-01.png"]')
+  await expect(second.locator('img')).toBeVisible()
+  expect(attempts).toBe(1)
+  await expect(first.locator('img')).toHaveCount(0)
+  const otherReads=reads('grid-01.png')
+  failed=false
+  await panel.getByRole('button',{name:'刷新',exact:true}).click()
+  await expect(first.locator('img')).toBeVisible()
+  expect(attempts).toBe(2)
+  expect(reads('grid-01.png')).toBe(otherReads)
+})
+
+test('an account change cancels an old thumbnail and releases the previous account cache',async({page})=>{
+  slowThumbnail=true
+  for(let i=0;i<2;i++)core.put(`grid-0${i}.png`,core.files.get('sample.png')!)
+  await page.goto(app.url+'/#/workspace?view=grid&filter=grid-')
+  const panel=page.locator('#enterprise-workspace-panel'),first=panel.locator('.ew-file[title="grid-00.png"]'),second=panel.locator('.ew-file[title="grid-01.png"]')
+  await expect.poll(()=>reads('grid-00.png')).toBe(1)
+  await expect(second.locator('img')).toBeVisible()
+  const oldURL=await second.locator('img').getAttribute('src')
+  const binding={...app.request({op:'binding'}),userId:'other-user'}
+  app.request({op:'setBinding',binding})
+  slowThumbnail=false
+  await panel.getByRole('button',{name:'刷新',exact:true}).click()
+  await expect.poll(()=>thumbnailClosed).toBe(true)
+  finishThumbnail?.()
+  await expect(first.locator('img')).toBeVisible()
+  await expect(second.locator('img')).not.toHaveAttribute('src',oldURL!)
+  expect(reads('grid-00.png')).toBe(2)
+  expect(reads('grid-01.png')).toBe(2)
+})
 
 for(const fail of [false,true])test(`closing the last tab finishes before a ${fail?'failed':'slow'} directory refresh`,async({page})=>{
   await page.goto(app.url+'/#/workspace?file=hello.txt&view=grid')

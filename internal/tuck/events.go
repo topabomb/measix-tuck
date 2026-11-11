@@ -438,6 +438,21 @@ func (n *normalizer) handle(root, event M, observed *string) error {
 		return m.stateLocked(task, patch)
 	case "error":
 		return m.stateLocked(task, M{"lastFailure": M{"code": firstString(event["code"], "runtime_error"), "message": firstString(event["error"], event["message"], "Agent execution failed")}})
+	case "warning":
+		if sessionID := S(event["session_id"]); sessionID != "" {
+			if sessionID != task["nativeSessionId"] {
+				break
+			}
+		} else if S(event["agent_name"]) == "" || event["agent_name"] != task["agent"] {
+			break
+		}
+		secret := ""
+		if models, ok := m.options.Models.(*Models); ok {
+			secret = models.Secret
+		}
+		if message := diagnosticDetail(S(event["message"]), secret); message != "" && message != task["lastTurnWarning"] {
+			return m.stateLocked(task, M{"lastTurnWarning": message})
+		}
 	case "stream_stopped":
 		FinishTurnTiming(task, true, NowMS())
 		reason := "interrupted"
@@ -450,8 +465,13 @@ func (n *normalizer) handle(root, event M, observed *string) error {
 		if reason == "completed" && task["lastFailure"] != nil {
 			reason = "error"
 		}
-		if reason == "completed" && S(event["finish_reason"]) == "length" {
-			reason = "max-tokens"
+		if reason == "completed" {
+			switch S(event["finish_reason"]) {
+			case "length":
+				reason = "max-tokens"
+			case "refusal":
+				reason = "refused"
+			}
 		}
 		if err := n.endCompaction(task, reason); err != nil {
 			return err
@@ -848,7 +868,7 @@ func (n *normalizer) delegation(root M) error {
 			status = "waiting"
 		default:
 			switch S(child["lastTurnReason"]) {
-			case "error", "max-tokens":
+			case "error", "max-tokens", "refused":
 				status = "failed"
 			case "interrupted":
 				status = "interrupted"
@@ -861,6 +881,8 @@ func (n *normalizer) delegation(root M) error {
 			run["summary"] = O(child["lastFailure"])["message"]
 		} else if S(child["lastTurnReason"]) == "max-tokens" {
 			run["summary"] = "已达输出上限"
+		} else if S(child["lastTurnReason"]) == "refused" {
+			run["summary"] = "模型拒答"
 		}
 		runs = append(runs, run)
 	}

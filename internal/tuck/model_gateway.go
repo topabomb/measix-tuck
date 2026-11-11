@@ -173,14 +173,7 @@ func ModelRequestError(status int, payload M, effort, name string, secrets []str
 	if code == "" {
 		code = "model_request_failed"
 	}
-	detail := cleanSecret(description, secrets...)
-	detail = regexp.MustCompile(`(?i)Bearer\s+[^\s"'<>]+`).ReplaceAllString(detail, "Bearer [redacted]")
-	detail = regexp.MustCompile(`(?i)data:[^\s"'<>]+`).ReplaceAllString(detail, "[data omitted]")
-	detail = strings.TrimSpace(regexp.MustCompile(`[\x00-\x1f\x7f]+`).ReplaceAllString(detail, " "))
-	runes := []rune(detail)
-	if len(runes) > 800 {
-		detail = string(runes[:800])
-	}
+	detail := diagnosticDetail(description, secrets...)
 	message := fmt.Sprintf("模型调用失败（HTTP %d，%s）", status, code)
 	if detail != "" {
 		message += "：" + detail
@@ -189,4 +182,16 @@ func ModelRequestError(status int, payload M, effort, name string, secrets []str
 		message += "；服务端报告请求未转发至上游，请检查请求合同或资源配置"
 	}
 	return message, code
+}
+
+func diagnosticDetail(text string, secrets ...string) string {
+	detail := cleanSecret(text, secrets...)
+	detail = regexp.MustCompile(`(?i)Bearer\s+[^\s"'<>]+`).ReplaceAllString(detail, "Bearer [redacted]")
+	detail = regexp.MustCompile(`(?i)data:[^\s"'<>]+`).ReplaceAllString(detail, "[data omitted]")
+	detail = strings.TrimSpace(regexp.MustCompile(`[\x00-\x1f\x7f]+`).ReplaceAllString(detail, " "))
+	runes := []rune(detail)
+	if len(runes) > 800 {
+		return string(runes[:800])
+	}
+	return detail
 }

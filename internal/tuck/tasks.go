@@ -741,9 +741,6 @@ func (m *Manager) drain(ctx context.Context, id string, run *taskRun) {
 			}
 			m.mu.Lock()
 			if task := m.tasks[id]; task != nil {
-				if len(A(task["queue"])) > 0 {
-					task["queuePaused"] = true
-				}
 				code := Code(runErr)
 				if code == "" {
 					code = "execution_error"
@@ -841,6 +838,9 @@ func (m *Manager) drain(ctx context.Context, id string, run *taskRun) {
 		task["nativeStopped"] = nil
 		task["lastFailure"] = nil
 		task["lastTurnReason"] = nil
+		if S(O(entry["source"])["kind"]) != "delivery_required" {
+			delete(task, "lastTurnWarning")
+		}
 		task["status"] = "working"
 		task["activity"] = M{"phase": "preparing", "detail": "", "startedAt": NowMS()}
 		StartTurnTiming(task, NowMS())
@@ -934,12 +934,6 @@ func (m *Manager) drain(ctx context.Context, id string, run *taskRun) {
 			}
 		}
 		runErr = m.settleLocked(task, reason, OOrNil(task["lastFailure"]))
-		if reason != "completed" && len(A(task["queue"])) > 0 {
-			task["queuePaused"] = true
-			if runErr == nil {
-				runErr = m.publishLocked(task, M{"type": "state", "task": task}, nil)
-			}
-		}
 		m.mu.Unlock()
 		if runErr != nil || reason != "completed" {
 			return
@@ -1393,7 +1387,11 @@ func (m *Manager) settleLocked(task M, reason string, failure M) error {
 	if len(failure) > 0 {
 		lastFailure = failure
 	}
-	return m.stateLocked(task, M{"status": "idle", "lastTurnReason": reason, "lastFailure": lastFailure, "pendingInteraction": nil, "nativeInteraction": nil, "activeAssistantIndex": nil, "activity": nil})
+	patch := M{"status": "idle", "lastTurnReason": reason, "lastFailure": lastFailure, "pendingInteraction": nil, "nativeInteraction": nil, "activeAssistantIndex": nil, "activity": nil}
+	if reason != "completed" && len(A(task["queue"])) > 0 {
+		patch["queuePaused"] = true
+	}
+	return m.stateLocked(task, patch)
 }
 func (m *Manager) settleChildrenLocked(root M, failure M) error {
 	changed := false

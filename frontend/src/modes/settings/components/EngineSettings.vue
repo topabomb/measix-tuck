@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import {ref,onMounted,onBeforeUnmount} from 'vue'
 import {authFetch} from '../../../app/auth'
-type Engine={managed:boolean;currentVersion:string|null;state:string;busy:string|null;latest:{version:string;publishedAt:string;releaseUrl:string}|null;downloadedVersion:string|null}
+type Engine={managed:boolean;currentVersion:string|null;minimumVersion:string;state:string;busy:string|null;latest:{version:string;publishedAt:string;releaseUrl:string}|null;downloadedVersion:string|null}
 const emit=defineEmits<{changed:[]}>()
 const engine=ref<Engine>(),busy=ref(''),error=ref(''),message=ref(''),confirm=ref(false)
 let active=true
@@ -32,7 +32,7 @@ onMounted(load)
 <template>
  <section class="engine-settings" aria-label="Docker Agent 引擎">
   <div class="engine-summary"><div><h3>Docker Agent</h3><p>官方发布程序</p></div><strong>{{engine?.currentVersion||'版本未知'}}</strong></div>
-  <p v-if="engine" class="hint">{{engine.state==='ready'?'运行中':engine.state==='starting'?'正在启动':'服务未就绪'}}</p>
+  <p v-if="engine" class="hint">{{engine.state==='ready'?'运行中':engine.state==='starting'?'正在启动':'服务未就绪'}} · 最低支持 {{engine.minimumVersion}}</p>
   <p v-if="engine&&!engine.managed" class="hint">此引擎由外部管理，请在宿主更新。</p>
   <div v-if="engine?.latest" class="engine-release"><span>最新稳定版 <strong>{{engine.latest.version}}</strong></span><span>{{new Date(engine.latest.publishedAt).toLocaleDateString()}}</span><a :href="engine.latest.releaseUrl" target="_blank" rel="noopener noreferrer">发布说明 ↗</a></div>
   <p v-if="engine?.downloadedVersion" class="hint">{{engine.downloadedVersion}} 已下载，尚未应用。</p>

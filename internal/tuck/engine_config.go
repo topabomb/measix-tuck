@@ -1,15 +1,46 @@
 package tuck
 
 import (
-	"gopkg.in/yaml.v3"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
+
+	"gopkg.in/yaml.v3"
 )
+
+const worktreeGuardCommand = "engine-worktree-guard"
 
 func (m *Models) WriteConfig() (string, error) {
 	c := m.Config()
 	models, providers, agents := M{}, M{}, Clone(O(c["agents"]))
+	var worktreeGuard M
+	if O(c["engine"])["mode"] == "managed" {
+		executable, err := os.Executable()
+		if err != nil {
+			return "", err
+		}
+		command := `"$TUCK_WORKTREE_GUARD" ` + worktreeGuardCommand
+		if runtime.GOOS == "windows" {
+			command = `%TUCK_WORKTREE_GUARD% ` + worktreeGuardCommand
+			// cmd.exe expands the path after stripping its /C argument quotes.
+			guardPath := `"` + executable + `"`
+			for _, shell := range []string{"pwsh.exe", "powershell.exe"} {
+				if _, err := exec.LookPath(shell); err == nil {
+					command = `& $env:TUCK_WORKTREE_GUARD ` + worktreeGuardCommand
+					guardPath = executable
+					break
+				}
+			}
+			executable = guardPath
+		}
+		worktreeGuard = M{"matcher": "run_background_agent", "hooks": []M{{"type": "command", "command": command, "env": M{"TUCK_WORKTREE_GUARD": executable}}}}
+	}
 	for _, protocol := range []string{"tuck-chat", "tuck-responses"} {
 		api := "openai_chatcompletions"
 		if protocol == "tuck-responses" {
@@ -24,6 +55,9 @@ func (m *Models) WriteConfig() (string, error) {
 		for _, effort := range ModelReasoningOptions(model) {
 			alias, key := S(model["nativeModel"]), S(model["key"])
 			opts := M{"context_size": model["contextWindow"]}
+			if model["provider"] == "tuck-chat" {
+				opts["replay_reasoning"] = false
+			}
 			if effort != "default" {
 				alias += "_" + effort
 				key += "--reasoning-" + effort
@@ -38,6 +72,27 @@ func (m *Models) WriteConfig() (string, error) {
 	}
 	for name, av := range agents {
 		a := O(av)
+		if worktreeGuard != nil {
+			hooks, ok := a["hooks"].(M)
+			if !ok && a["hooks"] != nil {
+				return "", fmt.Errorf("invalid hooks for agent %s", name)
+			}
+			if hooks == nil {
+				hooks = M{}
+			}
+			var guards []any
+			switch existing := hooks["tool_guard"].(type) {
+			case nil:
+			case M:
+				guards = []any{existing}
+			case []any:
+				guards = existing
+			default:
+				return "", fmt.Errorf("invalid tool_guard for agent %s", name)
+			}
+			hooks["tool_guard"] = append(guards, worktreeGuard)
+			a["hooks"] = hooks
+		}
 		defaultID := S(a["modelId"])
 		if defaultID == "" {
 			defaultID = S(m.Summary()["defaultModelId"])
@@ -76,6 +131,25 @@ func (m *Models) WriteConfig() (string, error) {
 	}
 	return path, nil
 }
+
+func guardBackgroundWorktree(input io.Reader, output io.Writer) error {
+	event, err := ReadJSON(input, 4<<20)
+	if err != nil {
+		return err
+	}
+	args, ok := event["tool_input"].(M)
+	if !ok || args == nil {
+		return fmt.Errorf("missing background tool input")
+	}
+	for key, value := range args {
+		if strings.EqualFold(key, "worktree") && value != false {
+			// A null can hide an earlier duplicate true in the original tool JSON.
+			return json.NewEncoder(output).Encode(M{"decision": "block", "reason": backgroundWorktreeUnavailable})
+		}
+	}
+	return nil
+}
+
 func tuckToolset(baseURL, agent string, readonly bool) M {
 	endpoint := baseURL + tuckToolsPath + "?agent=" + url.QueryEscape(agent)
 	// Omitting the public MCP name keeps our tool names unprefixed. Endpoints

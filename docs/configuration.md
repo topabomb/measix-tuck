@@ -9,7 +9,7 @@
 | schemaVersion | 当前 4；正式 Go v1/v2/v3 须显式离线迁移，拒绝未知格式与重复 JSON 键 |
 | server | listenHost、port、frontendDir；默认 127.0.0.1:8090、frontend/dist |
 | storage | dataDir、workspaceRoot；默认 data、data/workspaces |
-| engine | mode=managed/external、version、binary、url、desktopProxy；默认官方 v1.152.0、回环 8091 |
+| engine | mode=managed/external、version、binary、url、desktopProxy；默认版本来自[官方发行清单](../internal/tuck/contract/engine-release.json)，回环 8091 |
 | security | auth、settingsProtection、必填的 32 字节 credentialKey；不自动替换已有密钥 |
 | providers | 自定义供应商 URL、协议、apiKey、模型目录和能力 |
 | imageGenerators / defaultImageGenerator | 可选生图资源及默认来源/ID；复用 providers 连接，独立声明生图协议 |
@@ -25,6 +25,8 @@
 ## 模型、助手与工作目录
 
 模型 ID、助手身份与目录选择明确保存，不根据名称猜来源。原生 max_iterations=0 保留官方无限语义，max_consecutive_tool_calls 等字段必须合法；新增原生字段先核对兼容版本。原生工具 allow_list:[] 仍采用官方“不限定目录”语义；shell 不继承文件工具路径限制。readonly 与工具名称选择同时生效。
+
+Tuck 为 Chat Completions 投影 `provider_opts.replay_reasoning: false`。同一个会话可以切换模型与供应商，关闭回放可避免把上一模型的 `reasoning_content` 带到另一个供应商。
 
 工作目录有 auto / specified / none。auto 用工作根目录生成；specified 必须是存在、可访问的绝对目录，与交付存储隔离；none 不设置原生任务目录，也不承诺本地附件/交付文件能力。助手配置是默认值，创建时明确选择优先；已有对话和 fork 保留实际目录事实。
 
@@ -184,7 +186,7 @@ server、storage、登录 auth、credentialKey，以及引擎 mode/version/binar
 | Tuck 工作台 SSE | 无固定总寿命；每 15 秒空闲 ping，浏览器断线后等待 1 秒重连并从事件游标恢复 | 当前浏览器订阅；登录失效、退出或服务关闭撤销该订阅 |
 | 动态工具目录同步 | 开轮等待一次目录确认、取消或最多 1 秒 | 只结束等待，不把超时推断为已同步；实际调用仍核对当前工具许可 |
 
-原生工具自身的期限仍由 Docker Agent v1.152.0 的公开配置与工具参数控制。`lifecycle.startup_timeout` 约束 MCP 初始连接和初始化，`lifecycle.call_timeout` 约束单次原生工具调用，未配置的调用期限保留官方无期限语义；Tuck 不另加一层调用期限或重试。shell 的默认 30 秒和后台任务等待的默认 300 秒/上限 3600 秒见[工具参考](tools-reference.md)，等待超时不会停止后台任务。第三方服务的执行期限、平台准入期限及 HTTP 代理期限不由 Tuck 猜测或覆盖。
+原生工具自身的期限由 Docker Agent 的公开配置与工具参数控制。`lifecycle.startup_timeout` 约束 MCP 初始连接和初始化，`lifecycle.call_timeout` 约束单次原生工具调用，未配置的调用期限保留官方无期限语义；Tuck 不另加一层调用期限或重试。shell 的默认 30 秒和后台任务等待的默认 300 秒/上限 3600 秒见[工具参考](tools-reference.md)，等待超时不会停止后台任务。第三方服务的执行期限、平台准入期限及 HTTP 代理期限不由 Tuck 猜测或覆盖。
 
 ### 探测、维护与展示等待
 

@@ -22,6 +22,7 @@ export interface DockerTask extends ConversationDescriptor {
   lifecycle?: { purpose: string; keep: boolean; lastActivityAt: number; archivedAt: number; lastDeleteError?: string }
   managedWorkspaceId?: string
   turnId?: string
+  lastTurnWarning?: string
   activity?: { phase: 'preparing' | 'processing' | 'reasoning' | 'responding' | 'tool' | 'compacting' | 'finishing'; detail?: string; startedAt: number; afterCompaction?: boolean } | null
   turnTiming?: { turnId: string; startedAt: number; observedAt: number; endedAt?: number; waitingMs: number; waitingSince?: number; incomplete?: boolean }
   usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens: number }

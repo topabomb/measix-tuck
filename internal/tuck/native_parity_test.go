@@ -420,11 +420,17 @@ func TestParityNativeBackgroundBeforeParentEnds(t *testing.T) {
 	f, app := parityApp(t)
 	entered, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
+	var worktreeResult atomic.Value
 	nativeScript(f, func(w http.ResponseWriter, r *http.Request, b M) {
 		_, results := recentNative(b)
 		if Contains(nativeNames(b), "run_background_agent") {
 			if len(results) == 0 {
-				nativeDelta(w, nativeCall("run_background_agent", M{"agent": "worker", "task": "BACKGROUND_CHILD"}, ""))
+				nativeDelta(w, nativeCall("run_background_agent", M{"agent": "worker", "task": "BACKGROUND_CHILD", "Worktree": true}, ""))
+				return
+			}
+			if len(results) == 1 {
+				worktreeResult.Store(S(results[0]["content"]))
+				nativeDelta(w, nativeCall("run_background_agent", M{"agent": "worker", "task": "BACKGROUND_CHILD", "worktree": false}, ""))
 				return
 			}
 			once.Do(func() { close(entered) })
@@ -452,6 +458,9 @@ func TestParityNativeBackgroundBeforeParentEnds(t *testing.T) {
 	}
 	close(release)
 	waitIdle(t, app.Manager, id)
+	if result := S(worktreeResult.Load()); !strings.Contains(result, backgroundWorktreeUnavailable) {
+		t.Fatal("native tool guard did not reject isolated worktree execution", result)
+	}
 	for _, v := range app.Manager.List() {
 		if v["parentTaskId"] == id {
 			t.Fatal("private background session identity inferred", v)
@@ -819,6 +828,71 @@ func TestParityWorkspaceSaveValidation(t *testing.T) {
 	})
 }
 
+func TestParityNativeWarningAndRefusal(t *testing.T) {
+	f, app := parityApp(t)
+	saveApp(t, app, func(c M) { O(c["workbench"])["requireDelivery"] = true })
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	nativeScript(f, func(w http.ResponseWriter, r *http.Request, b M) {
+		prompt, results := recentNative(b)
+		switch prompt {
+		case "refused request":
+			entered <- struct{}{}
+			select {
+			case <-release:
+			case <-r.Context().Done():
+				return
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "data: {\"id\":\"fixture\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"content_filter\"}]}\n\ndata: [DONE]\n\n")
+		case "deliver without a final reply":
+			if len(results) == 0 {
+				nativeDelta(w, nativeCall("deliver_result", M{"summary": "stored result"}, ""))
+			} else {
+				nativeDelta(w, M{})
+			}
+		default:
+			nativeDelta(w, M{"content": "finished"})
+		}
+	})
+	refused := S(newParityTask(t, app, nil)["id"])
+	submitTask(t, app.Manager, refused, "refused request")
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("model call did not start")
+	}
+	submitTask(t, app.Manager, refused, "queued request")
+	close(release)
+	done := waitIdle(t, app.Manager, refused)
+	if done["lastTurnReason"] != "refused" || I(done["turnCount"]) != 1 ||
+		!B(done["queuePaused"]) || len(A(done["queue"])) != 1 || done["latestDelivery"] != nil {
+		t.Fatal(done)
+	}
+	events, err := app.Store.TaskEvents(refused, []string{"state"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		state := O(event["task"])
+		if state["lastTurnReason"] == "refused" && TaskIsActive(state) {
+			t.Fatal("refusal was published with an active queue", state)
+		}
+	}
+
+	warned := S(newParityTask(t, app, nil)["id"])
+	done = runAppTask(t, app, warned, "deliver without a final reply")
+	if !strings.Contains(S(done["lastTurnWarning"]), "without a final reply") ||
+		done["lastFailure"] != nil || I(done["turnCount"]) != 1 ||
+		O(done["latestDelivery"])["summary"] != "stored result" {
+		t.Fatal(done)
+	}
+	done = runAppTask(t, app, warned, "next request")
+	if done["lastTurnWarning"] != nil || I(done["turnCount"]) != 3 {
+		t.Fatal(done)
+	}
+}
+
 func TestParityNativeDeliveryContinuation(t *testing.T) {
 	f, app := parityApp(t)
 	saveApp(t, app, func(c M) { O(c["workbench"])["requireDelivery"] = true })
@@ -1082,7 +1156,9 @@ func TestParityNativeDeliveryNullableAndLimit(t *testing.T) {
 		t.Fatal(outputs)
 	}
 	files := O(O(schema["properties"])["files"])
-	if I(files["maxItems"]) != 10 || !strings.Contains(string(JSON(files["type"])), "null") {
+	branches := A(files["anyOf"])
+	if len(branches) != 2 || S(O(branches[0])["type"]) != "array" ||
+		I(O(branches[0])["maxItems"]) != 10 || S(O(branches[1])["type"]) != "null" {
 		t.Fatal(schema)
 	}
 	if I(O(done["latestDelivery"])["version"]) != 2 {

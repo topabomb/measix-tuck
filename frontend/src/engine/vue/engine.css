@@ -95,8 +95,10 @@
   & .run-status i { width:6px; height:6px; border-radius:50%; background:var(--ce-theme-muted,#64748b); }
   & .run-status.indicator-working { color:var(--ce-theme-success,#8edba1); }
   & .run-status.indicator-working i { background:var(--ce-theme-muted,#3fb950); animation:conversationEnginePulse 1.8s ease-in-out infinite; }
-  & .run-status.indicator-blocked { color:var(--ce-theme-warning,#e3c66b); }
-  & .run-status.indicator-blocked i { background:var(--ce-theme-muted,#d29922); }
+  & .run-status.indicator-blocked,
+  & .run-status.indicator-refused { color:var(--ce-theme-warning,#e3c66b); }
+  & .run-status.indicator-blocked i,
+  & .run-status.indicator-refused i { background:var(--ce-theme-muted,#d29922); }
   & .run-status.indicator-failed { color:var(--ce-theme-danger,#ff9b94); }
   & .run-status.indicator-failed i,
   & .run-status.indicator-interrupted i { background:var(--ce-theme-danger,#f85149); }

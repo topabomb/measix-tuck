@@ -42,6 +42,8 @@ const (
 	textRequest           modelTextID = "tuck.inspect_attachments.param.request"
 )
 
+const backgroundWorktreeUnavailable = "Background agents in Tuck use the current task workspace. Omit worktree or set it to false."
+
 var modelTexts = map[modelTextID]string{
 	"tuck.agent.root.description":       "Tuck workspace agent",
 	"tuck.agent.worker.description":     "Task specialist",
@@ -80,9 +82,9 @@ var modelTexts = map[modelTextID]string{
 	textGeneratePlatform:                " This platform image resource does not accept reference images; omit reference_images.",
 	textPrompt:                          "Describe the desired image. With references, explain each image's role in order and what to preserve or change.",
 	textCount:                           "Number of images to generate, from 1 to 4; default 1, subject to resource limits.",
-	textReferences:                      "Optional 0–4 PNG/JPEG/WebP reference images. Use file paths relative to the task working directory; omit unless needed.",
+	textReferences:                      "Optional 0–4 PNG/JPEG/WebP reference images. Use distinct file paths relative to the task working directory; omit unless needed.",
 	textInspect:                         "Use when you need to understand attachment content, extract information, or compare differences. Reads files from the task working directory or the connected Runcove workspace and returns text. Supports images; PDF and other attachment types are not yet supported. Provide relevant background and specific questions.",
-	textAttachments:                     "1–4 attachments to inspect, in order. Supports PNG/JPEG/GIF/WebP images.",
+	textAttachments:                     "1–4 distinct attachments to inspect, in order. Supports PNG/JPEG/GIF/WebP images.",
 	textAttachmentSource:                "Attachment source: local for the task working directory, or runcove for the connected Runcove workspace. Default local.",
 	textAttachmentPath:                  "For local files, a relative or absolute path inside the task working directory. For Runcove files, a path relative to the workspace root, without /workspace/.",
 	textRequest:                         "What to identify, extract, compare, or verify. Refer to attachments by array order and include relevant background and the desired answer format when needed.",

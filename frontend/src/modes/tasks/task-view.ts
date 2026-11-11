@@ -5,7 +5,7 @@ export { isChannelTask, taskName, taskIsActive, taskHasEnded, channelLimit }
 
 export const taskPath = (id: string) => `/tasks/${encodeURIComponent(id)}`
 export const tasksAssistantPath = (agent: string) => `/tasks/assistants/${encodeURIComponent(agent)}`
-export const taskNeedsConversation = (task: DockerTask) => !taskIsActive(task) && (task.lastTurnReason === 'error' || !!task.queuePaused && task.queue.length > 0)
+export const taskNeedsConversation = (task: DockerTask) => !taskIsActive(task) && (task.lastTurnReason === 'error' || task.lastTurnReason === 'refused' || !!task.queuePaused && task.queue.length > 0)
 export function taskListQuery(query: LocationQuery) {
   const period = query.period === 'all' || query.period === '7d' ? query.period : '24h'
   const value = typeof query.page === 'string' && /^\d+$/.test(query.page) ? Number(query.page) : 1
@@ -50,6 +50,7 @@ export function taskState(task: DockerTask): {label: string; icon: string} {
   if (pending) return {label:pending.kind === 'question' ? '等待回答' : pending.purpose === 'iterations' ? '等待继续' : '等待确认',icon:'waiting'}
   if (task.status === 'waiting') return {label:'等待处理',icon:'waiting'}
   if (taskIsActive(task)) return {label:'执行中',icon:'working'}
+  if (task.lastTurnReason === 'refused') return {label:'模型拒答',icon:'refused'}
   if (task.queuePaused && task.queue.length) return {label:'队列已暂停',icon:'waiting'}
   if (task.lastTurnReason === 'completed') return {label:'已完成',icon:'completed'}
   if (task.lastTurnReason === 'error') return {label:'失败',icon:'failed'}

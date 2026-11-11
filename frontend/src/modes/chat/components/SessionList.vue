@@ -13,7 +13,7 @@ const items = computed(() => [...props.sessions])
 const list = ref<VListHandle | null>(null), host = ref<HTMLElement | null>(null)
 const indicator = deriveSessionIndicator
 const taskIcon = modes.find(mode => mode.id === 'tasks')!.icon
-const detail = (task: WorkSessionDescriptor) => task.queuedPrompts ? `${indicatorLabel(indicator(task))} · ${task.queuedPrompts} 条排队` : ['blocked','failed','interrupted','max-tokens'].includes(indicator(task)) ? indicatorLabel(indicator(task)) : ''
+const detail = (task: WorkSessionDescriptor) => task.queuedPrompts ? `${indicatorLabel(indicator(task))} · ${task.queuedPrompts} 条排队` : ['blocked','failed','interrupted','max-tokens','refused'].includes(indicator(task)) ? indicatorLabel(indicator(task)) : ''
 watch(() => props.query, () => list.value?.scrollToIndex(0))
 watch(() => props.activeId, async id => {
   await nextTick()

@@ -11,6 +11,7 @@ export type SessionIndicator =
   | 'failed'
   | 'interrupted'
   | 'max-tokens'
+  | 'refused'
   | 'completed'
   | 'idle'
 
@@ -22,6 +23,7 @@ export function deriveSessionIndicator(
   if (session.lastTurnReason === 'error') return 'failed'
   if (session.lastTurnReason === 'aborted' || session.lastTurnReason === 'interrupted') return 'interrupted'
   if (session.lastTurnReason === 'max-tokens') return 'max-tokens'
+  if (session.lastTurnReason === 'refused') return 'refused'
   if (session.lastTurnReason === 'completed') return 'completed'
   return 'idle'
 }
@@ -33,6 +35,7 @@ export function sessionIndicatorLabel(indicator: SessionIndicator): string {
     case 'failed': return 'Failed'
     case 'interrupted': return 'Interrupted'
     case 'max-tokens': return 'Max tokens'
+    case 'refused': return 'Model refused'
     case 'completed': return 'Completed'
     default: return 'Idle'
   }
@@ -45,6 +48,7 @@ export function sessionIndicatorGlyph(indicator: SessionIndicator): string {
     case 'failed': return '×'
     case 'interrupted': return '■'
     case 'max-tokens': return '↑'
+    case 'refused': return '!'
     case 'completed': return '✓'
     default: return '○'
   }

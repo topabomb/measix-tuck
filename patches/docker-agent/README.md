@@ -33,7 +33,7 @@
 
 ## 当前状态与撤除记录
 
-当前无项目维护的 Docker Agent 补丁，默认使用官方 v1.152.0。
+当前无项目维护的 Docker Agent 补丁。默认版本见[官方发行清单](../../internal/tuck/contract/engine-release.json)。
 
 2026-10-22，工具图片排序补丁 `v1.150.0+tuck-tool-image-order.1` 由官方 [v1.152.0](https://github.com/docker/docker-agent/releases/tag/v1.152.0)（`e7f1ec394dfa47aea0b066092a35c72564b192cb`）替代，项目补丁文件已撤除。我们提交的 [#4661](https://github.com/docker/docker-agent/pull/4661) 已合并并进入该正式版本，完整解决 [#4608](https://github.com/docker/docker-agent/issues/4608) 的工具批次排序与 [#4629](https://github.com/docker/docker-agent/issues/4629) 的图片文本化问题，并覆盖显式缓存分支。
 

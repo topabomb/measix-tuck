@@ -9,6 +9,7 @@ export type TurnEndReasonKind =
   | 'aborted'
   | 'error'
   | 'max-tokens'
+  | 'refused'
   | 'interrupted'
 
 export interface LlmFailure {

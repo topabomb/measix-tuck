@@ -39,6 +39,8 @@ func Run(args []string, input io.Reader, output, diagnostics io.Writer) error {
 		args = args[1:]
 	}
 	switch command {
+	case worktreeGuardCommand:
+		return guardBackgroundWorktree(input, output)
 	case "init":
 		container := len(args) == 1 && args[0] == "--container"
 		if len(args) > 0 && !container {
@@ -115,8 +117,9 @@ func Run(args []string, input io.Reader, output, diagnostics io.Writer) error {
 			return fmt.Errorf("usage: tuck serve [--config path]")
 		}
 		engine := O(config.Applied()["engine"])
-		if executable, err := os.Executable(); err == nil && S(engine["mode"]) == "managed" && S(engine["binary"]) == "" {
-			bundle := filepath.Join(filepath.Dir(executable), "engine", S(engine["version"]), ExecutableName())
+		version := S(engine["version"])
+		if executable, err := os.Executable(); err == nil && S(engine["mode"]) == "managed" && S(engine["binary"]) == "" && requireEngineVersion(version) == nil {
+			bundle := filepath.Join(filepath.Dir(executable), "engine", version, ExecutableName())
 			if _, err = os.Stat(bundle); err == nil {
 				if e = InstallEngine(ctx, config); e != nil {
 					return e

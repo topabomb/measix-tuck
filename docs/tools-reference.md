@@ -92,7 +92,7 @@ Tuck 自实现工具统一不加来源或分组前缀：`list_conversations`、`
 | 工具 | 参数 | 行为和结果 |
 | --- | --- | --- |
 | `transfer_task` | `agent: string`，`task: string`，`expected_output: string` | 同步委派给配置中的子代理，等待并返回其结果；固定版本 schema 要求填写 `expected_output` |
-| `run_background_agent` | `agent: string`，`task: string`，`expected_output?: string` | 启动后台子代理，立即返回后台任务 ID |
+| `run_background_agent` | `agent: string`，`task: string`，`expected_output?: string` | 在任务工作目录启动后台子代理，立即返回后台任务 ID。工作区约束见[生命周期边界](architecture.md#生命周期边界) |
 | `list_background_agents` | 无 | 返回后台任务及最近报告状态 |
 | `view_background_agent` | `task_id: string` | 查看该后台任务的状态与已有输出 |
 | `wait_background_agents` | `task_ids: string[]`，`timeout?: integer` | 等待 1–100 个不同后台任务 ID，返回任务结果与 `all_done`；输出受原生工具限制 |

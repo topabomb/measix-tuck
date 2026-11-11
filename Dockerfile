@@ -22,14 +22,31 @@ FROM debian:bookworm-slim AS engine
 ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl python3 && rm -rf /var/lib/apt/lists/*
 COPY internal/tuck/contract/engine-release.json /manifest.json
-RUN python3 -c 'import json,os,subprocess; m=json.load(open("/manifest.json")); a=m["targets"]["linux-"+{"amd64":"x64","arm64":"arm64"}[os.environ.get("TARGETARCH") or "amd64"]];subprocess.run(["curl","-fL","--retry","0",a["url"],"-o","/docker-agent"],check=True);import hashlib;assert hashlib.file_digest(open("/docker-agent","rb"),"sha256").hexdigest()==a["sha256"]' && chmod 755 /docker-agent
+RUN python3 - <<'PY'
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+
+manifest = json.loads(Path("/manifest.json").read_text())
+arch = {"amd64": "x64", "arm64": "arm64"}[os.environ.get("TARGETARCH") or "amd64"]
+asset = manifest["targets"]["linux-" + arch]
+binary = Path("/engine") / manifest["version"] / "docker-agent"
+binary.parent.mkdir(parents=True)
+subprocess.run(["curl", "-fL", "--retry", "0", asset["url"], "-o", str(binary)], check=True)
+with binary.open("rb") as source:
+    if hashlib.file_digest(source, "sha256").hexdigest() != asset["sha256"]:
+        raise SystemExit("bundled official artifact SHA256 mismatch")
+binary.chmod(0o755)
+PY
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git ripgrep tini && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/tuck
 COPY --from=backend /tuck ./tuck
 COPY --from=frontend /build/dist ./frontend/dist/
-COPY --from=engine /docker-agent ./engine/v1.152.0/docker-agent
+COPY --from=engine /engine/ ./engine/
 RUN mkdir -p /data /config && chown 1000:1000 /data /config
 USER 1000:1000
 ENV HOME=/data

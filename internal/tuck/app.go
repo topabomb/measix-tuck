@@ -172,6 +172,9 @@ func (a *App) Start(ctx context.Context) error {
 	if e := a.Engine.Start(ctx); e != nil {
 		return e
 	}
+	return a.initializeEngine(ctx)
+}
+func (a *App) initializeEngine(ctx context.Context) error {
 	a.Models.MCP.Prepare(ctx, false)
 	if e := a.Manager.RestoreChildStatistics(ctx); e != nil {
 		return e

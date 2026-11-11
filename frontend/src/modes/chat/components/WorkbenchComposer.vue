@@ -65,7 +65,7 @@ const unsubscribeDraft = props.runtime.subscribeState(() => {
 })
 onBeforeUnmount(unsubscribeDraft)
 onMounted(resize)
-watch(imageIssue, () => emit('layout'), { flush: 'sync' })
+watch([imageIssue, () => props.task.lastTurnWarning, () => props.task.lastTurnReason === 'refused'], () => emit('layout'), { flush: 'sync' })
 function addFiles(files: readonly File[], items?: DataTransferItemList) {
   if (readOnly.value || busy.value || !props.connected) return
   if (!writableWorkspace.value) { notice.value='无目录模式不能保存附件，请在自动或指定目录的对话中添加文件。'; return }
@@ -180,6 +180,8 @@ async function resolve(approved: boolean) {
         </ol>
       </section>
       <p v-if="task.lastFailure" class="composer-error" role="alert" data-testid="last-turn-failure">{{ task.lastFailure.message }}</p>
+      <p v-if="task.lastTurnReason === 'refused'" class="composer-warning" role="status" data-testid="last-turn-refusal">模型拒答</p>
+      <p v-else-if="task.lastTurnWarning" class="composer-warning" role="status" data-testid="last-turn-warning">{{ task.lastTurnWarning }}</p>
       <p v-if="error" class="composer-error" role="alert">{{ error }}</p>
       <div class="run-feedback-row">
         <WorkbenchRunStatus :task="task" :connected="connected" :sending="sending" :stopping="actionInFlight === 'abort'" @layout="emit('layout')" />
@@ -292,7 +294,9 @@ button.primary { background:var(--tuck-accent,#b8ddfb); color:var(--tuck-accentT
 .workbench-interaction[data-kind=approval] summary{margin:0;min-height:30px;align-content:center}
 .workbench-interaction[data-kind=approval]>.interaction-actions{margin:0 0 0 auto;flex:none}
 .workbench-interaction input { width:100%; padding:8px; background:var(--tuck-surface,#151d24); color:var(--tuck-text,#fff); border:1px solid var(--tuck-muted,#74623d); border-radius:6px; }
-.composer-error { color:var(--tuck-danger,#ffada6); white-space:pre-wrap; overflow-wrap:anywhere; padding:6px 8px; margin:0 0 4px; border:1px solid var(--tuck-border,#693833); border-radius:8px; }
+.composer-error,.composer-warning { white-space:pre-wrap; overflow-wrap:anywhere; padding:6px 8px; margin:0 0 4px; border:1px solid var(--tuck-border); border-radius:8px; }
+.composer-error { color:var(--tuck-danger,#ffada6); }
+.composer-warning { color:var(--tuck-warning,#d6b77b); }
 @container composer (max-width:480px) { .workbench-input-box { padding:6px 8px; } .queue-items li { flex-wrap:wrap; } .queue-items p { flex-basis:calc(100% - 28px); } .queue-actions { margin-left:auto; } .composer-settings { flex-basis:auto; } .composer-settings:not(.in-panel) select { max-width:160px; } .composer-caption { flex-wrap:wrap; } }
 @media(max-width:760px){
   .workbench-composer .workbench-input-box>textarea{font-size:16px;min-height:30px}

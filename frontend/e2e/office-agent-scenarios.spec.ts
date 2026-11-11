@@ -24,8 +24,7 @@ test('diagnostics shortcuts expose the live Plan, delegation and terminal eviden
   await page.getByLabel('Stream rate').selectOption('60')
   await page.getByTestId('stream-start').click()
   await expect.poll(() => logicalCount(page), { timeout: 20_000 }).toBeGreaterThanOrEqual(84_009)
-  // The finite producer may finish between observing its final row and pausing.
-  if (await page.getByRole('button', { name: 'Pause' }).isEnabled()) await page.getByRole('button', { name: 'Pause' }).click()
+  await expect(page.getByTestId('last-turn-reason')).toHaveText('completed')
 
   await page.getByTestId('reference-agent-delegation').click()
   await expect(page.getByTestId('active-session-id')).toHaveText('agent-loop')

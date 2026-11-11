@@ -108,7 +108,8 @@ test('one small wheel gesture keeps reading intent through new content and layou
     await page.getByTestId('jump-latest').click()
     await expect(page.locator('.conversation-vlist')).toBeVisible()
     await expect.poll(() => remaining(page)).toBeLessThan(2)
-    // Interrupt an explicit Latest navigation immediately, then change layout.
+    // The Latest button can disappear outside the conversation's scroll target.
+    await page.locator('.conversation-vlist').hover()
     await page.mouse.wheel(0, -60)
     await expect.poll(() => remaining(page)).toBeGreaterThan(40)
     await page.setViewportSize({ width: 1150, height: 760 })

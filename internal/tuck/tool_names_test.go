@@ -55,6 +55,10 @@ func TestTuckToolNamesOfficial(t *testing.T) {
 							tool := O(v)
 							name := firstString(O(tool["function"])["name"], tool["name"])
 							counts[name]++
+							if protocol == "OPENAI_RESPONSES" && (name == inspectionTool || name == "generate_images") &&
+								strings.Contains(string(JSON(tool["parameters"])), `"uniqueItems"`) {
+								t.Errorf("Responses received an unsupported array constraint for %s", name)
+							}
 						}
 						for _, name := range all {
 							want := 0

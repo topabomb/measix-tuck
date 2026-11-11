@@ -4,15 +4,15 @@
 
 ## 版本与依据
 
-基线为官方 **v1.152.0**，提交 `e7f1ec394dfa47aea0b066092a35c72564b192cb`，核对日期 **2026-10-23**。二进制版本与 SHA256 已按[发行清单](../internal/tuck/contract/engine-release.json)核对。以下链接均固定到该 tag，不能把较新主分支的行为直接套用到本清单。
+基线为官方 **v1.159.0**，提交 `b4fa1eb0bb542ae136f1482f9f25fc8b5b2254e5`，核对日期 **2026-11-11**。二进制版本与 SHA256 已按[发行清单](../internal/tuck/contract/engine-release.json)核对。以下链接均固定到该 tag，不能把较新主分支的行为直接套用到本清单。
 
-证据来源：官方[工具集注册表](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/teamloader/toolsets/toolsets.go)、[装配实现](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/teamloader/teamloader.go)、各节所引官方源码，以及官方 Windows 二进制公开命令 `debug toolsets <agent-file> --json` 导出的工具名称、描述和参数 schema。名称、参数与装配验证不等于全部工具的真实业务调用验收。
+证据来源：官方[工具集注册表](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/teamloader/toolsets/toolsets.go)、[装配实现](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/teamloader/teamloader.go)、各节所引官方源码，以及官方 Windows 二进制公开命令 `debug toolsets <agent-file> --json` 导出的工具名称、描述和参数 schema。名称、参数与装配验证不等于全部工具的真实业务调用验收。
 
 ## 分类定义：三类工具加一类接入能力
 
 Docker Agent 以工具集为配置单位，为 Agent 装配工具。引擎内置工具分为“引擎基本工具、引擎配置型工具、市场接入工具”三类；引擎另提供“外部工具接入器”，用于接入由外部动态提供的工具。
 
-| 分类名称 | 定义 | v1.152.0 显式工具集类型数 |
+| 分类名称 | 定义 | v1.159.0 显式工具集类型数 |
 | --- | --- | ---: |
 | 引擎基本工具 | 在正常引擎环境中，仅启用 `type` 即可提供工具，无需额外专用配置；工具定义和执行逻辑由引擎提供。市场工具单独归类 | 19 |
 | 引擎配置型工具 | 需要专用配置或功能条件，具体工具定义由引擎或本地配置决定。数量可以随本地配置变化，或从引擎预设候选中筛选 | 7 |
@@ -35,7 +35,7 @@ toolsets:
     tools: [read_file]
 ```
 
-以上是 Agent 配置片段，不是完整配置文件。省略 `tools` 或填写 `tools: []` 均表示不筛选；停用整组应移除工具集条目。相同工具名按配置顺序保留第一项，不合并后续实例的权限、路径或处理逻辑。只读过滤、启动状态和自动装配还会改变最终模型目录。依据：[筛选](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/teamloader/filter.go)、[同名去重](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/agent/agent.go#L485)。
+以上是 Agent 配置片段，不是完整配置文件。省略 `tools` 或填写 `tools: []` 均表示不筛选；停用整组应移除工具集条目。相同工具名按配置顺序保留第一项，不合并后续实例的权限、路径或处理逻辑。只读过滤、启动状态和自动装配还会改变最终模型目录。依据：[筛选](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/teamloader/filter.go)、[同名去重](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/agent/agent.go#L503-L510)。
 
 本文逐工具记录功能、调用参数及重要返回/执行边界，遵循以下约定：
 
@@ -43,7 +43,7 @@ toolsets:
 - 参数类型使用 `string`、`integer`、`boolean`、`object`、`string[]` 等。数组/指针字段在原始 schema 中可能同时允许 `null`，但 `required` 与是否允许 `null` 是两个维度，业务校验仍可能拒绝空值。表中以正常调用值说明，不将 schema 可空视为业务成功保证。
 - **无参数 `{}`**也是明确的调用约定。原始目录可能表现为空对象 schema，也可能 `parameters: null`，后者表示未声明参数 schema，不表示没有调用合同。
 - 安装配置与调用参数分开：例如 Webhook URL 是工具集配置，调用只传消息；`open_url` 调用不接受 URL。
-- 引擎可以为部分工具添加可选 `description: string`，用于说明本次调用；模型供应商的严格 schema 转换也可能调整可选/可空表示。表格描述业务参数，模型实际请求中的 schema 是当次调用的直接依据。[说明参数实现](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/description.go)
+- 引擎可以为部分工具添加可选 `description: string`，用于说明本次调用；模型供应商的严格 schema 转换也可能调整可选/可空表示。表格描述业务参数，模型实际请求中的 schema 是当次调用的直接依据。[说明参数实现](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/description.go)
 - 动态命名工具也有功能说明和参数 schema；这些内容从配置生成，不存在可在版本文档中写死的真实名称/字段全集。相关条目明确列出生成规则及标为示例的具体合同。
 
 ## 引擎基本工具
@@ -64,7 +64,7 @@ toolsets:
 | `create_directory` | 创建一个或多个目录，支持嵌套目录 | `paths: string[]`：目录路径 | 无 |
 | `remove_directory` | 删除一个或多个空目录 | `paths: string[]`：目录路径 | 无；不提供递归删除非空目录的参数 |
 
-依据：[实现](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/filesystem/filesystem.go)、[输入类型](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/filesystem/types/types.go)。
+依据：[实现](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/filesystem/filesystem.go)、[输入类型](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/filesystem/types/types.go)。
 
 ### file：3 个，与 filesystem 重复
 
@@ -76,7 +76,7 @@ toolsets:
 | `write_file` | 创建或完整覆盖文件 | 必填 `path: string`、`content: string` |
 | `edit_file` | 精确替换文件文本 | 必填 `path: string`、`edits: {oldText: string, newText: string}[]` |
 
-同时装配两组时三个名称去重，而非合并两套路径配置。[实现](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/file/file.go)
+同时装配两组时三个名称去重，而非合并两套路径配置。[实现](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/file/file.go)
 
 ### shell：1 个
 
@@ -84,7 +84,7 @@ toolsets:
 | --- | --- | --- | --- |
 | `shell` | 在引擎主机执行命令，返回命令输出或执行错误 | `cmd: string`：命令文本 | `cwd: string`：工作目录，默认 `.`；`timeout: integer`：超时秒数，默认 30。Shell 及语法随主机环境而定 |
 
-调用不是沙箱声明，也不继承 `filesystem.allow_list`。需异步保留进程时使用下一组后台工具。[实现](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/shell/shell.go)
+调用不是沙箱声明，也不继承 `filesystem.allow_list`。需异步保留进程时使用下一组后台工具。[实现](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/shell/shell.go)
 
 ### background_jobs：5 个
 
@@ -96,7 +96,7 @@ toolsets:
 | `stop_background_job` | 终止后台命令及其子进程 | `job_id: string` | 这是停止操作，不是停止等待 |
 | `wait_background_job` | 等待命令完成，返回退出码和输出；已完成时立即返回已有结果 | `job_id: string` | `timeout: integer`：等待秒数，默认 60；超时返回当前输出与超时信息，不等同于停止进程 |
 
-这里的 job 是操作系统命令进程，区别于后台 Agent 任务。[实现](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/backgroundjobs/backgroundjobs.go)
+这里的 job 是操作系统命令进程，区别于后台 Agent 任务。[实现](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/backgroundjobs/backgroundjobs.go)
 
 ### git：5 个
 
@@ -110,7 +110,7 @@ toolsets:
 | `git_show` | 提交元数据、消息、变更文件及增删行数 | 无 | `ref: string`：默认 `HEAD` |
 | `git_blame` | 指定文件逐行对应的提交和作者 | `path: string`：相对仓库根目录的文件路径 | `rev: string`：默认 `HEAD` |
 
-依据：[实现](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/git/git.go)。
+依据：[实现](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/git/git.go)。
 
 ### todo：4 个
 
@@ -123,7 +123,7 @@ toolsets:
 | `update_todos` | 按 ID 更新状态，返回更新项、未找到项和当前待办 | `updates: object[]`，每项必填 `id: string`、`status: string` | 状态取上述三个值 |
 | `list_todos` | 返回当前待办及未完成事项提醒 | 无参数 `{}` | 原始目录未声明参数 schema |
 
-依据：[实现](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/todo/todo.go)。
+依据：[实现](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/todo/todo.go)。
 
 ### tasks：8 个
 
@@ -140,7 +140,7 @@ toolsets:
 | `add_dependency` | 添加依赖，使一个任务等待另一个任务完成 | `taskId: string`：依赖方；`dependsOnId: string`：前置任务 | 注意字段为 camelCase |
 | `remove_dependency` | 移除指定依赖关系 | `taskId: string`；`dependsOnId: string` | 不删除任务本身 |
 
-依据：[实现及参数类型](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/tasks/tasks.go)。
+依据：[实现及参数类型](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/tasks/tasks.go)。
 
 ### plan：8 个
 
@@ -150,14 +150,14 @@ toolsets:
 | --- | --- | --- | --- |
 | `write_plan` | 创建或完整替换计划正文 | `name: string`；`content: string` | `title: string`、`author: string`、`status: string`、`last_known_revision: integer`；未提供的元数据沿用已有值 |
 | `read_plan` | 返回正文、标题、作者、状态及 revision | `name: string` | 无 |
-| `update_plan_from_file` | 从文件读取正文，创建或完整替换计划 | `name: string`；`path: string` | `title: string`、`author: string`、`status: string`、`last_known_revision: integer` |
-| `export_plan_to_file` | 将计划正文写入指定文件 | `name: string`；`path: string` | 返回写入结果，不把完整正文再次作为工具输出返回 |
+| `update_plan_from_file` | 从文件读取正文，创建或完整替换计划。相对路径以工作目录为基准 | `name: string`；`path: string` | `title: string`、`author: string`、`status: string`、`last_known_revision: integer` |
+| `export_plan_to_file` | 将计划正文写入指定文件。相对路径以工作目录为基准 | `name: string`；`path: string` | 返回写入结果，不把完整正文再次作为工具输出返回 |
 | `set_plan_status` | 修改已有计划状态，保留正文 | `name: string`；`status: string` | `last_known_revision: integer` |
 | `get_plan_status` | 只读取状态和 revision，不读取完整正文 | `name: string` | 无 |
 | `list_plans` | 列出计划名称、标题、作者、状态及 revision | 无参数 `{}` | 原始目录未声明参数 schema |
 | `delete_plan` | 删除指定计划 | `name: string` | `last_known_revision: integer` |
 
-依据：[实现](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/plan/plan.go)。
+依据：[实现](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/plan/plan.go)。
 
 ### session_context：2 个
 
@@ -166,7 +166,7 @@ toolsets:
 | `list_sessions` | 按最近优先列出原生历史会话的 ID、标题、创建时间及消息数；排除当前会话 | 无 | `limit: integer`：默认 20，上限 100 |
 | `read_session` | 读取历史会话文本以补充上下文 | `session_id: string`：会话 ID，或 `-1`、`-2` 等相对引用 | 长记录保留较新的消息并注明截断；默认文本上限 24000 字符，不提供修改历史的参数 |
 
-依据：[实现](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/sessioncontext/sessioncontext.go)。
+依据：[实现](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/sessioncontext/sessioncontext.go)。
 
 ### memory：5 个
 
@@ -180,7 +180,7 @@ toolsets:
 | `search_memories` | 根据关键词和分类检索 | 无 | `query: string`：空格分隔关键词，全部需要匹配；`category: string`：分类过滤 |
 | `update_memory` | 更新指定记忆正文，可同时更新分类 | `id: string`；`memory: string` | `category: string`；不能仅因为功能描述提到更新分类就省略 schema 必填的 memory |
 
-依据：[实现](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/memory/memory.go)、[默认路径](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/memory/create.go)。
+依据：[实现](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/memory/memory.go)、[默认路径](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/memory/create.go)。
 
 ### 单工具组：think、environment、datetime、calculator、random、fetch、user_prompt
 
@@ -196,7 +196,7 @@ toolsets:
 | `fetch` / `fetch` | 通过 HTTP(S) GET 获取 URL，返回正文和响应元数据 | `urls: string[]`：至少 1 项；`format: string`：text、markdown 或 html | `timeout: integer`：请求超时秒数，默认 30，范围 1–300；受工具集配置的网络访问限制约束 |
 | `user_prompt` / `user_prompt` | 请求用户回答并等待结果，通过原生交互机制返回回答 | `message: string`：问题 | `title: string`：默认 Question；`schema: object`：约束回答结构的 JSON Schema。schema 是回答合同，不是新的工具定义 |
 
-依据：[Think](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/think/think.go)、[Environment](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/environment/environment.go)、[Datetime](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/datetime/datetime.go)、[Calculator](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/calculator/calculator.go)、[Random](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/random/random.go)、[Fetch](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/fetch/fetch.go)、[User Prompt](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/userprompt/userprompt.go)。
+依据：[Think](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/think/think.go)、[Environment](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/environment/environment.go)、[Datetime](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/datetime/datetime.go)、[Calculator](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/calculator/calculator.go)、[Random](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/random/random.go)、[Fetch](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/fetch/fetch.go)、[User Prompt](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/userprompt/userprompt.go)。
 
 ### background_agents：5 个
 
@@ -204,13 +204,13 @@ toolsets:
 
 | 工具 | 功能与结果 | 必填参数 | 可选参数及重要约定 |
 | --- | --- | --- | --- |
-| `run_background_agent` | 启动后台子代理，立即返回 task ID | `agent: string`：目标子代理；`task: string`：任务说明 | `expected_output: string`：期望成果 |
+| `run_background_agent` | 启动后台子代理，立即返回 task ID | `agent: string`：目标子代理；`task: string`：任务说明 | `expected_output: string`：期望成果；`worktree: boolean`：从当前 Git HEAD 创建独立检出，默认关闭 |
 | `list_background_agents` | 列出后台子代理任务的状态和运行时间 | 无参数 `{}` | 原始目录未声明参数 schema |
 | `view_background_agent` | 返回执行中的缓冲输出或已完成的最终结果及状态 | `task_id: string` | 使用启动工具返回的后台任务 ID，不是原生会话 ID |
-| `wait_background_agents` | 等待指定任务全部结束，按输入顺序返回状态和受限输出，含 all_done | `task_ids: string[]`：1–100 个不同任务 ID | `timeout: integer`：整组共享的等待秒数，默认 300，0 使用默认值，上限 3600。失败/停止任务不使其他任务提前结束等待；等待超时或取消不停止任务 |
+| `wait_background_agents` | 等待指定任务全部结束，按输入顺序返回状态和受限输出，含 all_done | `task_ids: string[]`：1–100 个不同任务 ID | `timeout: integer`：整组共享的等待秒数，默认 300，0 使用默认值，上限 3600。失败/停止任务不使其他任务提前结束等待；等待超时或取消不停止任务。worktree 模式返回目录、分支和基准提交 |
 | `stop_background_agent` | 请求停止指定后台子代理 | `task_id: string` | 与取消等待是不同操作 |
 
-依据：[定义及执行](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/agent/agent.go)、[等待实现](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/agent/wait.go)。
+依据：[定义及执行](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/agent/agent.go)、[等待实现](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/agent/wait.go)。
 
 ### scheduler：3 个
 
@@ -222,7 +222,7 @@ toolsets:
 | `list_schedules` | 返回活动计划的 ID、表达式和下次触发时间 | 无参数 `{}` | 无 |
 | `cancel_schedule` | 按 ID 取消计划 | `id: string` | 使用 create_schedule 返回的 ID |
 
-依据：[工具及运行循环](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/scheduler/scheduler.go)、[时间表达式](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/scheduler/schedule.go)。
+依据：[工具及运行循环](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/scheduler/scheduler.go)、[时间表达式](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/scheduler/schedule.go)。
 
 ## 引擎配置型工具
 
@@ -230,7 +230,7 @@ toolsets:
 
 ### api：每项配置一个命名工具
 
-装配配置位于 `api_config`：`name` 确定工具名，`instruction` 为工具功能说明，`endpoint`、`method`、`headers` 描述 HTTP 请求，`args` 定义输入属性，`required` 定义必填参数，`output_schema` 可描述返回结构。引擎按照配置执行 HTTP 请求，运行结果仍是响应正文字符串；声明 output_schema 不会自动将正文变成经过验证的业务对象。
+装配配置位于 `api_config`：`name` 确定工具名，`instruction` 为工具功能说明，`endpoint`、`method`、`headers` 描述 HTTP 请求，`args` 定义输入属性，`required` 定义必填参数，`output_schema` 可描述返回结构。引擎按照配置执行 HTTP 请求，运行结果仍是响应正文字符串；声明 output_schema 不会自动将正文变成经过验证的业务对象。原生只读提示仅适用于 GET。
 
 | 工具 | 功能与结果 | 调用参数 |
 | --- | --- | --- |
@@ -238,7 +238,7 @@ toolsets:
 
 例如工具名配置为 `lookup_record`、instruction 为“按 key 查询记录”、args 仅定义 `key: string` 且 required 为 `[key]`，则该实例的具体工具是 `lookup_record(key: string)`。这个名称和参数是示例，不是引擎预置工具。
 
-依据：[类型定义](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/config/latest/types.go)、[参数与执行实现](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/api/client/client.go)。
+依据：[类型定义](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/config/latest/types.go)、[参数与执行实现](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/api/client/client.go)。
 
 ### script：每个本地脚本定义一个工具
 
@@ -250,7 +250,7 @@ toolsets:
 
 例如配置 `echo_text`，说明“输出给定文字”，命令引用 text，args 定义 `text: string` 且 required 为 `[text]`，则具体工具为 `echo_text(text: string)`。这是示例实例，不是一个固定名为 script 的工具。配置时应显式写出 required；以实际导出 schema 核对必填字段，不依赖描述文字推测。
 
-依据：[实现](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/shell/script_shell.go)。
+依据：[实现](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/shell/script_shell.go)。
 
 ### webhook：1 个
 
@@ -260,7 +260,7 @@ toolsets:
 | --- | --- | --- | --- |
 | `send_webhook` | 向配置的目标发送通知；引擎负责交付重试及最终失败反馈 | `message: string`：通知文字 | `value2: string`、`value3: string`：仅 IFTTT 使用。调用被接受不应直接解释为远端已收到 |
 
-依据：[定义、接收及交付实现](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/webhook/webhook.go)。
+依据：[定义、接收及交付实现](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/webhook/webhook.go)。
 
 ### model_picker：2 个
 
@@ -271,7 +271,7 @@ toolsets:
 | `change_model` | 请求切换当前会话使用的模型，返回切换反馈 | 必填 `model: string`，必须属于允许列表 |
 | `revert_model` | 恢复会话原始模型 | 无参数 `{}`；原始目录未声明参数 schema |
 
-依据：[实现](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/modelpicker/modelpicker.go)。
+依据：[实现](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/modelpicker/modelpicker.go)。
 
 ### open_url：每项配置一个工具
 
@@ -281,7 +281,7 @@ toolsets:
 | --- | --- | --- |
 | `open_url`，或配置的 name | 在引擎所在主机的默认浏览器打开配置 URL，返回操作结果；不返回网页正文 | 无参数 `{}`。调用不接受任意 url，目标来自配置 |
 
-依据：[实现](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/openurl/openurl.go)。
+依据：[实现](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/openurl/openurl.go)。
 
 ### rag：每个知识库来源一个检索工具
 
@@ -291,7 +291,7 @@ toolsets:
 | --- | --- | --- |
 | 对应知识库的工具名（缺省 `rag`） | 检索该知识库，返回匹配内容及检索结果信息；不执行任意外部工具 | 必填 `query: string`：检索问题或关键词 |
 
-多个知识库可以产生多个不同名检索工具，但每个来源的检索调用结构由引擎定义。依据：[实现](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/rag/rag.go)。
+多个知识库可以产生多个不同名检索工具，但每个来源的检索调用结构由引擎定义。依据：[实现](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/rag/rag.go)。
 
 ### lsp：15 个内置候选工具
 
@@ -315,7 +315,7 @@ toolsets:
 | `lsp_signature_help` | 获取调用位置的函数签名及参数帮助 | `file: string`、`line: integer`、`character: integer` | 位置应落在函数调用参数区域 |
 | `lsp_inlay_hints` | 获取文件或指定行范围的类型、参数名等内联提示 | `file: string` | `start_line: integer`：默认 1；`end_line: integer`：默认文件末尾 |
 
-`lsp_workspace` 和 `lsp_diagnostics` 始终保留，其余候选按服务能力过滤。这里的 15 是完整候选数，不是每个语言服务器都提供 15 个可用操作的承诺。依据：[参数、定义及能力筛选](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/lsp/lsp.go)。
+`lsp_workspace` 和 `lsp_diagnostics` 始终保留，其余候选按服务能力过滤。这里的 15 是完整候选数，不是每个语言服务器都提供 15 个可用操作的承诺。依据：[参数、定义及能力筛选](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/lsp/lsp.go)。
 
 ### 功能配置自动装配的引擎工具
 
@@ -333,13 +333,13 @@ toolsets:
 | `run_tools_with_javascript` | 启用 Code Mode 后装配；运行 JavaScript 来组合调用已装配工具，返回脚本执行结果 | 必填 `script: string`。这是组合调用入口；部分不适合包装的工具仍单独暴露，不能简单把它与全部被包装工具累加 |
 | `__structured_output__` | 启用工具模式结构化输出；按配置 schema 提交最终答案 | 参数对象严格由 structured_output.schema 定义；说明结合配置的 name/description 生成。有效调用结束该轮，必须单独调用，不能与其他工具混在同一响应中 |
 
-依据：[自动装配](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/teamloader/teamloader.go)、[Transfer Task 参数](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/transfertask/types/types.go)、[Handoff 参数](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/handoff/types/types.go)、[Skills](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/skills/skills.go)、[Deferred](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/deferred/deferred.go)、[Code Mode](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/codemode/codemode.go)、[Structured Output](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/structuredoutput/structuredoutput.go)。
+依据：[自动装配](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/teamloader/teamloader.go)、[Transfer Task 参数](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/transfertask/types/types.go)、[Handoff 参数](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/handoff/types/types.go)、[Skills](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/skills/skills.go)、[Deferred](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/deferred/deferred.go)、[Code Mode](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/codemode/codemode.go)、[Structured Output](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/structuredoutput/structuredoutput.go)。
 
 ## 市场接入工具
 
 ### mcp_catalog：初始 3 个，启用服务后 5 个管理工具
 
-这是内置 MCP 服务器市场入口。v1.152.0 从 Docker MCP Catalog 筛选远程 Streamable HTTP 服务，将 **34 个服务**的名称、说明、地址和认证方式作为 servers.json 静态快照编译进程序。34 是服务数量，不是工具数量。搜索发生在本地目录快照中；不是扫描用户已配置的 MCP，也不是每次联网搜索完整市场。allowed_servers / blocked_servers 可进一步限制目录范围。
+这是内置 MCP 服务器市场入口。v1.159.0 从 Docker MCP Catalog 筛选远程 Streamable HTTP 服务，将 **34 个服务**的名称、说明、地址和认证方式作为 servers.json 静态快照编译进程序。34 是服务数量，不是工具数量。搜索发生在本地目录快照中；不是扫描用户已配置的 MCP，也不是每次联网搜索完整市场。allowed_servers / blocked_servers 可进一步限制目录范围。
 
 | 工具 | 功能与结果 | 调用参数 | 提供条件 |
 | --- | --- | --- | --- |
@@ -349,7 +349,7 @@ toolsets:
 | `disable_remote_mcp_server` | 停用服务，移除它贡献的工具 | 必填 `id: string`：目录服务 ID | 至少一个服务已启用 |
 | `reset_remote_mcp_server_auth` | 清除服务已保存的认证，供后续重新启用时建立新认证 | 必填 `id: string`：目录服务 ID | 至少一个服务已启用 |
 
-这些管理工具由引擎实现，属于内置工具。启用服务后获取的工具由服务提供，属于外部工具，不计入上述 3/5 个管理工具。服务目录源为 [Docker MCP Catalog](https://desktop.docker.com/mcp/catalog/v3/catalog.json)；版本事实以[内置快照](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/mcpcatalog/servers.json)、[加载代码](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/mcpcatalog/servers.go)、[工具及参数实现](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/mcpcatalog/mcpcatalog.go)为准。
+这些管理工具由引擎实现，属于内置工具。启用服务后获取的工具由服务提供，属于外部工具，不计入上述 3/5 个管理工具。服务目录源为 [Docker MCP Catalog](https://desktop.docker.com/mcp/catalog/v3/catalog.json)；版本事实以[内置快照](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/mcpcatalog/servers.json)、[加载代码](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/mcpcatalog/servers.go)、[工具及参数实现](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/mcpcatalog/mcpcatalog.go)为准。
 
 ## 外部工具接入器：只记录能力边界
 
@@ -357,13 +357,13 @@ toolsets:
 
 | 接入器 `type` | 外部定义及执行来源 | 配置与数量边界 |
 | --- | --- | --- |
-| `mcp` | 从 MCP 服务获取工具目录、说明和 schema，由对应服务执行调用 | 配置 command、remote 或 ref 等连接信息；目录动态变化。原生支持 stdio、远程 HTTP/SSE、Docker MCP Gateway 等方式 |
+| `mcp` | 从 MCP 服务获取工具目录、说明和 schema，由对应服务执行调用 | 配置 command、remote 或 ref 等连接信息；目录动态变化。原生支持 stdio、远程 HTTP/SSE、Docker MCP Gateway 等方式。Streamable HTTP 可用 `remote.standalone_sse` 按连接启用独立 GET 事件流 |
 | `a2a` | 从 Agent Card 读取技能，包装成工具并由远端 Agent 执行 | 配置 url 等；按实际 Card 投影。本版本 Card 没有技能时提供整个 Agent 的调用入口 |
 | `openapi` | 从外部 OpenAPI 规范导入受支持的操作，由对应 API 服务执行 | 配置规范 url 等；按操作生成工具名，优先 operationId，缺省由 HTTP 方法和路径派生；参数依操作定义生成 |
 
 没有与外部配置无关的具体工具名/参数全集，因此此处不虚构固定调用清单。它们与 api/script 的区别在于定义来自外部目录/规范，而非本地逐工具定义。mcp_catalog 使用 MCP 接入能力，不构成第四种协议或接入机制。
 
-依据：[MCP](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/mcp/mcp.go)、[A2A](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/a2a/a2a.go)、[OpenAPI](https://github.com/docker/docker-agent/blob/v1.152.0/pkg/tools/builtin/openapi/openapi.go)。
+依据：[MCP](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/mcp/mcp.go)、[A2A](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/a2a/a2a.go)、[OpenAPI](https://github.com/docker/docker-agent/blob/v1.159.0/pkg/tools/builtin/openapi/openapi.go)。
 
 ## 审查与升级维护
 

@@ -19,6 +19,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func TestMain(m *testing.M) {
+	if len(os.Args) == 2 && os.Args[1] == worktreeGuardCommand {
+		if err := Run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	os.Exit(m.Run())
+}
+
 // The fixture speaks a provider protocol to the unmodified official executable.
 // It never emulates the engine or opens its private database.
 type nativeFixture struct {
@@ -403,8 +414,8 @@ func resolveAllNative(t *testing.T, f *nativeFixture, id string) M {
 
 func TestOfficialNativeFullLoop(t *testing.T) {
 	f := officialFixture(t, 16)
-	if S(f.engine.State()["version"]) != "v1.152.0" {
-		t.Fatal("test contract requires official v1.152.0", f.engine.State())
+	if S(f.engine.State()["version"]) != minimumEngineVersion {
+		t.Fatalf("test contract requires official %s: %v", minimumEngineVersion, f.engine.State())
 	}
 	id := f.create(t, nil)
 	submitTask(t, f.manager, id, "FULL_LOOP")

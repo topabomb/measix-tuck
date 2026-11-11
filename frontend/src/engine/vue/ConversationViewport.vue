@@ -586,6 +586,7 @@ defineExpose({ captureSnapshot, jumpToMessage, jumpToLatest, shiftBackward, shif
       </div>
       <div v-else-if="sessionIndicator === 'failed'" class="turn-outcome-banner failure" data-testid="last-turn-failure"><strong>Last turn failed</strong><span>{{ runtime.kernel.lastFailure?.code }} · {{ runtime.kernel.lastFailure?.message }}</span></div>
       <div v-else-if="sessionIndicator === 'max-tokens'" class="turn-outcome-banner warning"><strong>Last turn reached the output-token limit</strong><span>You can continue this session with another prompt.</span></div>
+      <div v-else-if="sessionIndicator === 'refused'" class="turn-outcome-banner warning" role="status"><strong>The model refused the last request</strong></div>
       <div v-if="uiState.queuedPrompts > 0" class="queue-banner" data-testid="queue-banner">{{ uiState.queuedPrompts }} follow-up{{ uiState.queuedPrompts === 1 ? '' : 's' }} queued for this session</div>
       <div class="composer-box">
         <textarea ref="composerInputRef" v-model="composerText" data-testid="composer-input" rows="1" :placeholder="placeholder || composerPlaceholder" :disabled="readOnly || Boolean(uiState.pendingInteraction)" @input="onComposerInput" @keydown.enter.exact.prevent="sendComposer" />

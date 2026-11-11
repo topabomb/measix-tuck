@@ -6,10 +6,10 @@ const category = computed(() => {
   if (['error','failed'].includes(props.status)) return 'error'
   if (['working','running','streaming','in-progress'].includes(props.status)) return 'running'
   if (['interrupted','cancelled'].includes(props.status)) return 'stopped'
-  if (['pending','queued','waiting','blocked','max-tokens'].includes(props.status)) return 'waiting'
+  if (['pending','queued','waiting','blocked','max-tokens','refused'].includes(props.status)) return 'waiting'
   return 'idle'
 })
-const title = computed(() => props.label || ({ success:'完成', error:'失败', running:'执行中', stopped:'已停止', waiting:'等待处理', idle:'空闲' }[category.value]))
+const title = computed(() => props.label || (props.status === 'refused' ? '模型拒答' : { success:'完成', error:'失败', running:'执行中', stopped:'已停止', waiting:'等待处理', idle:'空闲' }[category.value]))
 </script>
 <template>
   <span v-if="status" class="activity-status" :class="category" role="img" :aria-label="title" :title="title">

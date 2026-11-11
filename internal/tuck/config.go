@@ -538,6 +538,7 @@ func defaultConfig() M {
 	if err := json.Unmarshal(defaultConfigJSON, &result); err != nil {
 		panic(err)
 	}
+	O(result["engine"])["version"] = minimumEngineVersion
 	for name, value := range O(result["agents"]) {
 		O(value)["instruction"] = modelContent.DefaultInstruction(name)
 		O(value)["description"] = modelContent.DefaultDescription(name)

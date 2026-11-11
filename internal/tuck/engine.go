@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -74,19 +75,35 @@ func (e *Engine) State() M {
 	defer e.mu.Unlock()
 	return M{"status": e.state, "state": e.state, "version": e.version, "error": e.lastError, "external": e.options.External}
 }
+
+var engineVersionLine = regexp.MustCompile(`(?m)^(?:docker-agent|cagent|docker agent) version (v[^\s]+)\r?$`)
+var stableEngineVersion = regexp.MustCompile(`^v\d+\.\d+\.\d+(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$`)
+
 func EngineVersion(ctx context.Context, binary string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, binary, "version").CombinedOutput()
+	out, err := exec.CommandContext(ctx, binary, "version").Output()
 	if err != nil {
 		return "", fmt.Errorf("engine version: %w", err)
 	}
-	match := regexp.MustCompile(`\bv[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?\b`).FindString(string(out))
-	if match == "" {
+	match := engineVersionLine.FindStringSubmatch(string(out))
+	if match == nil {
 		return "", errors.New("official engine did not report a semantic version")
 	}
-	return match, nil
+	return match[1], nil
 }
+
+func requireEngineVersion(version string) error {
+	base, _, _ := strings.Cut(version, "+")
+	var actual, minimum [3]uint64
+	_, err := fmt.Sscanf(base, "v%d.%d.%d", &actual[0], &actual[1], &actual[2])
+	_, _ = fmt.Sscanf(minimumEngineVersion, "v%d.%d.%d", &minimum[0], &minimum[1], &minimum[2])
+	if !stableEngineVersion.MatchString(version) || err != nil || slices.Compare(actual[:], minimum[:]) < 0 {
+		return Problem(409, "engine_version_unsupported", fmt.Sprintf("Docker Agent %s 不受支持，Tuck 需要 %s 或更高的稳定版本。请升级引擎。", version, minimumEngineVersion))
+	}
+	return nil
+}
+
 func (e *Engine) Start(ctx context.Context) error {
 	e.mu.Lock()
 	if e.process != nil {
@@ -95,11 +112,18 @@ func (e *Engine) Start(ctx context.Context) error {
 	}
 	o := e.options
 	e.state = "starting"
+	e.version = ""
 	e.lastError = ""
 	e.mu.Unlock()
 	if !o.External {
 		v, err := EngineVersion(ctx, o.Binary)
 		if err != nil {
+			return e.fail(err)
+		}
+		if err = requireEngineVersion(v); err != nil {
+			e.mu.Lock()
+			e.version = v
+			e.mu.Unlock()
 			return e.fail(err)
 		}
 		for _, p := range []string{o.DataDir, o.WorkspaceRoot} {

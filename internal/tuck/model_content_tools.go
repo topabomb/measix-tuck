@@ -14,13 +14,13 @@ func imageDefinition(resource M) M {
 	return M{"name": "generate_images", "description": description, "inputSchema": M{"type": "object", "additionalProperties": false, "required": []string{"prompt"}, "properties": M{
 		"prompt":           M{"type": "string", "minLength": 1, "maxLength": 32000, "description": modelText(textPrompt)},
 		"count":            M{"type": []string{"integer", "null"}, "minimum": 1, "maximum": maxCount, "default": 1, "description": modelText(textCount)},
-		"reference_images": M{"type": []string{"array", "null"}, "maxItems": 4, "uniqueItems": true, "items": M{"type": "string", "minLength": 1, "maxLength": 1024}, "description": modelText(textReferences)},
+		"reference_images": M{"type": []string{"array", "null"}, "maxItems": 4, "items": M{"type": "string", "minLength": 1, "maxLength": 1024}, "description": modelText(textReferences)},
 	}}}
 }
 
 func inspectionDefinition() M {
 	return M{"name": inspectionTool, "description": modelText(textInspect), "inputSchema": M{"type": "object", "additionalProperties": false, "required": []string{"attachments", "request"}, "properties": M{
-		"attachments": M{"type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": true, "description": modelText(textAttachments), "items": M{"type": "object", "additionalProperties": false, "required": []string{"path"}, "properties": M{
+		"attachments": M{"type": "array", "minItems": 1, "maxItems": 4, "description": modelText(textAttachments), "items": M{"type": "object", "additionalProperties": false, "required": []string{"path"}, "properties": M{
 			"source": M{"type": []string{"string", "null"}, "enum": []any{"local", "runcove", nil}, "default": "local", "description": modelText(textAttachmentSource)},
 			"path":   M{"type": "string", "minLength": 1, "maxLength": 4096, "description": modelText(textAttachmentPath)},
 		}}},

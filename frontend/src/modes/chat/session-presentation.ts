@@ -5,7 +5,7 @@ import type { DockerTask } from '../../shared/workspace/runtime'
 export { hasReportedUsage } from '../../shared/token-format'
 
 export function indicatorLabel(state: SessionIndicator): string {
-  return { idle:'空闲', working:'执行中', blocked:'等待处理', failed:'失败', interrupted:'已停止', 'max-tokens':'已达输出上限', completed:'已完成' }[state]
+  return { idle:'空闲', working:'执行中', blocked:'等待处理', failed:'失败', interrupted:'已停止', 'max-tokens':'已达输出上限', refused:'模型拒答', completed:'已完成' }[state]
 }
 
 export function taskStatus(task: ConversationDescriptor & Pick<Partial<DockerTask>, 'compaction'>): string {

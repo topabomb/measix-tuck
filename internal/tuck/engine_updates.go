@@ -20,6 +20,20 @@ import (
 //go:embed contract/engine-release.json
 var engineManifest []byte
 
+var baselineManifest = func() M {
+	value, err := DecodeJSON(engineManifest, 16<<10)
+	if err != nil {
+		panic(err)
+	}
+	manifest := O(value)
+	if !stableVersion.MatchString(S(manifest["version"])) {
+		panic("invalid baseline engine version")
+	}
+	return manifest
+}()
+
+var minimumEngineVersion = S(baselineManifest["version"])
+
 func ExecutableName() string {
 	if runtime.GOOS == "windows" {
 		return "docker-agent.exe"
@@ -33,17 +47,12 @@ type EngineRelease struct {
 }
 
 func BaselineRelease() (EngineRelease, error) {
-	v, e := DecodeJSON(engineManifest, 16<<10)
-	if e != nil {
-		return EngineRelease{}, e
-	}
 	target := map[string]string{"windows": "win32", "linux": "linux", "darwin": "darwin"}[runtime.GOOS] + "-" + map[string]string{"amd64": "x64", "arm64": "arm64"}[runtime.GOARCH]
-	m := O(v)
-	asset := O(O(m["targets"])[target])
+	asset := O(O(baselineManifest["targets"])[target])
 	if len(asset) == 0 {
 		return EngineRelease{}, fmt.Errorf("unsupported official engine target %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
-	return EngineRelease{Version: S(m["version"]), URL: S(asset["url"]), SHA256: S(asset["sha256"]), ReleaseURL: "https://github.com/docker/docker-agent/releases/tag/" + S(m["version"])}, nil
+	return EngineRelease{Version: minimumEngineVersion, URL: S(asset["url"]), SHA256: S(asset["sha256"]), ReleaseURL: "https://github.com/docker/docker-agent/releases/tag/" + minimumEngineVersion}, nil
 }
 func FileHash(path string) (string, error) {
 	file, e := os.Open(path)
@@ -83,6 +92,9 @@ func LatestRelease(ctx context.Context, client *http.Client) (EngineRelease, err
 	if !stableVersion.MatchString(version) || B(value["draft"]) || B(value["prerelease"]) {
 		return EngineRelease{}, fmt.Errorf("official stable release required")
 	}
+	if e = requireEngineVersion(version); e != nil {
+		return EngineRelease{}, e
+	}
 	for _, v := range A(value["assets"]) {
 		asset := O(v)
 		if S(asset["name"]) != name {
@@ -104,6 +116,9 @@ func DownloadEngine(ctx context.Context, client *http.Client, release EngineRele
 	u, e := url.Parse(release.URL)
 	if e != nil || u.Scheme != "https" || u.Host != "github.com" || !strings.HasPrefix(u.Path, "/docker/docker-agent/releases/download/"+release.Version+"/") || !stableVersion.MatchString(release.Version) || len(release.SHA256) != 64 {
 		return fmt.Errorf("invalid official release metadata")
+	}
+	if e = requireEngineVersion(release.Version); e != nil {
+		return e
 	}
 	if _, e = hex.DecodeString(release.SHA256); e != nil {
 		return e
@@ -159,6 +174,9 @@ func InstallEngine(ctx context.Context, config *Config) error {
 	engine := O(config.Applied()["engine"])
 	if S(engine["mode"]) == "external" || S(engine["binary"]) != "" {
 		return Problem(409, "external_engine", "此引擎由外部管理")
+	}
+	if e := requireEngineVersion(S(engine["version"])); e != nil {
+		return e
 	}
 	release, e := BaselineRelease()
 	if e != nil {
@@ -251,7 +269,7 @@ func (u *EngineUpdates) View() M {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	state := u.App.Engine.State()
-	v := M{"managed": u.managed(), "currentVersion": state["version"], "state": state["state"], "busy": nil, "latest": nil, "downloadedVersion": nil}
+	v := M{"managed": u.managed(), "currentVersion": state["version"], "minimumVersion": minimumEngineVersion, "state": state["state"], "busy": nil, "latest": nil, "downloadedVersion": nil}
 	if u.busy != "" {
 		v["busy"] = u.busy
 	}
@@ -355,6 +373,7 @@ func (u *EngineUpdates) Apply(ctx context.Context, version string, authorize fun
 		next := Clone(current)
 		O(next["engine"])["version"] = version
 		previous := a.Engine.Options()
+		previousReady := a.Engine.State()["state"] == "ready"
 		previousApplied := a.Models.Config()
 		ownRevision := ""
 		destination := filepath.Join(a.Config.DataDir(), "engines", version, ExecutableName())
@@ -364,18 +383,14 @@ func (u *EngineUpdates) Apply(ctx context.Context, version string, authorize fun
 		u.mu.Lock()
 		staged := u.path
 		u.mu.Unlock()
-		if e = copyFileSync(staged, destination); e != nil {
-			return e
-		}
-		if e = os.Chmod(destination, 0755); e != nil {
-			return e
-		}
 		backup, e := os.MkdirTemp(filepath.Join(a.Config.DataDir(), "engines"), ".recovery-")
 		if e != nil {
 			return e
 		}
 		restored := false
-		stopped, started := false, false
+		stopped, installed, started := false, false, false
+		sameBinary := previous.Binary == destination
+		previousBinary := ""
 		saved := map[string]bool{}
 		defer func() {
 			if restored || !stopped || S(a.Engine.State()["state"]) == "ready" {
@@ -384,6 +399,13 @@ func (u *EngineUpdates) Apply(ctx context.Context, version string, authorize fun
 		}()
 		applyErr := func() error {
 			if e = authorize(); e != nil {
+				return e
+			}
+			candidate := filepath.Join(backup, "candidate-"+ExecutableName())
+			if e = copyFileSync(staged, candidate); e != nil {
+				return e
+			}
+			if e = os.Chmod(candidate, 0755); e != nil {
 				return e
 			}
 			if e = a.Engine.Close(); e != nil {
@@ -403,6 +425,23 @@ func (u *EngineUpdates) Apply(ctx context.Context, version string, authorize fun
 				}
 				saved[name] = true
 			}
+			if sameBinary {
+				if info, err := os.Stat(destination); err == nil {
+					previousBinary = filepath.Join(backup, ExecutableName())
+					if e = copyFileSync(destination, previousBinary); e != nil {
+						return e
+					}
+					if e = os.Chmod(previousBinary, info.Mode().Perm()); e != nil {
+						return e
+					}
+				} else if !os.IsNotExist(err) {
+					return err
+				}
+			}
+			if e = replaceFile(candidate, destination); e != nil {
+				return e
+			}
+			installed = true
 			options := previous
 			options.Binary = destination
 			if e = a.Engine.Configure(options); e != nil {
@@ -442,6 +481,16 @@ func (u *EngineUpdates) Apply(ctx context.Context, version string, authorize fun
 			_ = a.Models.SetConfig(previousApplied)
 			if stopped {
 				_ = a.Engine.Close()
+				if installed && sameBinary {
+					if previousBinary != "" {
+						e = replaceFile(previousBinary, destination)
+					} else {
+						e = os.Remove(destination)
+					}
+					if e != nil {
+						return Problem(503, "engine_restore_failed", "更新失败，恢复资产保留在 "+backup)
+					}
+				}
 				if started {
 					for _, name := range []string{"docker-sessions.db", "docker-sessions.db-wal", "docker-sessions.db-shm"} {
 						target := filepath.Join(previous.DataDir, name)
@@ -459,7 +508,7 @@ func (u *EngineUpdates) Apply(ctx context.Context, version string, authorize fun
 				_ = a.Engine.Configure(previous)
 				restoreCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 				defer cancel()
-				if e = a.Engine.Start(restoreCtx); e != nil {
+				if e = a.Engine.Start(restoreCtx); e != nil && previousReady {
 					return Problem(503, "engine_restore_failed", "更新失败，原引擎未能恢复。会话备份保留在 "+backup)
 				}
 				restored = true
@@ -544,9 +593,14 @@ func (a *App) engineSettings(w http.ResponseWriter, r *http.Request) error {
 				}
 			}
 		}
+		previousReady := a.Engine.State()["state"] == "ready"
 		e = a.Updates.Apply(r.Context(), S(data["version"]), authorize)
 		if e == nil {
-			e = a.publishConnection()
+			if previousReady {
+				e = a.publishConnection()
+			} else {
+				e = a.initializeEngine(a.ctx)
+			}
 		}
 	default:
 		return Problem(404, "not_found", "Route not found")

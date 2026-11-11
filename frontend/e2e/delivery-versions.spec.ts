@@ -6,6 +6,26 @@ import { platformFixture } from '../../tests/fixtures/platform-fixture.mjs'
 import { fixture, until } from '../../tests/fixtures/fixture.mjs'
 import { openSettings, closeSettings } from './settings'
 
+test('engine warnings and model refusals are visible after reload', async ({page}) => {
+  const app = await fixture()
+  try {
+    const task = await app.manager.create({title:'轮次结局验收'})
+    await page.goto(`${app.url}/#/chat/conversations/${task.id}`)
+    await app.manager.normalizer.handle(task, {
+      type:'warning', session_id:task.nativeSessionId, message:'Model stopped without a final reply.',
+    })
+    await expect(page.getByTestId('last-turn-warning')).toHaveText('Model stopped without a final reply.')
+    await page.reload()
+    await expect(page.getByTestId('last-turn-warning')).toBeVisible()
+    app.manager.settle(task, 'refused')
+    await expect(page.getByTestId('last-turn-refusal')).toHaveText('模型拒答')
+    await expect(page.getByTestId('last-turn-failure')).toHaveCount(0)
+    await page.reload()
+    await expect(page.getByTestId('last-turn-refusal')).toBeVisible()
+    await expect(page.getByTestId(`session-${task.id}`).getByText('模型拒答', {exact:true})).toBeVisible()
+  } finally { await app.close() }
+})
+
 test('an automatic delivery reminder cannot trigger another reminder',async({page})=>{
   await page.setViewportSize({width:390,height:844})
   const f=await platformFixture({native:true}),app=f.app!

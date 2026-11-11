@@ -28,7 +28,7 @@ const counts = computed(() => {
   const result = { blocked:0, working:0, completed:0, failed:0, interrupted:0, idle:0, unknown:0 }
   for (const {task} of children.value) {
     const state = deriveSessionIndicator(task)
-    result[state === 'max-tokens' ? 'failed' : state]++
+    result[state === 'max-tokens' || state === 'refused' ? 'failed' : state]++
   }
   for (const {task} of family.value.rows) for (const run of task.backgroundRuns || []) {
     const state = runState(task,run)
@@ -178,7 +178,7 @@ onBeforeUnmount(() => { close(); window.removeEventListener('resize', positionPo
 .choice-action { color:var(--tuck-text); font-size:var(--tuck-font-caption); }.choice-action.current { color:var(--tuck-accent); }
 .agent-copy .needs-attention { color:var(--tuck-warning); } .agent-copy .failure { color:var(--tuck-danger); }
 .agent-status[data-status=working],.agent-status[data-status=completed] { background:var(--tuck-success); }
-.agent-status[data-status=blocked] { background:var(--tuck-warning); }
+.agent-status[data-status=blocked],.agent-status[data-status=refused] { background:var(--tuck-warning); }
 .agent-status[data-status=failed],.agent-status[data-status=interrupted] { background:var(--tuck-danger); }
 .agent-popover footer { justify-content:space-between; } .no-results { color:var(--tuck-muted); text-align:center; }
 @container chat-column (max-width:760px) {

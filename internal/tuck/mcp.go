@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,7 +14,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/cyberphone/json-canonicalization/go/src/webpki.org/jsoncanonicalizer"
 )
@@ -23,41 +21,6 @@ import (
 var mcpVersions = []string{"2025-11-25", "2025-06-18", "2025-03-26"}
 
 const mcpDiscoveryTimeout = 20 * time.Second
-
-func ToolHash(tool M) (string, error) {
-	var valid func(any) bool
-	valid = func(v any) bool {
-		switch x := v.(type) {
-		case string:
-			return utf8.ValidString(x)
-		case map[string]any:
-			for k, v := range x {
-				if !utf8.ValidString(k) || !valid(v) {
-					return false
-				}
-			}
-		case []any:
-			for _, v := range x {
-				if !valid(v) {
-					return false
-				}
-			}
-		}
-		return true
-	}
-	if !valid(tool) {
-		return "", fmt.Errorf("invalid UTF-8 in tool contract")
-	}
-	encoded, e := json.Marshal(tool)
-	if e != nil {
-		return "", e
-	}
-	raw, e := jsoncanonicalizer.Transform(encoded)
-	if e != nil {
-		return "", e
-	}
-	return "sha256:" + Hash(raw), nil
-}
 
 func readMCPJSON(reader io.Reader) (M, error) {
 	raw, e := io.ReadAll(io.LimitReader(reader, (4<<20)+1))
@@ -96,7 +59,6 @@ type mcpEntry struct {
 	Key, Scope, Fingerprint, Namespace, Source string
 	Resource                                   M
 	Tools                                      map[string]M
-	Catalog                                    []M
 	Validated, Attempted                       bool
 	Status, Error                              string
 	ctx                                        context.Context
@@ -182,7 +144,6 @@ func (c *MCPConnections) Rebuild() error {
 				tools, message, err := c.project(entry, catalog)
 				if err == nil {
 					c.mu.Lock()
-					entry.Catalog = catalog
 					entry.Tools = tools
 					entry.Validated = true
 					entry.Status = "ready"
@@ -236,27 +197,19 @@ func validTool(tool M) bool {
 }
 func (c *MCPConnections) project(entry *mcpEntry, catalog []M) (map[string]M, string, error) {
 	resource := c.resource(entry)
-	grants := map[string]M{}
+	grants := map[string]bool{}
 	for _, v := range A(resource["allowedTools"]) {
-		grants[S(O(v)["name"])] = O(v)
+		grants[S(O(v)["name"])] = true
 	}
 	tools, seen := map[string]M{}, map[string]bool{}
-	drift := []string{}
+	missing := []string{}
 	for _, raw := range catalog {
 		name := S(raw["name"])
 		if !validTool(raw) || seen[name] || len(seen) >= 4096 {
 			return nil, "", Problem(502, "mcp_catalog", "MCP 工具目录无效")
 		}
 		seen[name] = true
-		hash, e := ToolHash(raw)
-		if e != nil {
-			return nil, "", e
-		}
-		grant := grants[name]
-		if entry.Source == "platform" && S(resource["toolAccessMode"]) == "ALLOWLIST" && (grant == nil || S(grant["contractHash"]) != hash) {
-			if grant != nil {
-				drift = append(drift, name)
-			}
+		if entry.Source == "platform" && S(resource["toolAccessMode"]) == "ALLOWLIST" && !grants[name] {
 			continue
 		}
 		alias := name
@@ -266,16 +219,16 @@ func (c *MCPConnections) project(entry *mcpEntry, catalog []M) (map[string]M, st
 		if tools[alias] != nil {
 			return nil, "", Problem(502, "mcp_catalog", "MCP 工具别名冲突")
 		}
-		tools[alias] = M{"raw": Clone(raw), "hash": hash, "grant": Clone(grant)}
+		tools[alias] = Clone(raw)
 	}
 	for name := range grants {
 		if !seen[name] {
-			drift = append(drift, name)
+			missing = append(missing, name)
 		}
 	}
 	message := ""
-	if len(drift) > 0 {
-		message = fmt.Sprintf("%d 个审核工具缺失或合同已变化，已阻止使用：%s", len(drift), strings.Join(drift[:min(3, len(drift))], "、"))
+	if len(missing) > 0 {
+		message = fmt.Sprintf("%d 个已授权工具未出现在服务目录中：%s", len(missing), strings.Join(missing[:min(3, len(missing))], "、"))
 	}
 	return tools, message, nil
 }
@@ -393,7 +346,7 @@ func (c *MCPConnections) AssistantSummary(agent string) []M {
 		}
 		count := 0
 		for _, tool := range entry.Tools {
-			if selection == nil || Contains(selection, S(O(tool["raw"])["name"])) {
+			if selection == nil || Contains(selection, S(tool["name"])) {
 				count++
 			}
 		}
@@ -723,7 +676,6 @@ func (c *MCPConnections) Discover(ctx context.Context, key string) error {
 			}
 			if e == nil {
 				entry.Tools = tools
-				entry.Catalog = catalog
 				entry.Error = message
 				entry.Validated = true
 				entry.Status = "ready"
@@ -871,11 +823,11 @@ func (c *MCPConnections) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		c.mu.RLock()
 		tool := Clone(entry.Tools[name])
 		c.mu.RUnlock()
-		if tool == nil || !c.selected(entry, S(O(tool["raw"])["name"])) {
-			fail(Problem(403, "mcp_tool_unavailable", "工具未获许可、合同已变化或已在本机停用"))
+		if tool == nil || !c.selected(entry, S(tool["name"])) {
+			fail(Problem(403, "mcp_tool_unavailable", "工具不在当前授权目录中或已在本机停用"))
 			return
 		}
-		body["params"] = Merge(O(body["params"]), M{"name": O(tool["raw"])["name"]})
+		body["params"] = Merge(O(body["params"]), M{"name": tool["name"]})
 	}
 	var input io.Reader
 	if body != nil {
@@ -939,8 +891,8 @@ func (c *MCPConnections) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			c.mu.Unlock()
 			visible := []any{}
 			for alias, tool := range tools {
-				if c.selected(entry, S(O(tool["raw"])["name"])) {
-					visible = append(visible, Merge(O(tool["raw"]), M{"name": alias}))
+				if c.selected(entry, S(tool["name"])) {
+					visible = append(visible, Merge(tool, M{"name": alias}))
 				}
 			}
 			message = Merge(message, M{"result": Merge(result, M{"tools": visible})})

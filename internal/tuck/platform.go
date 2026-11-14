@@ -579,18 +579,20 @@ func snapshotClosure(snapshot M) error {
 			}
 		}
 	}
-	for key, id := range O(snapshot["policy"]) {
-		if !strings.HasPrefix(key, "default") {
+	for key, group := range map[string]string{
+		"defaultAssistantId": "assistants", "defaultImageGenerationId": "imageGenerators",
+		"defaultTtsId": "tts", "defaultAsrId": "asr", "defaultModelId": "models",
+		"defaultFastModelId": "models", "defaultTitleModelId": "models", "defaultAttachmentInspectionModelId": "models",
+		"defaultSuggestionModelId": "models", "defaultCompressModelId": "models",
+	} {
+		id := S(O(snapshot["policy"])[key])
+		if id == "" {
 			continue
 		}
-		group := map[string]string{"defaultAssistantId": "assistants", "defaultImageGenerationId": "imageGenerators", "defaultTtsId": "tts", "defaultAsrId": "asr"}[key]
-		if group == "" {
-			group = "models"
-		}
-		if e := ref(group, S(id), true); e != nil {
+		if e := ref(group, id, true); e != nil {
 			return e
 		}
-		if key == "defaultAttachmentInspectionModelId" && !Contains(maps[group][S(id)]["inputModalities"], "IMAGE") {
+		if key == "defaultAttachmentInspectionModelId" && !Contains(maps[group][id]["inputModalities"], "IMAGE") {
 			return Problem(422, "invalid_platform_data", "附件检查模型未声明 IMAGE 输入")
 		}
 	}
@@ -637,16 +639,8 @@ func (p *Platform) Sync(ctx context.Context) (err error) {
 	if O(bootstrap["deployment"])["deploymentId"] != binding["deploymentId"] || O(bootstrap["user"])["userId"] != binding["userId"] || O(bootstrap["device"])["deviceId"] != binding["deviceId"] || O(bootstrap["session"])["sessionId"] != binding["sessionId"] {
 		return Problem(422, "identity_mismatch", "平台会话身份不一致")
 	}
-	if e = p.mutate(func(data M) error {
-		O(data["binding"])["employeeName"] = O(bootstrap["user"])["displayName"]
-		return nil
-	}); e != nil {
-		return e
-	}
-	state, e := p.ManagedState(ctx)
-	if e != nil {
-		return e
-	}
+	state := O(bootstrap["managedState"])
+	employee := O(bootstrap["user"])["displayName"]
 	generation := I(state["targetManagedGeneration"])
 	if generation == 0 {
 		generation = I(state["activeManagedGeneration"])
@@ -654,7 +648,6 @@ func (p *Platform) Sync(ctx context.Context) (err error) {
 	if generation == 0 {
 		return Problem(409, "snapshot_not_found", "平台尚未发布配置")
 	}
-	binding = p.Binding()
 	cached := O(binding["snapshot"])
 	if I(cached["managedGeneration"]) != generation {
 		cached = nil
@@ -694,9 +687,16 @@ func (p *Platform) Sync(ctx context.Context) (err error) {
 		if e = snapshotClosure(snapshot); e != nil {
 			return e
 		}
+	}
+	newSnapshot := r.StatusCode != http.StatusNotModified
+	if newSnapshot || binding["employeeName"] != employee {
 		if e = p.mutate(func(data M) error {
-			O(data["binding"])["snapshot"] = snapshot
-			O(data["binding"])["appliedReported"] = false
+			live := O(data["binding"])
+			live["employeeName"] = employee
+			if newSnapshot {
+				live["snapshot"] = snapshot
+				live["appliedReported"] = false
+			}
 			return nil
 		}); e != nil {
 			return e

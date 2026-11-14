@@ -1,6 +1,6 @@
 {
   "source": "measix-platform-core/api/generated/android/client-control.openapi.yaml",
-  "sha256": "55fb1ea7404ed71135948a94733b3160366adb991be3abda0c0af481f10e2cc8",
+  "sha256": "c6a37d90a84e9218c52e43ac7a91e2283b93dfa78f708fa54c1d6e1e0e5a0138",
   "baseline": "0.2.0-preview.23",
   "schemas": [
     "PlatformEnrollmentMaterial",

@@ -497,8 +497,7 @@ func DiscoverTools(ctx context.Context, app *App, data M) (M, error) {
 		entry := c.entries[id]
 		tools := []any{}
 		for _, tool := range entry.Tools {
-			raw := O(tool["raw"])
-			tools = append(tools, M{"name": raw["name"], "description": raw["description"], "readonly": B(O(raw["annotations"])["readOnlyHint"])})
+			tools = append(tools, M{"name": tool["name"], "description": tool["description"], "readonly": B(O(tool["annotations"])["readOnlyHint"])})
 		}
 		state := M{"status": entry.Status, "validated": entry.Validated, "toolCount": len(entry.Tools), "error": entry.Error}
 		c.mu.RUnlock()
@@ -542,7 +541,7 @@ func DiscoverTools(ctx context.Context, app *App, data M) (M, error) {
 			}
 			owner.mu.RLock()
 			summary := []any{}
-			for _, tool := range saved.Catalog {
+			for _, tool := range saved.Tools {
 				summary = append(summary, M{"name": tool["name"], "description": tool["description"], "readonly": B(O(tool["annotations"])["readOnlyHint"])})
 			}
 			state := M{"status": saved.Status, "validated": saved.Validated, "toolCount": len(saved.Tools), "error": saved.Error}

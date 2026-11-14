@@ -294,7 +294,7 @@ func TestParityWorkspaceAuthenticationLogoutAndConnectionGate(t *testing.T) {
 	defer once.Do(func() { close(release) })
 	f.p.change(func() {
 		f.p.hook = func(w http.ResponseWriter, r *http.Request, b M) bool {
-			if strings.HasSuffix(r.URL.Path, "/state") {
+			if strings.HasSuffix(r.URL.Path, "/bootstrap") {
 				close(entered)
 				select {
 				case <-release:

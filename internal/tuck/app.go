@@ -808,7 +808,6 @@ func (a *App) changeConnection(w http.ResponseWriter, r *http.Request) error {
 	if a.Manager.Active() {
 		return Problem(409, "active_tasks", "请等待当前执行结束或停止后再更新资源配置")
 	}
-	a.Workspace.Close()
 	data, e := ReadJSON(r.Body, 24<<20)
 	if e != nil {
 		return e
@@ -836,7 +835,6 @@ func (a *App) changeConnection(w http.ResponseWriter, r *http.Request) error {
 	if e = a.Models.Rebuild(); e != nil {
 		return e
 	}
-	a.Models.MCP.Prepare(op, true)
 	if e = a.Engine.Close(); e != nil {
 		return e
 	}

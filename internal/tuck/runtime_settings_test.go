@@ -1164,9 +1164,13 @@ func TestOfficialPlatformHistoryParametersAndProtocols(t *testing.T) {
 		O(f.controls["state"])["activeManagedGeneration"] = f.snapshot["managedGeneration"]
 		f.controls["etag"] = "\"" + S(f.snapshot["snapshotHash"]) + "\""
 	})
+	beforeProbes := requestCount(f, "initialize")
 	status, v := appRequest(t, app, "POST", "/api/connection/sync", M{})
 	if status != 200 {
 		t.Fatal(status, v)
+	}
+	if requestCount(f, "initialize") != beforeProbes {
+		t.Fatal("connection sync verified tool catalogs before returning")
 	}
 	runAppTask(t, app, taskID, "After generation update")
 	if mustTask(t, app.Manager, taskID)["nativeSessionId"] != nativeID {

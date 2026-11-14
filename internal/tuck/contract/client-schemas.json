@@ -858,7 +858,9 @@
           "pattern": "^[^*]+$"
         },
         "contractHash": {
-          "$ref": "#/definitions/Sha256Hash"
+          "description": "Compatibility field, not an authorization condition. New publications emit an empty string; historical SHA-256 values remain accepted. Authorization uses server identity and exact tool name.",
+          "type": "string",
+          "pattern": "^(sha256:[0-9a-f]{64})?$"
         },
         "approvalPolicy": {
           "description": "AUTO adds no enterprise confirmation; REQUIRE_CONFIRMATION requires user approval before each invocation. Independent of tool selection and does not bypass existing runtime or system permissions. Required explicitly; no decoder default.",

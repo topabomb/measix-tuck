@@ -88,13 +88,13 @@ func preparedMCP(t *testing.T) *platformFixture {
 	return f
 }
 
-func TestMCPContractGrantsAndDrift(t *testing.T) {
+func TestMCPExactNameGrantSurvivesDefinitionChanges(t *testing.T) {
 	f := preparedMCP(t)
 	f.change(func() { f.controls["mcpSse"] = true })
 	p := newMCPPeer(t, f)
 	_, v := p.rpc(t, "tools/list", M{})
 	tools := A(O(v["result"])["tools"])
-	if len(tools) != 1 || O(tools[0])["name"] != ToolAlias("search_records") || !B(O(O(tools[0])["extension"])["mustBeHashed"]) {
+	if len(tools) != 1 || O(tools[0])["name"] != ToolAlias("search_records") || !B(O(O(tools[0])["extension"])["preserved"]) {
 		t.Fatal(v)
 	}
 	_, v = p.rpc(t, "tools/call", M{"name": ToolAlias("search_records"), "arguments": M{"query": "hello"}})
@@ -109,18 +109,23 @@ func TestMCPContractGrantsAndDrift(t *testing.T) {
 			}
 		}
 	}
-	f.change(func() { O(O(A(f.controls["mcpTools"])[0])["extension"])["mustBeHashed"] = false })
+	f.change(func() { O(A(f.controls["mcpTools"])[0])["description"] = "Updated tool description" })
 	_, v = p.rpc(t, "tools/list", M{})
-	if len(A(O(v["result"])["tools"])) != 0 {
-		t.Fatal("drift leaked tool")
+	tools = A(O(v["result"])["tools"])
+	if len(tools) != 1 || O(tools[0])["description"] != "Updated tool description" {
+		t.Fatal("authorized tool definition was not refreshed", v)
 	}
 	_, v = p.rpc(t, "tools/call", M{"name": ToolAlias("search_records"), "arguments": M{}})
-	if !B(O(v["result"])["isError"]) || requestCount(f, "tools/call") != 1 {
-		t.Fatal("drift called upstream")
+	if B(O(v["result"])["isError"]) || requestCount(f, "tools/call") != 2 {
+		t.Fatal("same-name tool was rejected", v)
+	}
+	_, v = p.rpc(t, "tools/call", M{"name": ToolAlias("not_granted"), "arguments": M{}})
+	if !B(O(v["result"])["isError"]) || requestCount(f, "tools/call") != 2 {
+		t.Fatal("ungranted name reached upstream", v)
 	}
 	f.change(func() { O(f.controls["state"])["activeManagedGeneration"] = I(f.snapshot["managedGeneration"]) + 1 })
 	_, v = p.rpc(t, "tools/call", M{"name": ToolAlias("search_records"), "arguments": M{}})
-	if !B(O(v["result"])["isError"]) || requestCount(f, "tools/call") != 1 {
+	if !B(O(v["result"])["isError"]) || requestCount(f, "tools/call") != 2 {
 		t.Fatal("stale generation called upstream")
 	}
 	if f.models.MCP.Summary(false)[0]["status"] != "ready" {
@@ -493,7 +498,7 @@ func TestMCPAcknowledgmentsRetainJSONValidation(t *testing.T) {
 	})
 }
 
-func TestMCPAllAndCanonicalHash(t *testing.T) {
+func TestMCPAllIncludesNewlyDiscoveredTools(t *testing.T) {
 	f := newPlatformFixture(t, 5)
 	f.change(func() {
 		resource := O(A(f.snapshot["mcp"])[0])
@@ -522,14 +527,6 @@ func TestMCPAllAndCanonicalHash(t *testing.T) {
 	_, v = p.rpc(t, "tools/list", M{})
 	if len(A(O(v["result"])["tools"])) != 3 {
 		t.Fatal(v)
-	}
-	a, e := ToolHash(M{"name": "x", "inputSchema": M{"type": "object"}, "extension": 1})
-	if e != nil {
-		t.Fatal(e)
-	}
-	b, e := ToolHash(M{"extension": 1.0, "inputSchema": M{"type": "object"}, "name": "x"})
-	if e != nil || a != b {
-		t.Fatal("noncanonical number/order", a, b, e)
 	}
 }
 

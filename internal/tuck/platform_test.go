@@ -58,12 +58,18 @@ func TestPlatformSyncAndAdmission(t *testing.T) {
 				t.Fatal("plaintext credential")
 			}
 			cached := Clone(O(f.platform.Binding()["snapshot"]))
+			before := len(f.requestList())
 			f.change(func() { f.controls["employeeName"] = "更新后的员工" })
 			if e := f.platform.Sync(context.Background()); e != nil {
 				t.Fatal(e)
 			}
 			if !reflect.DeepEqual(cached, O(f.platform.Binding()["snapshot"])) || f.platform.Binding()["employeeName"] != "更新后的员工" {
 				t.Fatal("304 changed verified snapshot or missed employee")
+			}
+			requests := f.requestList()[before:]
+			if len(requests) != 3 || !strings.HasSuffix(S(requests[0]["path"]), "/bootstrap") ||
+				!strings.Contains(S(requests[1]["path"]), "/managed/snapshots/") || !strings.HasSuffix(S(requests[2]["path"]), "/managed/state") {
+				t.Fatal("unexpected synchronization request sequence")
 			}
 			restored, e := NewPlatform(f.store, f.config)
 			if e != nil {
@@ -73,15 +79,49 @@ func TestPlatformSyncAndAdmission(t *testing.T) {
 			if restored.Binding()["employeeName"] != "更新后的员工" {
 				t.Fatal("employee not persisted")
 			}
-			f.change(func() { f.controls["badResponse"] = true; f.controls["etag"] = "\"changed\"" })
+			before = len(f.requestList())
+			f.change(func() {
+				f.controls["badResponse"] = true
+				f.controls["etag"] = "\"changed\""
+				f.controls["employeeName"] = "未通过快照验证"
+			})
 			if e := f.platform.Sync(context.Background()); Code(e) != "invalid_platform_data" {
 				t.Fatalf("invalid snapshot: %v", e)
 			}
-			if !reflect.DeepEqual(cached, O(f.platform.Binding()["snapshot"])) {
-				t.Fatal("invalid snapshot replaced cache")
+			if !reflect.DeepEqual(cached, O(f.platform.Binding()["snapshot"])) || f.platform.Binding()["employeeName"] != "更新后的员工" {
+				t.Fatal("invalid snapshot changed the applied binding")
+			}
+			if len(f.requestList()[before:]) != 2 {
+				t.Fatal("invalid snapshot triggered additional requests")
 			}
 			f.change(func() { O(f.controls["state"])["activeManagedGeneration"] = I(f.snapshot["managedGeneration"]) + 1 })
 			assertStatus(t, f.platform.Admit(context.Background(), I(cached["managedGeneration"])), 428)
+		})
+	}
+}
+
+func TestPlatformMCPGrantContract(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		hash  any
+		valid bool
+	}{
+		{"current", "", true},
+		{"historical", "sha256:" + strings.Repeat("a", 64), true},
+		{"malformed", "old", false},
+		{"null", nil, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			snapshot := testVector(t, "snapshot-v5")
+			grant := O(A(O(A(snapshot["mcp"])[0])["allowedTools"])[0])
+			grant["contractHash"] = test.hash
+			if err := Check("ManagedSnapshot", snapshot); (err == nil) != test.valid {
+				t.Fatal(err)
+			}
+			delete(grant, "contractHash")
+			if err := Check("ManagedSnapshot", snapshot); err == nil {
+				t.Fatal("accepted missing compatibility field")
+			}
 		})
 	}
 }

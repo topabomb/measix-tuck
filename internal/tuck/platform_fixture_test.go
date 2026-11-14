@@ -57,14 +57,7 @@ func newPlatformFixture(t *testing.T, version int) *platformFixture {
 	provider := Merge(O(A(f.snapshot["providers"])[0]), M{"providerId": "prv_cccccccc-cccc-4ccc-8ccc-cccccccccccc", "displayName": "Responses provider", "clientProtocol": "OPENAI_RESPONSES"})
 	f.snapshot["providers"] = append(A(f.snapshot["providers"]), provider)
 	f.snapshot["models"] = append(A(f.snapshot["models"]), Merge(response, M{"modelId": "mdl_cccccccc-cccc-4ccc-8ccc-cccccccccccc", "providerId": provider["providerId"], "displayName": "Responses model", "upstreamModelKey": "public-responses-alias"}))
-	tool := M{"name": "search_records", "description": "Search fixture records", "inputSchema": M{"type": "object", "properties": M{"query": M{"type": "string"}}}, "annotations": M{"readOnlyHint": true}, "extension": M{"mustBeHashed": true}}
-	hash, e := ToolHash(tool)
-	if e != nil {
-		t.Fatal(e)
-	}
-	if version == 5 {
-		O(A(O(A(f.snapshot["mcp"])[0])["allowedTools"])[0])["contractHash"] = hash
-	}
+	tool := M{"name": "search_records", "description": "Search fixture records", "inputSchema": M{"type": "object", "properties": M{"query": M{"type": "string"}}}, "annotations": M{"readOnlyHint": true}, "extension": M{"preserved": true}}
 	f.controls = M{"state": M{"runtimeStatus": "READY", "activeManagedGeneration": f.snapshot["managedGeneration"], "managedStateRevision": 1, "syncRequired": false, "runtimeBlocked": false}, "etag": "\"" + S(f.snapshot["snapshotHash"]) + "\"", "token": f.credentials["accessToken"], "mcpSession": "fixture-session", "mcpTools": []any{tool, M{"name": "not_granted", "inputSchema": M{"type": "object"}}}}
 	f.server = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.server.Close)
@@ -82,9 +75,10 @@ func newPlatformFixture(t *testing.T, version int) *platformFixture {
 	for _, v := range O(c["agents"]) {
 		delete(O(v), "modelId")
 	}
-	if e = os.WriteFile(path, JSON(c), 0600); e != nil {
+	if e := os.WriteFile(path, JSON(c), 0600); e != nil {
 		t.Fatal(e)
 	}
+	var e error
 	f.config, e = LoadConfig(path)
 	if e != nil {
 		t.Fatal(e)
